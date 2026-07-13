@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.example
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+forwarder.py
+requirements.txt
+venv/
+__pycache__/
+*.pyc
+agentrouter
+*.log
+/tmp

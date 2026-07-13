@@ -1,0 +1,11 @@
+services:
+  agentrouter:
+    build: .
+    image: agentrouter:latest
+    container_name: agentrouter
+    ports:
+      - "${AGENTROUTER_PORT:-1765}:${AGENTROUTER_PORT:-8000}"
+    volumes:
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+
