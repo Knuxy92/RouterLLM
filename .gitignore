@@ -1,4 +1,13 @@
+# binaries
+/api
+*.exe
+*.test
+*.out
+
+# environment
 .env
-venv/
-__pycache__/
-*.pyc
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/

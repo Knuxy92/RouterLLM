@@ -78,7 +78,6 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 		var reqBody []byte
 		var reqPath string
 		var authHeader string
-		var authValue string
 
 		if pv.Style == "anthropic" {
 			reqBody, reqPath, err = adapter.TranslateRequest(body, route.ModelName)
