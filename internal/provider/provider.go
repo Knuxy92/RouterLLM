@@ -58,10 +58,10 @@ var alibabaModels = []string{
 
 func routingRules() []routingRule {
 	rules := []routingRule{
-		{"claude-opus-4-8", []routeSpec{{"agentrouter", "claude-opus-4-8"}}},
-		{"claude-opus-4-7", []routeSpec{{"agentrouter", "claude-opus-4-7"}}},
-		{"claude-opus-4-6", []routeSpec{{"agentrouter", "claude-opus-4-6"}}},
-		{"gpt-5.5", []routeSpec{{"agentrouter", "gpt-5.5"}}},
+		{"claude-opus-4-8", []routeSpec{{"freemodel-cc", "claude-opus-4-8"}}},
+		{"claude-opus-4-7", []routeSpec{{"freemodel-cc", "claude-opus-4-7"}}},
+		{"claude-opus-4-6", []routeSpec{{"freemodel-cc", "claude-opus-4-6"}}},
+		{"gpt-5.5", []routeSpec{{"freemodel-api", "gpt-5.5"}}},
 		{"glm-5.2", []routeSpec{{"agentrouter", "glm-5.2"}}},
 		{"deepseek-v4-flash-free", []routeSpec{{"opencode", "deepseek-v4-flash-free"}}},
 		{"mimo-v2.5-free", []routeSpec{{"opencode", "mimo-v2.5-free"}}},
