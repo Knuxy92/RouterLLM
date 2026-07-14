@@ -2,11 +2,13 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"agentrouter/internal/adapter"
 	"agentrouter/internal/dto"
@@ -17,11 +19,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var switchableStatuses = map[int]bool{
+const maxRetries = 3
+
+var deadStatuses = map[int]bool{
 	401: true,
 	402: true,
 	403: true,
+}
+
+var transientStatuses = map[int]bool{
+	408: true,
 	429: true,
+	500: true,
+	502: true,
+	503: true,
+	504: true,
 }
 
 type Proxy struct {
@@ -103,22 +115,13 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode >= 500 {
-			eb, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			p.log.Printf("upstream %s returned HTTP %d, falling back...", pv.Name, resp.StatusCode)
-			lastStatus = resp.StatusCode
-			lastErrBody = eb
-			continue
-		}
-
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			p.log.Printf("upstream %s returned HTTP %d, falling back...", pv.Name, resp.StatusCode)
-			lastStatus = resp.StatusCode
-			lastErrBody = eb
-			continue
+			p.log.Printf("upstream %s returned HTTP %d, passing through", pv.Name, resp.StatusCode)
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Data(resp.StatusCode, "application/json", eb)
+			return
 		}
 
 		p.log.Printf("serving %s via %s (HTTP %d)", path, pv.Name, resp.StatusCode)
@@ -154,46 +157,81 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 			break
 		}
 
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
-		if err != nil {
-			c.String(http.StatusInternalServerError, "failed to build request: "+err.Error())
-			return nil, 0, nil, true
-		}
-		for k, v := range pv.Headers {
-			req.Header[k] = []string{v}
-		}
-		switch pv.AuthMode {
-		case "both":
-			req.Header["Authorization"] = []string{"Bearer " + key}
-			req.Header["x-api-key"] = []string{key}
-		case "x-api-key":
-			req.Header["x-api-key"] = []string{key}
-		default:
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
+		for retry := 0; retry < maxRetries; retry++ {
+			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
+			if err != nil {
+				c.String(http.StatusInternalServerError, "failed to build request: "+err.Error())
+				return nil, 0, nil, true
+			}
+			for k, v := range pv.Headers {
+				req.Header[k] = []string{v}
+			}
+			switch pv.AuthMode {
+			case "both":
+				req.Header["Authorization"] = []string{"Bearer " + key}
+				req.Header["x-api-key"] = []string{key}
+			case "x-api-key":
+				req.Header["x-api-key"] = []string{key}
+			default:
+				req.Header.Set("Authorization", "Bearer "+key)
+			}
 
-		r, err := p.client.Do(req)
-		if err != nil {
-			p.log.Printf("proxy error via %s: %v", pv.Name, err)
-			lastStatus = http.StatusBadGateway
-			lastErrBody = []byte(err.Error())
-			continue
-		}
+			r, err := p.client.Do(req)
+			if err != nil {
+				p.log.Printf("proxy error via %s (retry %d/%d): %v", pv.Name, retry+1, maxRetries, err)
+				lastStatus = http.StatusBadGateway
+				lastErrBody = []byte(err.Error())
+				if retry < maxRetries-1 {
+					if p.backoff(c.Request.Context(), retry) {
+						return nil, lastStatus, lastErrBody, true
+					}
+					continue
+				}
+				break
+			}
 
-		if switchableStatuses[r.StatusCode] {
-			eb, _ := io.ReadAll(r.Body)
-			r.Body.Close()
-			p.log.Printf("key %s dead (HTTP %d) via %s, switching...", keys.Mask(key), r.StatusCode, pv.Name)
-			lastStatus = r.StatusCode
-			lastErrBody = eb
-			pv.Keys.MarkDead(key)
-			continue
-		}
+			if deadStatuses[r.StatusCode] {
+				eb, _ := io.ReadAll(r.Body)
+				r.Body.Close()
+				p.log.Printf("key %s dead (HTTP %d) via %s, switching...", keys.Mask(key), r.StatusCode, pv.Name)
+				lastStatus = r.StatusCode
+				lastErrBody = eb
+				pv.Keys.MarkDead(key)
+				break
+			}
 
-		return r, 0, nil, false
+			if transientStatuses[r.StatusCode] {
+				eb, _ := io.ReadAll(r.Body)
+				r.Body.Close()
+				p.log.Printf("upstream %s transient (HTTP %d), retry %d/%d", pv.Name, r.StatusCode, retry+1, maxRetries)
+				lastStatus = r.StatusCode
+				lastErrBody = eb
+				if retry < maxRetries-1 {
+					if p.backoff(c.Request.Context(), retry) {
+						return nil, lastStatus, lastErrBody, true
+					}
+					continue
+				}
+				break
+			}
+
+			return r, 0, nil, false
+		}
 	}
 
 	return nil, lastStatus, lastErrBody, false
+}
+
+func (p *Proxy) backoff(ctx context.Context, retry int) bool {
+	d := time.Duration(100*(1<<retry)) * time.Millisecond
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return false
+	case <-ctx.Done():
+		return true
+	}
 }
 
 func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, c *gin.Context) {
