@@ -1,13 +1,2 @@
-# binaries
-/api
+agentrouter
 *.exe
-*.test
-*.out
-
-# environment
-.env
-
-# editor / os
-.DS_Store
-.idea/
-.vscode/
