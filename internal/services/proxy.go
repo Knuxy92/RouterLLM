@@ -227,13 +227,7 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 		return
 	}
 
-	anthropicBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.String(http.StatusBadGateway, "failed to read upstream response: "+err.Error())
-		return
-	}
-
-	openaiBody, err := adapter.TranslateResponse(anthropicBody)
+	openaiBody, err := adapter.BufferAnthropicToOpenAI(resp.Body, modelName)
 	if err != nil {
 		c.String(http.StatusBadGateway, "failed to translate response: "+err.Error())
 		return
