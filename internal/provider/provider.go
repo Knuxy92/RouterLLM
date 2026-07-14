@@ -68,7 +68,6 @@ func routingRules() []routingRule {
 		{"hy3-free", []routeSpec{{"opencode", "hy3-free"}}},
 		{"nemotron-3-ultra-free", []routeSpec{{"opencode", "nemotron-3-ultra-free"}}},
 		{"north-mini-code-free", []routeSpec{{"opencode", "north-mini-code-free"}}},
-		{"gpt-5.6", []routeSpec{{"freemodel-api", "gpt-5.6"}}},
 		{"gpt-5.4", []routeSpec{{"freemodel-api", "gpt-5.4"}}},
 		{"gpt-5.4-mini", []routeSpec{{"freemodel-api", "gpt-5.4-mini"}}},
 		{"gpt-5.3-codex", []routeSpec{{"freemodel-api", "gpt-5.3-codex"}}},
