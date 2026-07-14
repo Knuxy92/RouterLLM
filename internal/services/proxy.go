@@ -160,14 +160,14 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 			return nil, 0, nil, true
 		}
 		for k, v := range pv.Headers {
-			req.Header.Set(k, v)
+			req.Header[k] = []string{v}
 		}
 		switch pv.AuthMode {
 		case "both":
-			req.Header.Set("Authorization", "Bearer "+key)
-			req.Header.Set("x-api-key", key)
+			req.Header["Authorization"] = []string{"Bearer " + key}
+			req.Header["x-api-key"] = []string{key}
 		case "x-api-key":
-			req.Header.Set("x-api-key", key)
+			req.Header["x-api-key"] = []string{key}
 		default:
 			req.Header.Set("Authorization", "Bearer "+key)
 		}
