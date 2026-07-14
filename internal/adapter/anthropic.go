@@ -111,6 +111,81 @@ func TranslateResponse(anthropicBody []byte) ([]byte, error) {
 	return json.Marshal(result)
 }
 
+func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
+	var msgID string
+	var upModel string
+	var contentBuilder strings.Builder
+	var stopReason string
+	var usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
+	_, err := util.IterDataLines(src, func(payload string) bool {
+		var event struct {
+			Type    string `json:"type"`
+			Message *struct {
+				ID    string `json:"id"`
+				Model string `json:"model"`
+			} `json:"message"`
+			Delta *struct {
+				Type       string `json:"type"`
+				Text       string `json:"text"`
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return true
+		}
+		switch event.Type {
+		case "message_start":
+			if event.Message != nil {
+				msgID = event.Message.ID
+				upModel = event.Message.Model
+			}
+		case "content_block_delta":
+			if event.Delta != nil && event.Delta.Type == "text_delta" {
+				contentBuilder.WriteString(event.Delta.Text)
+			}
+		case "message_delta":
+			if event.Delta != nil && event.Delta.StopReason != "" {
+				stopReason = event.Delta.StopReason
+			}
+			if event.Usage != nil {
+				usage = event.Usage
+			}
+		case "message_stop":
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result := model.ChatCompletionResponse{
+		ID:      msgID,
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   upModel,
+		Choices: []model.Choice{{
+			Index:        0,
+			Message:      model.Message{Role: "assistant", Content: contentBuilder.String()},
+			FinishReason: mapStopReason(stopReason),
+		}},
+	}
+	if usage != nil {
+		result.Usage = json.RawMessage(fmt.Sprintf(
+			`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
+			usage.InputTokens, usage.OutputTokens, usage.InputTokens+usage.OutputTokens,
+		))
+	}
+	return json.Marshal(result)
+}
+
 func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName string) error {
 	flusher, _ := dst.(http.Flusher)
 	var msgID string
