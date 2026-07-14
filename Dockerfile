@@ -11,6 +11,6 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /out/agentrouter .
-EXPOSE 8000
+EXPOSE 1765
 USER 65532:65532
 ENTRYPOINT ["./agentrouter"]

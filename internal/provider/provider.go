@@ -9,11 +9,13 @@ import (
 )
 
 type Provider struct {
-	Name    string
-	BaseURL string
-	Style   string
-	Keys    *keys.Manager
-	Headers map[string]string
+	Name     string
+	BaseURL  string
+	Style    string
+	Keys     *keys.Manager
+	Headers  map[string]string
+	AuthMode string
+	Query    string
 }
 
 type Route struct {
@@ -98,11 +100,13 @@ func NewRegistry(configs []config.ProviderConfig, cooldown time.Duration) *Regis
 			km = keys.New(pc.Keys, cooldown)
 		}
 		providers[pc.Name] = &Provider{
-			Name:    pc.Name,
-			BaseURL: pc.BaseURL,
-			Style:   pc.Style,
-			Keys:    km,
-			Headers: pc.Headers,
+			Name:     pc.Name,
+			BaseURL:  pc.BaseURL,
+			Style:    pc.Style,
+			Keys:     km,
+			Headers:  pc.Headers,
+			AuthMode: pc.AuthMode,
+			Query:    pc.Query,
 		}
 	}
 

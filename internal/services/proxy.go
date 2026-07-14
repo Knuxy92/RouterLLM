@@ -77,23 +77,20 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 
 		var reqBody []byte
 		var reqPath string
-		var authHeader string
 
 		if pv.Style == "anthropic" {
 			reqBody, reqPath, err = adapter.TranslateRequest(body, route.ModelName)
-			authHeader = "x-api-key"
 		} else {
 			body["model"] = route.ModelName
 			reqBody, err = json.Marshal(body)
 			reqPath = path
-			authHeader = "Authorization"
 		}
 		if err != nil {
 			c.String(http.StatusInternalServerError, "failed to encode body: "+err.Error())
 			return
 		}
 
-		resp, status, errBody, served := p.tryKeys(pv, reqPath, reqBody, authHeader, c)
+		resp, status, errBody, served := p.tryKeys(pv, reqPath, reqBody, c)
 		if served {
 			return
 		}
@@ -117,10 +114,11 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
-			p.log.Printf("upstream %s returned HTTP %d, passing through", pv.Name, resp.StatusCode)
-			c.Header("Access-Control-Allow-Origin", "*")
-			c.Data(resp.StatusCode, "application/json", eb)
-			return
+			resp.Body.Close()
+			p.log.Printf("upstream %s returned HTTP %d, falling back...", pv.Name, resp.StatusCode)
+			lastStatus = resp.StatusCode
+			lastErrBody = eb
+			continue
 		}
 
 		p.log.Printf("serving %s via %s (HTTP %d)", path, pv.Name, resp.StatusCode)
@@ -141,7 +139,7 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 	}
 }
 
-func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, authHeader string, c *gin.Context) (*http.Response, int, []byte, bool) {
+func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *gin.Context) (*http.Response, int, []byte, bool) {
 	maxAttempts := pv.Keys.Count()
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
@@ -156,14 +154,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, auth
 			break
 		}
 
-		var authValue string
-		if authHeader == "Authorization" {
-			authValue = "Bearer " + key
-		} else {
-			authValue = key
-		}
-
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, pv.BaseURL+path, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
 		if err != nil {
 			c.String(http.StatusInternalServerError, "failed to build request: "+err.Error())
 			return nil, 0, nil, true
@@ -171,13 +162,22 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, auth
 		for k, v := range pv.Headers {
 			req.Header.Set(k, v)
 		}
-		req.Header.Set(authHeader, authValue)
+		switch pv.AuthMode {
+		case "both":
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("x-api-key", key)
+		case "x-api-key":
+			req.Header.Set("x-api-key", key)
+		default:
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 
 		r, err := p.client.Do(req)
 		if err != nil {
 			p.log.Printf("proxy error via %s: %v", pv.Name, err)
-			c.String(http.StatusBadGateway, err.Error())
-			return nil, 0, nil, true
+			lastStatus = http.StatusBadGateway
+			lastErrBody = []byte(err.Error())
+			continue
 		}
 
 		if switchableStatuses[r.StatusCode] {
