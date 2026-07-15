@@ -39,15 +39,34 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 	}
 	req["messages"] = messages
 
+	maxTokens := 4096
+	explicitMaxTokens := false
 	if mt, ok := body["max_tokens"]; ok {
-		if f, ok := mt.(float64); ok {
-			req["max_tokens"] = int(f)
-		} else {
-			req["max_tokens"] = mt
-		}
-	} else {
-		req["max_tokens"] = 4096
+		maxTokens = intValue(mt, maxTokens)
+		explicitMaxTokens = true
 	}
+	if thinking, ok := body["thinking"].(map[string]any); ok {
+		_, hasBudget := thinking["budget_tokens"]
+		budget := intValue(thinking["budget_tokens"], 0)
+		if budget > 0 && maxTokens <= budget {
+			if explicitMaxTokens {
+				budget = maxTokens - 1
+			} else {
+				maxTokens = budget + 1024
+			}
+		}
+		if budget > 0 {
+			clampedThinking := make(map[string]any, len(thinking))
+			for k, v := range thinking {
+				clampedThinking[k] = v
+			}
+			clampedThinking["budget_tokens"] = budget
+			req["thinking"] = clampedThinking
+		} else if !hasBudget {
+			req["thinking"] = thinking
+		}
+	}
+	req["max_tokens"] = maxTokens
 
 	for _, key := range []string{"temperature", "top_p", "stream"} {
 		if v, ok := body[key]; ok {
@@ -64,14 +83,31 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 	return data, "/v1/messages", err
 }
 
+func intValue(v any, fallback int) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+	}
+	return fallback
+}
+
 func TranslateResponse(anthropicBody []byte) ([]byte, error) {
 	var ar struct {
 		ID         string `json:"id"`
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
 		Content    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
 		} `json:"content"`
 		Usage *struct {
 			InputTokens  int `json:"input_tokens"`
@@ -83,10 +119,18 @@ func TranslateResponse(anthropicBody []byte) ([]byte, error) {
 	}
 
 	var contentBuilder strings.Builder
+	var reasoningBuilder strings.Builder
 	for _, block := range ar.Content {
 		if block.Type == "text" {
 			contentBuilder.WriteString(block.Text)
 		}
+		if block.Type == "thinking" {
+			reasoningBuilder.WriteString(block.Thinking)
+		}
+	}
+	msg := model.Message{Role: "assistant", Content: contentBuilder.String()}
+	if reasoning := reasoningBuilder.String(); reasoning != "" {
+		msg.ReasoningContent = reasoning
 	}
 
 	result := model.ChatCompletionResponse{
@@ -96,7 +140,7 @@ func TranslateResponse(anthropicBody []byte) ([]byte, error) {
 		Model:   ar.Model,
 		Choices: []model.Choice{{
 			Index:        0,
-			Message:      model.Message{Role: "assistant", Content: contentBuilder.String()},
+			Message:      msg,
 			FinishReason: mapStopReason(ar.StopReason),
 		}},
 	}
@@ -115,6 +159,7 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 	var msgID string
 	var upModel string
 	var contentBuilder strings.Builder
+	var reasoningBuilder strings.Builder
 	var stopReason string
 	var usage *struct {
 		InputTokens  int `json:"input_tokens"`
@@ -130,6 +175,7 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 			Delta *struct {
 				Type       string `json:"type"`
 				Text       string `json:"text"`
+				Thinking   string `json:"thinking"`
 				StopReason string `json:"stop_reason"`
 			} `json:"delta"`
 			Usage *struct {
@@ -150,6 +196,9 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 			if event.Delta != nil && event.Delta.Type == "text_delta" {
 				contentBuilder.WriteString(event.Delta.Text)
 			}
+			if event.Delta != nil && event.Delta.Type == "thinking_delta" {
+				reasoningBuilder.WriteString(event.Delta.Thinking)
+			}
 		case "message_delta":
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				stopReason = event.Delta.StopReason
@@ -166,6 +215,11 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 		return nil, err
 	}
 
+	msg := model.Message{Role: "assistant", Content: contentBuilder.String()}
+	if reasoning := reasoningBuilder.String(); reasoning != "" {
+		msg.ReasoningContent = reasoning
+	}
+
 	result := model.ChatCompletionResponse{
 		ID:      msgID,
 		Object:  "chat.completion",
@@ -173,7 +227,7 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 		Model:   upModel,
 		Choices: []model.Choice{{
 			Index:        0,
-			Message:      model.Message{Role: "assistant", Content: contentBuilder.String()},
+			Message:      msg,
 			FinishReason: mapStopReason(stopReason),
 		}},
 	}
@@ -209,6 +263,7 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 			Delta *struct {
 				Type       string `json:"type"`
 				Text       string `json:"text"`
+				Thinking   string `json:"thinking"`
 				StopReason string `json:"stop_reason"`
 			} `json:"delta"`
 			Usage *struct {
@@ -247,6 +302,19 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 					Choices: []model.StreamChoice{{
 						Index:        0,
 						Delta:        model.Delta{Content: event.Delta.Text},
+						FinishReason: nil,
+					}},
+				})
+			}
+			if event.Delta != nil && event.Delta.Type == "thinking_delta" && event.Delta.Thinking != "" {
+				writeChunk(model.StreamChunk{
+					ID:      msgID,
+					Object:  "chat.completion.chunk",
+					Created: created,
+					Model:   modelName,
+					Choices: []model.StreamChoice{{
+						Index:        0,
+						Delta:        model.Delta{ReasoningContent: event.Delta.Thinking},
 						FinishReason: nil,
 					}},
 				})

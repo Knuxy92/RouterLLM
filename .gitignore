@@ -1,2 +1,21 @@
+# Binaries
 agentrouter
+api
 *.exe
+*.exe~
+*.test
+*.out
+
+# Environment
+.env
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project memory
+memory-bank/

@@ -86,15 +86,17 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 
 	for _, route := range routes {
 		pv := route.Provider
+		routeBody := cloneBody(body)
+		applyDefaults(routeBody, route.Defaults)
 
 		var reqBody []byte
 		var reqPath string
 
 		if pv.Style == "anthropic" {
-			reqBody, reqPath, err = adapter.TranslateRequest(body, route.ModelName)
+			reqBody, reqPath, err = adapter.TranslateRequest(routeBody, route.ModelName)
 		} else {
-			body["model"] = route.ModelName
-			reqBody, err = json.Marshal(body)
+			routeBody["model"] = route.ModelName
+			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		}
 		if err != nil {
@@ -139,6 +141,35 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 		c.Data(lastStatus, "application/json", lastErrBody)
 	} else {
 		c.String(http.StatusBadGateway, "all providers exhausted for model "+model)
+	}
+}
+
+func cloneBody(body map[string]any) map[string]any {
+	clone := make(map[string]any, len(body))
+	for k, v := range body {
+		clone[k] = v
+	}
+	return clone
+}
+
+func applyDefaults(body map[string]any, defaults provider.RequestDefaults) {
+	if defaults.ReasoningEffort != "" {
+		if _, ok := body["reasoning_effort"]; !ok {
+			body["reasoning_effort"] = defaults.ReasoningEffort
+		}
+	}
+	if defaults.EnableThinking != nil {
+		if _, ok := body["enable_thinking"]; !ok {
+			body["enable_thinking"] = *defaults.EnableThinking
+		}
+	}
+	if defaults.ThinkingBudget > 0 {
+		if _, ok := body["thinking"]; !ok {
+			body["thinking"] = map[string]any{
+				"type":          "enabled",
+				"budget_tokens": defaults.ThinkingBudget,
+			}
+		}
 	}
 }
 
