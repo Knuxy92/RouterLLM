@@ -72,14 +72,14 @@ func Load() *Config {
 		})
 	}
 
-	freemodelKey := os.Getenv("FREEMODEL_API_KEY")
-	if freemodelKey != "" {
+	freemodelKeys := splitList(os.Getenv("FREEMODEL_API_KEY"))
+	if len(freemodelKeys) > 0 {
 		fmHeaders := freemodelHeaders()
 		providers = append(providers, ProviderConfig{
 			Name:      "freemodel-api",
 			BaseURL:   envOr("FREEMODEL_API_BASE_URL", "https://api.freemodel.dev"),
 			Style:     "openai",
-			Keys:      []string{freemodelKey},
+			Keys:      freemodelKeys,
 			Headers:   fmHeaders,
 			ShareKeys: "freemodel",
 			AuthMode:  "both",
@@ -89,11 +89,33 @@ func Load() *Config {
 			Name:      "freemodel-cc",
 			BaseURL:   envOr("FREEMODEL_CC_BASE_URL", "https://cc.freemodel.dev"),
 			Style:     "anthropic",
-			Keys:      []string{freemodelKey},
+			Keys:      freemodelKeys,
 			Headers:   fmHeaders,
 			ShareKeys: "freemodel",
 			AuthMode:  "both",
 			Query:     "?beta=true",
+		})
+	}
+
+	if keys := splitList(os.Getenv("AEROLINK_API_KEY")); len(keys) > 0 {
+		providers = append(providers, ProviderConfig{
+			Name:     "aerolink",
+			BaseURL:  envOr("AEROLINK_BASE_URL", "https://capi.aerolink.lat"),
+			Style:    "anthropic",
+			Keys:     keys,
+			Headers:  aerolinkHeaders(),
+			AuthMode: "x-api-key",
+		})
+	}
+
+	if keys := splitList(os.Getenv("FORGE_API_KEY")); len(keys) > 0 {
+		providers = append(providers, ProviderConfig{
+			Name:     "forge",
+			BaseURL:  envOr("FORGE_BASE_URL", "https://forge-gateway-api.fly.dev"),
+			Style:    "openai",
+			Keys:     keys,
+			Headers:  map[string]string{"Content-Type": "application/json"},
+			AuthMode: "bearer",
 		})
 	}
 
@@ -146,22 +168,29 @@ func stainlessHeaders() map[string]string {
 	}
 }
 
+func aerolinkHeaders() map[string]string {
+	return map[string]string{
+		"Content-Type":      "application/json",
+		"anthropic-version": "2023-06-01",
+	}
+}
+
 func freemodelHeaders() map[string]string {
 	return map[string]string{
-		"Accept":                                "application/json",
-		"Content-Type":                         "application/json",
-		"User-Agent":                            "claude-cli/2.1.207 (external, cli)",
-		"X-Stainless-Arch":                      "x64",
-		"X-Stainless-Lang":                      "js",
-		"X-Stainless-OS":                        "Linux",
-		"X-Stainless-Package-Version":           "0.94.0",
-		"X-Stainless-Retry-Count":               "0",
-		"X-Stainless-Runtime":                   "node",
-		"X-Stainless-Runtime-Version":           "v26.3.0",
-		"X-Stainless-Timeout":                   "600",
-		"anthropic-beta":                        "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24",
+		"Accept":                                    "application/json",
+		"Content-Type":                              "application/json",
+		"User-Agent":                                "claude-cli/2.1.207 (external, cli)",
+		"X-Stainless-Arch":                          "x64",
+		"X-Stainless-Lang":                          "js",
+		"X-Stainless-OS":                            "Linux",
+		"X-Stainless-Package-Version":               "0.94.0",
+		"X-Stainless-Retry-Count":                   "0",
+		"X-Stainless-Runtime":                       "node",
+		"X-Stainless-Runtime-Version":               "v26.3.0",
+		"X-Stainless-Timeout":                       "600",
+		"anthropic-beta":                            "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24",
 		"anthropic-dangerous-direct-browser-access": "true",
-		"anthropic-version":                     "2023-06-01",
-		"x-app":                                 "cli",
+		"anthropic-version":                         "2023-06-01",
+		"x-app":                                     "cli",
 	}
 }
