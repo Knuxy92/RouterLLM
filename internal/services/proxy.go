@@ -8,33 +8,23 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"routerllm/internal/adapter"
-	"routerllm/internal/dto"
-	"routerllm/internal/keys"
+	"routerllm/internal/model"
 	"routerllm/internal/provider"
-	"routerllm/internal/routing"
 	"routerllm/internal/util"
-
-	"github.com/gin-gonic/gin"
 )
 
 const maxRetries = 3
 
 var deadStatuses = map[int]bool{
-	401: true,
-	402: true,
-	403: true,
+	401: true, 402: true, 403: true,
 }
 
 var transientStatuses = map[int]bool{
-	408: true,
-	429: true,
-	500: true,
-	502: true,
-	503: true,
-	504: true,
+	408: true, 429: true, 500: true, 502: true, 503: true, 504: true,
 }
 
 type Proxy struct {
@@ -47,15 +37,15 @@ func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger) *Pro
 	return &Proxy{registry: reg, client: client, log: log}
 }
 
-func (p *Proxy) Forward(path string, c *gin.Context) {
-	raw, err := c.GetRawData()
+func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		c.String(http.StatusBadRequest, "failed to read request body: "+err.Error())
+		http.Error(w, "failed to read request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	body, clientStream, err := dto.ParseAndForceStream(raw)
+	body, clientStream, err := parseAndForceStream(raw)
 	if err != nil {
-		c.String(http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if path == "/v1/responses" {
@@ -65,7 +55,7 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 	model, _ := body["model"].(string)
 	routes := p.registry.Routes(model)
 	if len(routes) == 0 {
-		c.String(http.StatusNotFound, fmt.Sprintf("model %q not found", model))
+		http.Error(w, fmt.Sprintf("model %q not found", model), http.StatusNotFound)
 		return
 	}
 
@@ -78,7 +68,7 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 		}
 		routes = filtered
 		if len(routes) == 0 {
-			c.String(http.StatusNotFound, fmt.Sprintf("model %q not available for %s", model, path))
+			http.Error(w, fmt.Sprintf("model %q not available for %s", model, path), http.StatusNotFound)
 			return
 		}
 	}
@@ -104,49 +94,60 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 			reqPath = path
 		}
 		if err != nil {
-			c.String(http.StatusInternalServerError, "failed to encode body: "+err.Error())
+			http.Error(w, "failed to encode body: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		resp, status, errBody, served := p.tryKeys(pv, reqPath, reqBody, c)
+		resp, status, errBody, served := p.tryKeys(pv, reqPath, reqBody, r)
 		if served {
 			return
 		}
-
 		if resp == nil {
 			p.log.Printf("all keys exhausted for %s via %s, falling back...", model, pv.Name)
 			lastStatus = status
 			lastErrBody = errBody
 			continue
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 			p.log.Printf("upstream %s returned HTTP %d, passing through", pv.Name, resp.StatusCode)
-			c.Header("Access-Control-Allow-Origin", "*")
-			c.Data(resp.StatusCode, "application/json", eb)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(resp.StatusCode)
+			w.Write(eb)
 			return
 		}
 
 		p.log.Printf("serving %s via %s (HTTP %d)", path, pv.Name, resp.StatusCode)
 
 		if pv.Style == "anthropic" {
-			p.serveAnthropic(resp, clientStream, route.ModelName, c)
+			p.serveAnthropic(resp, clientStream, route.ModelName, w)
 		} else if path == "/v1/responses" {
-			p.serveResponses(resp, clientStream, c)
+			serveResponses(resp, clientStream, w)
 		} else {
-			p.serveOpenAI(resp, clientStream, c)
+			serveOpenAI(resp, clientStream, w)
 		}
 		return
 	}
 
 	if lastErrBody != nil {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Data(lastStatus, "application/json", lastErrBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(lastStatus)
+		w.Write(lastErrBody)
 	} else {
-		c.String(http.StatusBadGateway, "all providers exhausted for model "+model)
+		http.Error(w, "all providers exhausted for model "+model, http.StatusBadGateway)
 	}
+}
+
+func parseAndForceStream(raw []byte) (map[string]any, bool, error) {
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, false, err
+	}
+	clientStream, _ := body["stream"].(bool)
+	body["stream"] = true
+	return body, clientStream, nil
 }
 
 func cloneBody(body map[string]any) map[string]any {
@@ -157,7 +158,7 @@ func cloneBody(body map[string]any) map[string]any {
 	return clone
 }
 
-func applyDefaults(body map[string]any, defaults routing.RequestDefaults) {
+func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	if defaults.ReasoningEffort != "" {
 		if _, ok := body["reasoning_effort"]; !ok {
 			body["reasoning_effort"] = defaults.ReasoningEffort
@@ -178,7 +179,7 @@ func applyDefaults(body map[string]any, defaults routing.RequestDefaults) {
 	}
 }
 
-func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *gin.Context) (*http.Response, int, []byte, bool) {
+func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, r *http.Request) (*http.Response, int, []byte, bool) {
 	maxAttempts := pv.Keys.AliveCount()
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
@@ -194,9 +195,9 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 		}
 
 		for retry := 0; retry < maxRetries; retry++ {
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
 			if err != nil {
-				c.String(http.StatusInternalServerError, "failed to build request: "+err.Error())
+				http.Error(nil, "failed to build request: "+err.Error(), http.StatusInternalServerError)
 				return nil, 0, nil, true
 			}
 			for k, v := range pv.Headers {
@@ -212,13 +213,13 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 				req.Header.Set("Authorization", "Bearer "+key)
 			}
 
-			r, err := p.client.Do(req)
+			r2, err := p.client.Do(req)
 			if err != nil {
 				p.log.Printf("proxy error via %s (retry %d/%d): %v", pv.Name, retry+1, maxRetries, err)
 				lastStatus = http.StatusBadGateway
 				lastErrBody = []byte(err.Error())
 				if retry < maxRetries-1 {
-					if p.backoff(c.Request.Context(), retry) {
+					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
 					}
 					continue
@@ -226,24 +227,24 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 				break
 			}
 
-			if deadStatuses[r.StatusCode] {
-				eb, _ := io.ReadAll(r.Body)
-				r.Body.Close()
-				p.log.Printf("key %s dead (HTTP %d) via %s, switching...", keys.Mask(key), r.StatusCode, pv.Name)
-				lastStatus = r.StatusCode
+			if deadStatuses[r2.StatusCode] {
+				eb, _ := io.ReadAll(r2.Body)
+				r2.Body.Close()
+				p.log.Printf("key %s dead (HTTP %d) via %s, switching...", maskKey(key), r2.StatusCode, pv.Name)
+				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				pv.Keys.MarkDead(key)
 				break
 			}
 
-			if transientStatuses[r.StatusCode] {
-				eb, _ := io.ReadAll(r.Body)
-				r.Body.Close()
-				p.log.Printf("upstream %s transient (HTTP %d), retry %d/%d", pv.Name, r.StatusCode, retry+1, maxRetries)
-				lastStatus = r.StatusCode
+			if transientStatuses[r2.StatusCode] {
+				eb, _ := io.ReadAll(r2.Body)
+				r2.Body.Close()
+				p.log.Printf("upstream %s transient (HTTP %d), retry %d/%d", pv.Name, r2.StatusCode, retry+1, maxRetries)
+				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				if retry < maxRetries-1 {
-					if p.backoff(c.Request.Context(), retry) {
+					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
 					}
 					continue
@@ -251,11 +252,18 @@ func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *g
 				break
 			}
 
-			return r, 0, nil, false
+			return r2, 0, nil, false
 		}
 	}
 
 	return nil, lastStatus, lastErrBody, false
+}
+
+func maskKey(value string) string {
+	if len(value) <= 4 {
+		return "..."
+	}
+	return "..." + value[len(value)-4:]
 }
 
 func (p *Proxy) backoff(ctx context.Context, retry int) bool {
@@ -270,48 +278,45 @@ func (p *Proxy) backoff(ctx context.Context, retry int) bool {
 	}
 }
 
-func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, c *gin.Context) {
+func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter) {
 	if clientStream {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Status(http.StatusOK)
-		if err := util.StreamSSE(resp.Body, c.Writer); err != nil {
-			p.log.Printf("stream error: %v", err)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		if err := util.StreamSSE(resp.Body, w, true); err != nil {
+			log.Printf("stream error: %v", err)
 		}
 		return
 	}
-
 	result := bufferStream(resp.Body)
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.JSON(resp.StatusCode, result)
+	writeJSON(w, http.StatusOK, result)
 }
 
-func (p *Proxy) serveResponses(resp *http.Response, clientStream bool, c *gin.Context) {
-	c.Header("Access-Control-Allow-Origin", "*")
+func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter) {
 	if clientStream {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Status(http.StatusOK)
-		if err := util.StreamSSEPassthrough(resp.Body, c.Writer); err != nil {
-			p.log.Printf("responses stream error: %v", err)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		if err := util.StreamSSE(resp.Body, w, false); err != nil {
+			log.Printf("responses stream error: %v", err)
 		}
 		return
 	}
 	body, _ := io.ReadAll(resp.Body)
-	c.Data(http.StatusOK, "application/json", body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
 }
 
-func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, c *gin.Context) {
+func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
 	if clientStream {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Status(http.StatusOK)
-		if err := adapter.StreamAnthropicToOpenAI(resp.Body, c.Writer, modelName); err != nil {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		if err := adapter.StreamAnthropicToOpenAI(resp.Body, w, modelName); err != nil {
 			p.log.Printf("anthropic stream error: %v", err)
 		}
 		return
@@ -319,11 +324,105 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 
 	openaiBody, err := adapter.BufferAnthropicToOpenAI(resp.Body, modelName)
 	if err != nil {
-		c.String(http.StatusBadGateway, "failed to translate response: "+err.Error())
+		http.Error(w, "failed to translate response: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	c.Header("Content-Type", "application/json")
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Data(http.StatusOK, "application/json", openaiBody)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(openaiBody)
+}
+
+func bufferStream(body io.Reader) *model.ChatCompletionResponse {
+	content := make(map[int]string)
+	reasoning := make(map[int]string)
+	finish := make(map[int]string)
+	var usage json.RawMessage
+	var resultID, modelName, systemFP string
+	var created int64
+	sawMeta := false
+
+	_, _ = util.IterDataLines(body, func(payload string) bool {
+		var chunk model.StreamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return true
+		}
+		if !sawMeta {
+			resultID = chunk.ID
+			modelName = chunk.Model
+			systemFP = chunk.SystemFingerprint
+			created = chunk.Created
+			sawMeta = true
+		}
+		if len(chunk.Usage) > 0 {
+			usage = chunk.Usage
+		}
+		for _, c := range chunk.Choices {
+			idx := c.Index
+			if c.Delta.Content != "" {
+				content[idx] += c.Delta.Content
+			}
+			if c.Delta.ReasoningContent != "" {
+				reasoning[idx] += c.Delta.ReasoningContent
+			}
+			if c.FinishReason != nil {
+				finish[idx] = *c.FinishReason
+			}
+		}
+		return true
+	})
+
+	if !sawMeta {
+		return &model.ChatCompletionResponse{
+			Object:  "chat.completion",
+			Choices: []model.Choice{},
+		}
+	}
+
+	indices := make(map[int]bool)
+	for i := range content {
+		indices[i] = true
+	}
+	for i := range finish {
+		indices[i] = true
+	}
+	keysSorted := make([]int, 0, len(indices))
+	for i := range indices {
+		keysSorted = append(keysSorted, i)
+	}
+	sort.Ints(keysSorted)
+
+	choices := make([]model.Choice, 0, len(keysSorted))
+	for _, idx := range keysSorted {
+		msg := model.Message{Role: "assistant", Content: content[idx]}
+		if r := reasoning[idx]; r != "" {
+			msg.ReasoningContent = r
+		}
+		fr := finish[idx]
+		if fr == "" {
+			fr = "stop"
+		}
+		choices = append(choices, model.Choice{
+			Index:        idx,
+			Message:      msg,
+			FinishReason: fr,
+		})
+	}
+
+	return &model.ChatCompletionResponse{
+		ID:                resultID,
+		Object:            "chat.completion",
+		Created:           created,
+		Model:             modelName,
+		SystemFingerprint: systemFP,
+		Choices:           choices,
+		Usage:             usage,
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	data, _ := json.Marshal(v)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(data)
 }

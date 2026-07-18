@@ -1,38 +1,73 @@
 package routers
 
 import (
+	"log"
 	"net/http"
+	"time"
 
 	"routerllm/internal/handlers"
-
-	"github.com/gin-gonic/gin"
 )
 
-func New(h *handlers.Handlers) *gin.Engine {
-	r := gin.New()
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
-	r.Use(CORS())
-
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-	r.GET("/v1/models", h.Models)
-	r.POST("/v1/chat/completions", h.ChatCompletions)
-	r.POST("/v1/responses", h.Responses)
-
-	return r
+type statusWriter struct {
+	http.ResponseWriter
+	status int
 }
 
-func CORS() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "*")
-		c.Header("Access-Control-Allow-Headers", "*")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusOK)
+func New(h *handlers.Handlers) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.HandleFunc("GET /v1/models", h.Models)
+	mux.HandleFunc("POST /v1/chat/completions", h.ChatCompletions)
+	mux.HandleFunc("POST /v1/responses", h.Responses)
+
+	return chain(mux, recovery, logger, cors)
+}
+
+func chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(mws) - 1; i >= 0; i-- {
+		h = mws[i](h)
+	}
+	return h
+}
+
+func recovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("panic: %v", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(lw, r)
+		log.Printf("%s %s %d %v", r.Method, r.URL.Path, lw.status, time.Since(start))
+	})
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
-		c.Next()
-	}
+		next.ServeHTTP(w, r)
+	})
 }

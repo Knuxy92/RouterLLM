@@ -37,29 +37,12 @@ func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err
 	}
 }
 
-func StreamSSE(src io.Reader, dst http.ResponseWriter) error {
+func StreamSSE(src io.Reader, dst http.ResponseWriter, filterChoices bool) error {
 	flusher, _ := dst.(http.Flusher)
 	sawDone, err := IterDataLines(src, func(payload string) bool {
-		if hasChoices(payload) {
-			fmt.Fprintf(dst, "data: %s\n\n", payload)
-			if flusher != nil {
-				flusher.Flush()
-			}
+		if filterChoices && !hasChoices(payload) {
+			return true
 		}
-		return true
-	})
-	if sawDone {
-		fmt.Fprintf(dst, "data: [DONE]\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	return err
-}
-
-func StreamSSEPassthrough(src io.Reader, dst http.ResponseWriter) error {
-	flusher, _ := dst.(http.Flusher)
-	sawDone, err := IterDataLines(src, func(payload string) bool {
 		fmt.Fprintf(dst, "data: %s\n\n", payload)
 		if flusher != nil {
 			flusher.Flush()
