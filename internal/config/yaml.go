@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"routerllm/internal/routing"
+	"routerllm/internal/model"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,7 +26,7 @@ type yamlConfig struct {
 	Port      string         `yaml:"port,omitempty"`
 	Cooldown  string         `yaml:"cooldown,omitempty"`
 	Providers []yamlProvider `yaml:"providers"`
-	Routes    []routing.Rule `yaml:"routes,omitempty"`
+	Routes    []model.Rule   `yaml:"routes,omitempty"`
 }
 
 type yamlProvider struct {
@@ -66,44 +66,19 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 
 	var providers []ProviderConfig
 	for _, yp := range yc.Providers {
-		def := providerDefaults[yp.Name]
 		p := ProviderConfig{
-			Name: yp.Name,
+			Name:     yp.Name,
+			BaseURL:  strings.TrimRight(yp.BaseURL, "/"),
+			Style:    yp.Style,
+			AuthMode: yp.AuthMode,
+			ShareKeys: yp.Share,
+			Query:    yp.Query,
+			Headers:  yp.Headers,
 		}
-		if yp.Style != "" {
-			p.Style = yp.Style
-		} else {
-			p.Style = def.Style
+		if p.Headers == nil {
+			p.Headers = make(map[string]string)
 		}
-		if yp.BaseURL != "" {
-			p.BaseURL = yp.BaseURL
-		} else {
-			p.BaseURL = def.BaseURL
-		}
-		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
 		p.BaseURL = strings.TrimSuffix(p.BaseURL, "/v1")
-		p.Headers = make(map[string]string)
-		for k, v := range def.Headers {
-			p.Headers[k] = v
-		}
-		for k, v := range yp.Headers {
-			p.Headers[k] = v
-		}
-		if yp.AuthMode != "" {
-			p.AuthMode = yp.AuthMode
-		} else {
-			p.AuthMode = def.AuthMode
-		}
-		if yp.Share != "" {
-			p.ShareKeys = yp.Share
-		} else {
-			p.ShareKeys = def.ShareKeys
-		}
-		if yp.Query != "" {
-			p.Query = yp.Query
-		} else {
-			p.Query = def.Query
-		}
 		if len(yp.APIKey) > 0 {
 			p.Keys = expandKeys(yp.APIKey)
 		} else {
@@ -112,20 +87,14 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		providers = append(providers, p)
 	}
 
-	routes := yc.Routes
-	if routes == nil {
-		routes = routing.DefaultRules()
-	}
-
 	client := &http.Client{Transport: newTransport()}
 
 	return &Config{
-		Port:       port,
-		Cooldown:   cooldown,
-		Providers:  providers,
-		Client:     client,
-		Routes:     routes,
-		RoutesFile: "",
+		Port:      port,
+		Cooldown:  cooldown,
+		Providers: providers,
+		Client:    client,
+		Routes:    yc.Routes,
 	}, nil
 }
 
@@ -146,62 +115,4 @@ func resolveEnv(s string) []string {
 		}
 	}
 	return []string{s}
-}
-
-type providerDefault struct {
-	Style     string
-	BaseURL   string
-	Headers   map[string]string
-	AuthMode  string
-	ShareKeys string
-	Query     string
-}
-
-var providerDefaults = map[string]providerDefault{
-	"agentrouter": {
-		Style:    "openai",
-		BaseURL:  "https://agentrouter.org",
-		Headers:  stainlessHeaders(),
-		AuthMode: "bearer",
-	},
-	"opencode": {
-		Style:    "openai",
-		BaseURL:  "https://opencode.ai/zen",
-		Headers:  map[string]string{"Content-Type": "application/json"},
-		AuthMode: "bearer",
-	},
-	"alibaba": {
-		Style:    "openai",
-		BaseURL:  "https://ws-1h0fygqzbmuhg6j1.ap-southeast-1.maas.aliyuncs.com/compatible-mode",
-		Headers:  map[string]string{"Content-Type": "application/json"},
-		AuthMode: "bearer",
-	},
-	"freemodel-api": {
-		Style:     "openai",
-		BaseURL:   "https://api.freemodel.dev",
-		Headers:   freemodelHeaders(),
-		AuthMode:  "both",
-		ShareKeys: "freemodel",
-		Query:     "?beta=true",
-	},
-	"freemodel-cc": {
-		Style:     "anthropic",
-		BaseURL:   "https://cc.freemodel.dev",
-		Headers:   freemodelHeaders(),
-		AuthMode:  "both",
-		ShareKeys: "freemodel",
-		Query:     "?beta=true",
-	},
-	"aerolink": {
-		Style:    "anthropic",
-		BaseURL:  "https://capi.aerolink.lat",
-		Headers:  aerolinkHeaders(),
-		AuthMode: "x-api-key",
-	},
-	"forge": {
-		Style:    "openai",
-		BaseURL:  "https://forge-gateway-api.fly.dev",
-		Headers:  map[string]string{"Content-Type": "application/json"},
-		AuthMode: "bearer",
-	},
 }

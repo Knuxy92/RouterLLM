@@ -6,7 +6,7 @@ import (
 
 	"routerllm/internal/config"
 	"routerllm/internal/keys"
-	"routerllm/internal/routing"
+	"routerllm/internal/model"
 )
 
 type Provider struct {
@@ -22,16 +22,15 @@ type Provider struct {
 type Route struct {
 	Provider  *Provider
 	ModelName string
-	Defaults  routing.RequestDefaults
+	Defaults  model.RequestDefaults
 }
 
 type Registry struct {
-	routes    map[string][]Route
-	models    []string
-	providers map[string]*Provider
+	routes map[string][]Route
+	models []string
 }
 
-func NewRegistry(configs []config.ProviderConfig, rules []routing.Rule, cooldown time.Duration) *Registry {
+func NewRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown time.Duration) *Registry {
 	providers := make(map[string]*Provider)
 	sharedMgrs := make(map[string]*keys.Manager)
 
@@ -80,23 +79,7 @@ func NewRegistry(configs []config.ProviderConfig, rules []routing.Rule, cooldown
 	}
 	sort.Strings(models)
 
-	return &Registry{routes: routes, models: models, providers: providers}
-}
-
-func (r *Registry) KeyManager(name string) *keys.Manager {
-	if p, ok := r.providers[name]; ok {
-		return p.Keys
-	}
-	return nil
-}
-
-func (r *Registry) ProviderNames() []string {
-	names := make([]string, 0, len(r.providers))
-	for name := range r.providers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return &Registry{routes: routes, models: models}
 }
 
 func (r *Registry) Routes(model string) []Route {

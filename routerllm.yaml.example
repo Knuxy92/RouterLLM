@@ -7,6 +7,9 @@
 #   - ${ENV_VAR_NAME} reads from environment variable
 #   - If the env var contains commas, it auto-splits into multiple keys
 #   - Also supports .env file (loaded automatically if present)
+#
+# All provider fields (style, base_url, headers, auth_mode, share, query)
+# must be specified in YAML — there are no hardcoded defaults.
 # =============================================================================
 
 # --- Server settings ---------------------------------------------------------
@@ -17,143 +20,169 @@ cooldown: 60s                       # key cooldown duration (default: 60s)
                                     # skipped for this duration
 
 # --- Providers ---------------------------------------------------------------
-# List the upstream LLM providers you have API keys for.
-# Each known provider has built-in defaults for:
-#   style, base_url, headers, auth_mode
-# You only need to specify what you want to override.
+# Each provider requires at minimum: name, api_key, style, base_url.
+# Everything else is optional.
 
 providers:
 
-  # agentrouter — primary provider, OpenAI-compatible, multi-key failover
+  # --- Known providers ---
+  # These are common API gateways. You must still specify style + base_url
+  # (shown as comments for reference).
+
   - name: agentrouter
-    api_key: ${AGENT_ROUTER_API_KEY}        # single key or comma-separated in env
+    api_key: ${AGENT_ROUTER_API_KEY}
     # api_key: [key1, key2, key3]           # or list multiple keys directly
-    # style: openai                         # (default: openai)
-    # base_url: https://agentrouter.org     # (default: https://agentrouter.org)
-    # headers:                              # extra headers merged with defaults
-    #   User-Agent: MyApp/1.0
-    # auth_mode: bearer                     # bearer | x-api-key | both (default: bearer)
+    style: openai
+    base_url: https://agentrouter.org
+    # headers:
+    #   Content-Type: application/json
+    auth_mode: bearer
     # share: ""                             # shared key group name (optional)
 
-  # opencode — free models only, OpenAI-compatible
   - name: opencode
     api_key: ${OPENCODE_API_KEY}
-    # style: openai                         # (default: openai)
-    # base_url: https://opencode.ai/zen     # (default: https://opencode.ai/zen)
-    # headers:
-    #   Content-Type: application/json
-    # auth_mode: bearer
+    style: openai
+    base_url: https://opencode.ai/zen
+    headers:
+      Content-Type: application/json
+    auth_mode: bearer
 
-  # alibaba — Qwen + Kimi models, OpenAI-compatible
   - name: alibaba
     api_key: ${ALIBABA_API_KEY}
-    # style: openai                         # (default: openai)
-    # base_url: https://your-region.maas.aliyuncs.com/compatible-mode
-    # headers:
-    #   Content-Type: application/json
-    # auth_mode: bearer
+    style: openai
+    base_url: https://your-region.maas.aliyuncs.com/compatible-mode
+    headers:
+      Content-Type: application/json
+    auth_mode: bearer
 
-  # freemodel-api — OpenAI-compatible (shares keys with freemodel-cc)
   - name: freemodel-api
-    api_key: ${FREEMODEL_API_KEY}            # optionally multi-key
-    # style: openai                          # (default: openai)
-    # base_url: https://api.freemodel.dev    # (default)
-    # auth_mode: both                        # sends both Bearer + x-api-key
-    # share: freemodel                       # shares key cooldown state
-    # query: "?beta=true"                    # appended to every request URL
+    api_key: ${FREEMODEL_API_KEY}
+    style: openai
+    base_url: https://api.freemodel.dev
+    auth_mode: both                        # sends both Bearer + x-api-key
+    share: freemodel                       # shares key cooldown state
+    query: "?beta=true"
 
-  # freemodel-cc — Anthropic-compatible (shares keys with freemodel-api)
   - name: freemodel-cc
     api_key: ${FREEMODEL_API_KEY}
-    # style: anthropic                       # (default: anthropic — auto-translated)
-    # base_url: https://cc.freemodel.dev     # (default)
-    # auth_mode: both
-    # share: freemodel                       # same share group = same key pool
-    # query: "?beta=true"
+    style: anthropic                       # auto-translated to /v1/messages
+    base_url: https://cc.freemodel.dev
+    auth_mode: both
+    share: freemodel
+    query: "?beta=true"
 
-  # aerolink — Anthropic-compatible fallback for Claude models
   - name: aerolink
     api_key: ${AEROLINK_API_KEY}
-    # style: anthropic                       # (default: anthropic)
-    # base_url: https://capi.aerolink.lat    # (default)
-    # headers:
-    #   Content-Type: application/json
-    #   anthropic-version: 2023-06-01
-    # auth_mode: x-api-key                   # sends x-api-key header
-    # api_key: [key1, key2, key3]            # multi-key example
+    # api_key: [key1, key2, key3]
+    style: anthropic
+    base_url: https://capi.aerolink.lat
+    headers:
+      Content-Type: application/json
+      anthropic-version: 2023-06-01
+    auth_mode: x-api-key                   # sends x-api-key header
 
-  # forge — OpenAI-compatible fallback gateway
   - name: forge
     api_key: ${FORGE_API_KEY}
-    # style: openai                          # (default: openai)
-    # base_url: https://forge-gateway-api.fly.dev  # (default)
-    # headers:
-    #   Content-Type: application/json
-    # auth_mode: bearer
+    style: openai
+    base_url: https://forge-gateway-api.fly.dev
+    headers:
+      Content-Type: application/json
+    auth_mode: bearer
 
-# --- Custom provider example (name not in built-in defaults) -----------------
-# If you add a provider name that RouterLLM doesn't know, you must specify
-# style and base_url at minimum:
+# --- Claude Code-style headers (example) ------------------------------------
+# Providers that emulate Claude Code (like freemodel-api/cc) may need these
+# headers to match the expected client environment:
 
-  # - name: my-custom-provider
-  #   api_key: ${MY_CUSTOM_KEY}
-  #   style: openai                          # required for unknown providers
-  #   base_url: https://api.myprovider.com   # required for unknown providers
+  # - name: my-claude-provider
+  #   api_key: ${MY_KEY}
+  #   style: anthropic
+  #   base_url: https://api.example.com
+  #   auth_mode: both
+  #   headers:
+  #     Accept: application/json
+  #     Content-Type: application/json
+  #     User-Agent: claude-cli/2.1.207 (external, cli)
+  #     X-Stainless-Arch: x64
+  #     X-Stainless-Lang: js
+  #     X-Stainless-OS: Linux
+  #     X-Stainless-Package-Version: 0.94.0
+  #     X-Stainless-Retry-Count: "0"
+  #     X-Stainless-Runtime: node
+  #     X-Stainless-Runtime-Version: v26.3.0
+  #     X-Stainless-Timeout: "600"
+  #     anthropic-beta: claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24
+  #     anthropic-dangerous-direct-browser-access: "true"
+  #     anthropic-version: 2023-06-01
+  #     x-app: cli
+
+# --- RooCode / Stainless-style headers (example) ----------------------------
+# For OpenAI-compatible providers that expect a RooCode or Stainless client:
+
+  # - name: my-roocode-provider
+  #   api_key: ${MY_KEY}
+  #   style: openai
+  #   base_url: https://api.example.com
   #   auth_mode: bearer
   #   headers:
   #     Content-Type: application/json
-  #     X-Custom: value
+  #     User-Agent: RooCode/3.53.0
+  #     X-Stainless-OS: Linux
+  #     X-Stainless-Arch: x64
+  #     X-Stainless-Lang: js
+  #     X-Stainless-Runtime: node
+  #     X-Stainless-Runtime-Version: v22.22.1
+  #     HTTP-Referer: https://github.com/RooVetGit/Roo-Cline
+  #     X-Title: Continue
 
 # --- Routes ------------------------------------------------------------------
 # Model routing rules: maps a model name → list of upstream routes.
 # Routes are tried in order until one succeeds.
 #
-# If the entire `routes:` section is omitted, built-in defaults are used
-# (see internal/routing/defaults.go for the full list).
+# Routes must be defined here — there are no built-in defaults.
 
-# routes:
+routes:
 
-#   # Single provider, no defaults
-#   - model: my-model
-#     routes:
-#       - provider: forge
-#         model: gpt-4                        # upstream model name
+  # Single provider, no defaults
+  - model: my-model
+    routes:
+      - provider: forge
+        model: gpt-4                        # upstream model name
 
-#   # Multiple fallback providers (tried in order)
-#   - model: claude-opus-4-8
-#     routes:
-#       - provider: freemodel-cc
-#         model: claude-opus-4-8
-#         defaults:
-#           thinking_budget: 32000            # thinking tokens for Anthropic
-#       - provider: aerolink
-#         model: claude-opus-4-8
+  # Multiple fallback providers (tried in order)
+  - model: claude-opus-4-8
+    routes:
+      - provider: freemodel-cc
+        model: claude-opus-4-8
+        defaults:
+          thinking_budget: 32000            # thinking tokens for Anthropic
+      - provider: aerolink
+        model: claude-opus-4-8
 
-#   # With reasoning effort (OpenAI-style)
-#   - model: gpt-5.5
-#     routes:
-#       - provider: freemodel-api
-#         model: gpt-5.5
-#         defaults:
-#           reasoning_effort: high            # low | medium | high
-#       - provider: forge
-#         model: gpt-5.5
+  # With reasoning effort (OpenAI-style)
+  - model: gpt-5.5
+    routes:
+      - provider: freemodel-api
+        model: gpt-5.5
+        defaults:
+          reasoning_effort: high            # low | medium | high
+      - provider: forge
+        model: gpt-5.5
 
-#   # Enable thinking on Qwen models (Alibaba)
-#   - model: qwen3.7-max
-#     routes:
-#       - provider: alibaba
-#         model: qwen3.7-max
-#         defaults:
-#           enable_thinking: true
+  # Enable thinking on Qwen models (Alibaba)
+  - model: qwen3.7-max
+    routes:
+      - provider: alibaba
+        model: qwen3.7-max
+        defaults:
+          enable_thinking: true
 
-#   # Free model, single provider
-#   - model: deepseek-v4-flash-free
-#     routes:
-#       - provider: opencode
-#         model: deepseek-v4-flash-free
-#         defaults:
-#           thinking_budget: 8192
+  # Free model, single provider
+  - model: deepseek-v4-flash-free
+    routes:
+      - provider: opencode
+        model: deepseek-v4-flash-free
+        defaults:
+          thinking_budget: 8192
 
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:

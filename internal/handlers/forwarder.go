@@ -1,32 +1,31 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"routerllm/internal/model"
 	"routerllm/internal/services"
-
-	"github.com/gin-gonic/gin"
 )
 
 type Handlers struct {
-	proxy   *services.Proxy
-	models  []string
+	proxy  *services.Proxy
+	models []string
 }
 
 func New(proxy *services.Proxy, models []string) *Handlers {
 	return &Handlers{proxy: proxy, models: models}
 }
 
-func (h *Handlers) ChatCompletions(c *gin.Context) {
-	h.proxy.Forward("/v1/chat/completions", c)
+func (h *Handlers) ChatCompletions(w http.ResponseWriter, r *http.Request) {
+	h.proxy.Forward("/v1/chat/completions", w, r)
 }
 
-func (h *Handlers) Responses(c *gin.Context) {
-	h.proxy.Forward("/v1/responses", c)
+func (h *Handlers) Responses(w http.ResponseWriter, r *http.Request) {
+	h.proxy.Forward("/v1/responses", w, r)
 }
 
-func (h *Handlers) Models(c *gin.Context) {
+func (h *Handlers) Models(w http.ResponseWriter, r *http.Request) {
 	data := make([]model.Model, 0, len(h.models))
 	for _, id := range h.models {
 		data = append(data, model.Model{
@@ -36,5 +35,6 @@ func (h *Handlers) Models(c *gin.Context) {
 			OwnedBy: "RouterLLM",
 		})
 	}
-	c.JSON(http.StatusOK, model.ModelList{Object: "list", Data: data})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.ModelList{Object: "list", Data: data})
 }

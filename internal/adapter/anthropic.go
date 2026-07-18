@@ -84,17 +84,8 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 }
 
 func intValue(v any, fallback int) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case json.Number:
-		if i, err := n.Int64(); err == nil {
-			return int(i)
-		}
+	if f, ok := v.(float64); ok {
+		return int(f)
 	}
 	return fallback
 }

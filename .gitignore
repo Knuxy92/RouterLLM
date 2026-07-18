@@ -1,5 +1,6 @@
 # Binaries
 /routerllm
+/routerlm
 api
 *.exe
 *.exe~

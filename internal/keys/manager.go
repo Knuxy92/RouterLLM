@@ -55,12 +55,6 @@ func (m *Manager) MarkDead(value string) {
 	}
 }
 
-func (m *Manager) Count() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.entries)
-}
-
 func (m *Manager) AliveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,40 +66,6 @@ func (m *Manager) AliveCount() int {
 		}
 	}
 	return alive
-}
-
-func (m *Manager) ReviveAll() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	n := 0
-	for i := range m.entries {
-		if !m.entries[i].deadUntil.IsZero() {
-			m.entries[i].deadUntil = time.Time{}
-			n++
-		}
-	}
-	return n
-}
-
-func (m *Manager) Replace(newKeys []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	entries := make([]entry, 0, len(newKeys))
-	for _, v := range newKeys {
-		entries = append(entries, entry{value: v})
-	}
-	m.entries = entries
-	m.cursor = 0
-}
-
-func (m *Manager) Snapshot() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]string, 0, len(m.entries))
-	for _, e := range m.entries {
-		out = append(out, e.value)
-	}
-	return out
 }
 
 func Mask(value string) string {

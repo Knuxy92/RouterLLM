@@ -2,6 +2,18 @@ package model
 
 import "encoding/json"
 
+type Model struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+type ModelList struct {
+	Object string  `json:"object"`
+	Data   []Model `json:"data"`
+}
+
 type StreamChunk struct {
 	ID                string          `json:"id"`
 	Object            string          `json:"object"`
@@ -44,4 +56,21 @@ type Message struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+type RequestDefaults struct {
+	ReasoningEffort string `yaml:"reasoning_effort" json:"reasoning_effort"`
+	EnableThinking  *bool  `yaml:"enable_thinking,omitempty" json:"enable_thinking,omitempty"`
+	ThinkingBudget  int    `yaml:"thinking_budget" json:"thinking_budget"`
+}
+
+type Spec struct {
+	Provider string          `yaml:"provider" json:"provider"`
+	Model    string          `yaml:"model" json:"model"`
+	Defaults RequestDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+}
+
+type Rule struct {
+	Model  string `yaml:"model" json:"model"`
+	Routes []Spec `yaml:"routes" json:"routes"`
 }
