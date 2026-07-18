@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"agentrouter/internal/model"
-	"agentrouter/internal/util"
+	"routerllm/internal/model"
+	"routerllm/internal/util"
 )
 
 func TranslateRequest(body map[string]any, modelName string) ([]byte, string, error) {
@@ -26,8 +26,8 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 			}
 			role, _ := msg["role"].(string)
 			if role == "system" {
-				if content, ok := msg["content"].(string); ok {
-					systemParts = append(systemParts, content)
+				if t := systemText(msg["content"]); t != "" {
+					systemParts = append(systemParts, t)
 				}
 				continue
 			}
@@ -99,60 +99,24 @@ func intValue(v any, fallback int) int {
 	return fallback
 }
 
-func TranslateResponse(anthropicBody []byte) ([]byte, error) {
-	var ar struct {
-		ID         string `json:"id"`
-		Model      string `json:"model"`
-		StopReason string `json:"stop_reason"`
-		Content    []struct {
-			Type     string `json:"type"`
-			Text     string `json:"text"`
-			Thinking string `json:"thinking"`
-		} `json:"content"`
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(anthropicBody, &ar); err != nil {
-		return nil, err
-	}
-
-	var contentBuilder strings.Builder
-	var reasoningBuilder strings.Builder
-	for _, block := range ar.Content {
-		if block.Type == "text" {
-			contentBuilder.WriteString(block.Text)
+func systemText(content any) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []any:
+		var parts []string
+		for _, p := range c {
+			if m, ok := p.(map[string]any); ok {
+				if t, _ := m["type"].(string); t == "text" {
+					if text, _ := m["text"].(string); text != "" {
+						parts = append(parts, text)
+					}
+				}
+			}
 		}
-		if block.Type == "thinking" {
-			reasoningBuilder.WriteString(block.Thinking)
-		}
+		return strings.Join(parts, "\n")
 	}
-	msg := model.Message{Role: "assistant", Content: contentBuilder.String()}
-	if reasoning := reasoningBuilder.String(); reasoning != "" {
-		msg.ReasoningContent = reasoning
-	}
-
-	result := model.ChatCompletionResponse{
-		ID:      ar.ID,
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   ar.Model,
-		Choices: []model.Choice{{
-			Index:        0,
-			Message:      msg,
-			FinishReason: mapStopReason(ar.StopReason),
-		}},
-	}
-
-	if ar.Usage != nil {
-		result.Usage = json.RawMessage(fmt.Sprintf(
-			`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
-			ar.Usage.InputTokens, ar.Usage.OutputTokens, ar.Usage.InputTokens+ar.Usage.OutputTokens,
-		))
-	}
-
-	return json.Marshal(result)
+	return ""
 }
 
 func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {

@@ -1,4 +1,5 @@
-.git
+
+cline connect.git
 .gitignore
 .env
 .env.example
@@ -11,6 +12,6 @@ requirements.txt
 venv/
 __pycache__/
 *.pyc
-agentrouter
+routerllm
 *.log
 /tmp

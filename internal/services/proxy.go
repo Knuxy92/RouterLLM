@@ -10,11 +10,12 @@ import (
 	"net/http"
 	"time"
 
-	"agentrouter/internal/adapter"
-	"agentrouter/internal/dto"
-	"agentrouter/internal/keys"
-	"agentrouter/internal/provider"
-	"agentrouter/internal/util"
+	"routerllm/internal/adapter"
+	"routerllm/internal/dto"
+	"routerllm/internal/keys"
+	"routerllm/internal/provider"
+	"routerllm/internal/routing"
+	"routerllm/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -56,6 +57,9 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 	if err != nil {
 		c.String(http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
+	}
+	if path == "/v1/responses" {
+		body["stream"] = clientStream
 	}
 
 	model, _ := body["model"].(string)
@@ -119,7 +123,6 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
 			p.log.Printf("upstream %s returned HTTP %d, passing through", pv.Name, resp.StatusCode)
 			c.Header("Access-Control-Allow-Origin", "*")
 			c.Data(resp.StatusCode, "application/json", eb)
@@ -130,6 +133,8 @@ func (p *Proxy) Forward(path string, c *gin.Context) {
 
 		if pv.Style == "anthropic" {
 			p.serveAnthropic(resp, clientStream, route.ModelName, c)
+		} else if path == "/v1/responses" {
+			p.serveResponses(resp, clientStream, c)
 		} else {
 			p.serveOpenAI(resp, clientStream, c)
 		}
@@ -152,7 +157,7 @@ func cloneBody(body map[string]any) map[string]any {
 	return clone
 }
 
-func applyDefaults(body map[string]any, defaults provider.RequestDefaults) {
+func applyDefaults(body map[string]any, defaults routing.RequestDefaults) {
 	if defaults.ReasoningEffort != "" {
 		if _, ok := body["reasoning_effort"]; !ok {
 			body["reasoning_effort"] = defaults.ReasoningEffort
@@ -174,7 +179,7 @@ func applyDefaults(body map[string]any, defaults provider.RequestDefaults) {
 }
 
 func (p *Proxy) tryKeys(pv *provider.Provider, path string, reqBody []byte, c *gin.Context) (*http.Response, int, []byte, bool) {
-	maxAttempts := pv.Keys.Count()
+	maxAttempts := pv.Keys.AliveCount()
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
 	}
@@ -281,6 +286,22 @@ func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, c *gin.Conte
 	result := bufferStream(resp.Body)
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.JSON(resp.StatusCode, result)
+}
+
+func (p *Proxy) serveResponses(resp *http.Response, clientStream bool, c *gin.Context) {
+	c.Header("Access-Control-Allow-Origin", "*")
+	if clientStream {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Status(http.StatusOK)
+		if err := util.StreamSSEPassthrough(resp.Body, c.Writer); err != nil {
+			p.log.Printf("responses stream error: %v", err)
+		}
+		return
+	}
+	body, _ := io.ReadAll(resp.Body)
+	c.Data(http.StatusOK, "application/json", body)
 }
 
 func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, c *gin.Context) {

@@ -56,3 +56,21 @@ func StreamSSE(src io.Reader, dst http.ResponseWriter) error {
 	}
 	return err
 }
+
+func StreamSSEPassthrough(src io.Reader, dst http.ResponseWriter) error {
+	flusher, _ := dst.(http.Flusher)
+	sawDone, err := IterDataLines(src, func(payload string) bool {
+		fmt.Fprintf(dst, "data: %s\n\n", payload)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return true
+	})
+	if sawDone {
+		fmt.Fprintf(dst, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	return err
+}

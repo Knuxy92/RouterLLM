@@ -1,0 +1,169 @@
+# =============================================================================
+# routerllm.yaml — RouterLLM configuration
+# =============================================================================
+# Copy this file to routerllm.yaml, edit your API keys, and run `routerllm`.
+#
+# API keys support ${VAR} syntax:
+#   - ${ENV_VAR_NAME} reads from environment variable
+#   - If the env var contains commas, it auto-splits into multiple keys
+#   - Also supports .env file (loaded automatically if present)
+# =============================================================================
+
+# --- Server settings ---------------------------------------------------------
+
+port: 1765                          # listen port (default: 1765)
+cooldown: 60s                       # key cooldown duration (default: 60s)
+                                    # when a key gets 401/402/403, it's
+                                    # skipped for this duration
+
+# --- Providers ---------------------------------------------------------------
+# List the upstream LLM providers you have API keys for.
+# Each known provider has built-in defaults for:
+#   style, base_url, headers, auth_mode
+# You only need to specify what you want to override.
+
+providers:
+
+  # agentrouter — primary provider, OpenAI-compatible, multi-key failover
+  - name: agentrouter
+    api_key: ${AGENT_ROUTER_API_KEY}        # single key or comma-separated in env
+    # api_key: [key1, key2, key3]           # or list multiple keys directly
+    # style: openai                         # (default: openai)
+    # base_url: https://agentrouter.org     # (default: https://agentrouter.org)
+    # headers:                              # extra headers merged with defaults
+    #   User-Agent: MyApp/1.0
+    # auth_mode: bearer                     # bearer | x-api-key | both (default: bearer)
+    # share: ""                             # shared key group name (optional)
+
+  # opencode — free models only, OpenAI-compatible
+  - name: opencode
+    api_key: ${OPENCODE_API_KEY}
+    # style: openai                         # (default: openai)
+    # base_url: https://opencode.ai/zen     # (default: https://opencode.ai/zen)
+    # headers:
+    #   Content-Type: application/json
+    # auth_mode: bearer
+
+  # alibaba — Qwen + Kimi models, OpenAI-compatible
+  - name: alibaba
+    api_key: ${ALIBABA_API_KEY}
+    # style: openai                         # (default: openai)
+    # base_url: https://your-region.maas.aliyuncs.com/compatible-mode
+    # headers:
+    #   Content-Type: application/json
+    # auth_mode: bearer
+
+  # freemodel-api — OpenAI-compatible (shares keys with freemodel-cc)
+  - name: freemodel-api
+    api_key: ${FREEMODEL_API_KEY}            # optionally multi-key
+    # style: openai                          # (default: openai)
+    # base_url: https://api.freemodel.dev    # (default)
+    # auth_mode: both                        # sends both Bearer + x-api-key
+    # share: freemodel                       # shares key cooldown state
+    # query: "?beta=true"                    # appended to every request URL
+
+  # freemodel-cc — Anthropic-compatible (shares keys with freemodel-api)
+  - name: freemodel-cc
+    api_key: ${FREEMODEL_API_KEY}
+    # style: anthropic                       # (default: anthropic — auto-translated)
+    # base_url: https://cc.freemodel.dev     # (default)
+    # auth_mode: both
+    # share: freemodel                       # same share group = same key pool
+    # query: "?beta=true"
+
+  # aerolink — Anthropic-compatible fallback for Claude models
+  - name: aerolink
+    api_key: ${AEROLINK_API_KEY}
+    # style: anthropic                       # (default: anthropic)
+    # base_url: https://capi.aerolink.lat    # (default)
+    # headers:
+    #   Content-Type: application/json
+    #   anthropic-version: 2023-06-01
+    # auth_mode: x-api-key                   # sends x-api-key header
+    # api_key: [key1, key2, key3]            # multi-key example
+
+  # forge — OpenAI-compatible fallback gateway
+  - name: forge
+    api_key: ${FORGE_API_KEY}
+    # style: openai                          # (default: openai)
+    # base_url: https://forge-gateway-api.fly.dev  # (default)
+    # headers:
+    #   Content-Type: application/json
+    # auth_mode: bearer
+
+# --- Custom provider example (name not in built-in defaults) -----------------
+# If you add a provider name that RouterLLM doesn't know, you must specify
+# style and base_url at minimum:
+
+  # - name: my-custom-provider
+  #   api_key: ${MY_CUSTOM_KEY}
+  #   style: openai                          # required for unknown providers
+  #   base_url: https://api.myprovider.com   # required for unknown providers
+  #   auth_mode: bearer
+  #   headers:
+  #     Content-Type: application/json
+  #     X-Custom: value
+
+# --- Routes ------------------------------------------------------------------
+# Model routing rules: maps a model name → list of upstream routes.
+# Routes are tried in order until one succeeds.
+#
+# If the entire `routes:` section is omitted, built-in defaults are used
+# (see internal/routing/defaults.go for the full list).
+
+# routes:
+
+#   # Single provider, no defaults
+#   - model: my-model
+#     routes:
+#       - provider: forge
+#         model: gpt-4                        # upstream model name
+
+#   # Multiple fallback providers (tried in order)
+#   - model: claude-opus-4-8
+#     routes:
+#       - provider: freemodel-cc
+#         model: claude-opus-4-8
+#         defaults:
+#           thinking_budget: 32000            # thinking tokens for Anthropic
+#       - provider: aerolink
+#         model: claude-opus-4-8
+
+#   # With reasoning effort (OpenAI-style)
+#   - model: gpt-5.5
+#     routes:
+#       - provider: freemodel-api
+#         model: gpt-5.5
+#         defaults:
+#           reasoning_effort: high            # low | medium | high
+#       - provider: forge
+#         model: gpt-5.5
+
+#   # Enable thinking on Qwen models (Alibaba)
+#   - model: qwen3.7-max
+#     routes:
+#       - provider: alibaba
+#         model: qwen3.7-max
+#         defaults:
+#           enable_thinking: true
+
+#   # Free model, single provider
+#   - model: deepseek-v4-flash-free
+#     routes:
+#       - provider: opencode
+#         model: deepseek-v4-flash-free
+#         defaults:
+#           thinking_budget: 8192
+
+# --- Route spec reference ----------------------------------------------------
+# Each entry under `routes:` supports:
+#
+#   model: string                           # REQUIRED — model name clients use
+#
+#   routes:                                 # REQUIRED — list of upstream targets
+#     - provider: string                    # REQUIRED — must match a provider name above
+#       model: string                       # OPTIONAL — upstream model name (defaults to model)
+#       defaults:                           # OPTIONAL — request defaults
+#         reasoning_effort: string          # "low" | "medium" | "high"
+#         enable_thinking: bool             # true | false (Qwen-style)
+#         thinking_budget: int              # max thinking tokens (Anthropic-style)

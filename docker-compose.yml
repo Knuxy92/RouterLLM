@@ -1,11 +1,10 @@
 services:
-  agentrouter:
+  routerllm:
     build: .
-    image: agentrouter:latest
-    container_name: agentrouter
+    image: routerllm:latest
+    container_name: routerllm
     ports:
-      - "${AGENTROUTER_PORT:-1765}:${AGENTROUTER_PORT:-8000}"
+      - "${ROUTERLLM_PORT:-1765}:${ROUTERLLM_PORT:-1765}"
     volumes:
-      - ./.env:/app/.env:ro
+      - ./routerllm.yaml:/app/routerllm.yaml:ro
     restart: unless-stopped
-
