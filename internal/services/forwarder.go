@@ -5,8 +5,8 @@ import (
 	"io"
 	"sort"
 
-	"agentrouter/internal/model"
-	"agentrouter/internal/util"
+	"routerllm/internal/model"
+	"routerllm/internal/util"
 )
 
 func bufferStream(body io.Reader) *model.ChatCompletionResponse {

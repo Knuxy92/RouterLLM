@@ -3,7 +3,7 @@ package routers
 import (
 	"net/http"
 
-	"agentrouter/internal/handlers"
+	"routerllm/internal/handlers"
 
 	"github.com/gin-gonic/gin"
 )

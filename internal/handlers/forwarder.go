@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"agentrouter/internal/model"
-	"agentrouter/internal/services"
+	"routerllm/internal/model"
+	"routerllm/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +33,7 @@ func (h *Handlers) Models(c *gin.Context) {
 			ID:      id,
 			Object:  "model",
 			Created: 1710000000,
-			OwnedBy: "agentrouter",
+			OwnedBy: "RouterLLM",
 		})
 	}
 	c.JSON(http.StatusOK, model.ModelList{Object: "list", Data: data})

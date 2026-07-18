@@ -9,27 +9,37 @@ import (
 	"syscall"
 	"time"
 
-	"agentrouter/internal/config"
-	"agentrouter/internal/handlers"
-	"agentrouter/internal/provider"
-	"agentrouter/internal/routers"
-	"agentrouter/internal/services"
-	"agentrouter/internal/util"
+	"routerllm/internal/config"
+	"routerllm/internal/handlers"
+	"routerllm/internal/provider"
+	"routerllm/internal/routers"
+	"routerllm/internal/routing"
+	"routerllm/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	_ = util.LoadDotenv(".env")
-
-	cfg := config.Load()
 	logger := log.New(os.Stdout, "", log.LstdFlags)
+	cfg := config.Load()
 
 	if len(cfg.Providers) == 0 {
-		logger.Fatal("no providers configured (set AGENT_ROUTER_API_KEY, OPENCODE_API_KEY, ALIBABA_API_KEY, or FREEMODEL_API_KEY)")
+		logger.Fatal("no providers configured — create routerllm.yaml or set env vars")
 	}
 
-	registry := provider.NewRegistry(cfg.Providers, cfg.Cooldown)
+	rules := cfg.Routes
+	if rules == nil {
+		var err error
+		rules, err = loadRoutesFile(cfg.RoutesFile)
+		if err != nil {
+			rules = routing.DefaultRules()
+			logger.Printf("using default routes (%d rules)", len(rules))
+		} else {
+			logger.Printf("loaded %d route rules from %s", len(rules), cfg.RoutesFile)
+		}
+	}
+
+	registry := provider.NewRegistry(cfg.Providers, rules, cfg.Cooldown)
 	proxy := services.NewProxy(registry, cfg.Client, logger)
 	logger.Printf("loaded %d provider(s), %d model(s)", len(cfg.Providers), len(registry.AllModels()))
 
@@ -60,4 +70,15 @@ func main() {
 		logger.Fatal("server forced to shutdown:", err)
 	}
 	logger.Println("server stopped")
+}
+
+func loadRoutesFile(path string) ([]routing.Rule, error) {
+	if path == "" {
+		return nil, os.ErrNotExist
+	}
+	rc, err := routing.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return rc.Routes, nil
 }

@@ -1,5 +1,5 @@
 # Binaries
-agentrouter
+/routerllm
 api
 *.exe
 *.exe~
@@ -8,6 +8,7 @@ api
 
 # Environment
 .env
+routerllm.yaml
 
 # IDE / OS
 .idea/

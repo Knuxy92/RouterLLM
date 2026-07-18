@@ -5,12 +5,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /out/agentrouter ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /out/routerllm ./cmd/routerllm
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
-COPY --from=builder /out/agentrouter .
+COPY --from=builder /out/routerllm .
 EXPOSE 1765
 USER 65532:65532
-ENTRYPOINT ["./agentrouter"]
+ENTRYPOINT ["./routerllm"]

@@ -1,10 +1,15 @@
 package config
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"routerllm/internal/routing"
+	"routerllm/internal/util"
 )
 
 type ProviderConfig struct {
@@ -19,14 +24,30 @@ type ProviderConfig struct {
 }
 
 type Config struct {
-	Port      string
-	Cooldown  time.Duration
-	Providers []ProviderConfig
-	Client    *http.Client
+	Port       string
+	Cooldown   time.Duration
+	RoutesFile string
+	Providers  []ProviderConfig
+	Client     *http.Client
+	Routes     []routing.Rule
 }
 
 func Load() *Config {
-	port := os.Getenv("AGENTROUTER_PORT")
+	_ = util.LoadDotenv(".env")
+
+	configFile := os.Getenv("ROUTERLLM_CONFIG_FILE")
+	if configFile == "" {
+		configFile = "routerllm.yaml"
+	}
+	if cfg, err := loadYAML(configFile); err == nil {
+		return cfg
+	}
+
+	return loadEnv()
+}
+
+func loadEnv() *Config {
+	port := os.Getenv("ROUTERLLM_PORT")
 	if port == "" {
 		port = "1765"
 	}
@@ -36,6 +57,16 @@ func Load() *Config {
 		if d, err := time.ParseDuration(v); err == nil {
 			cooldown = d
 		}
+	}
+
+	routesFile := os.Getenv("ROUTERLLM_ROUTES_FILE")
+	if routesFile == "" {
+		routesFile = "routes.json"
+	}
+
+	keysOverrideFile := os.Getenv("ROUTERLLM_KEYS_OVERRIDE_FILE")
+	if keysOverrideFile == "" {
+		keysOverrideFile = "keys.override.json"
 	}
 
 	var providers []ProviderConfig
@@ -119,7 +150,17 @@ func Load() *Config {
 		})
 	}
 
-	transport := &http.Transport{
+	client := &http.Client{Transport: newTransport()}
+
+	if err := applyKeyOverrides(keysOverrideFile, providers); err != nil {
+		log.Printf("warning: failed to apply key overrides from %s: %v", keysOverrideFile, err)
+	}
+
+	return &Config{Port: port, Cooldown: cooldown, RoutesFile: routesFile, Providers: providers, Client: client}
+}
+
+func newTransport() *http.Transport {
+	return &http.Transport{
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
@@ -127,9 +168,30 @@ func Load() *Config {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	client := &http.Client{Transport: transport}
+}
 
-	return &Config{Port: port, Cooldown: cooldown, Providers: providers, Client: client}
+func applyKeyOverrides(path string, providers []ProviderConfig) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var overrides map[string][]string
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return err
+	}
+	for i := range providers {
+		key := providers[i].ShareKeys
+		if key == "" {
+			key = providers[i].Name
+		}
+		if ks, ok := overrides[key]; ok {
+			providers[i].Keys = ks
+		}
+	}
+	return nil
 }
 
 func envOr(key, def string) string {
