@@ -17,7 +17,16 @@ import (
 )
 
 func main() {
-	logger := log.New(os.Stdout, "", log.LstdFlags)
+	logOut := os.Stdout
+	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {
+		f, err := os.OpenFile(lf, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			log.Fatalf("failed to open log file %s: %v", lf, err)
+		}
+		defer f.Close()
+		logOut = f
+	}
+	logger := log.New(logOut, "", log.LstdFlags)
 	cfg := config.Load()
 	if cfg == nil {
 		logger.Fatal("no config found — create routerllm.yaml")
@@ -26,8 +35,9 @@ func main() {
 		logger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
 	}
 
+	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
-	proxy := services.NewProxy(registry, cfg.Client, logger)
+	proxy := services.NewProxy(registry, cfg.Client, logger, debug)
 	logger.Printf("loaded %d provider(s), %d model(s)", len(cfg.Providers), len(registry.AllModels()))
 
 	h := handlers.New(proxy, registry.AllModels())
