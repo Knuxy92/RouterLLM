@@ -55,6 +55,21 @@ func (m *Manager) MarkDead(value string) {
 	}
 }
 
+func (m *Manager) LiveKey() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for _, e := range m.entries {
+		if !e.deadUntil.After(now) {
+			return e.value
+		}
+	}
+	if len(m.entries) > 0 {
+		return m.entries[0].value
+	}
+	return ""
+}
+
 func (m *Manager) AliveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -8,3 +8,5 @@ services:
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:ro
     restart: unless-stopped
+    env_file:
+      - .env
