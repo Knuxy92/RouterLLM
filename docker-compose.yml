@@ -7,6 +7,7 @@ services:
       - "${ROUTERLLM_PORT:-1765}:${ROUTERLLM_PORT:-1765}"
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:ro
+      - ./system_prompt.txt:/app/system_prompt.txt:ro
     restart: unless-stopped
     env_file:
       - .env

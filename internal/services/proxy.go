@@ -28,15 +28,16 @@ var transientStatuses = map[int]bool{
 }
 
 type Proxy struct {
-	registry    *provider.Registry
-	client      *http.Client
-	log         *log.Logger
-	debug       bool
-	forceStream bool
+	registry     *provider.Registry
+	client       *http.Client
+	log          *log.Logger
+	debug        bool
+	forceStream  bool
+	systemPrompt string
 }
 
-func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, forceStream bool) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug, forceStream: forceStream}
+func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, forceStream bool, systemPrompt string) *Proxy {
+	return &Proxy{registry: reg, client: client, log: log, debug: debug, forceStream: forceStream, systemPrompt: systemPrompt}
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
@@ -51,6 +52,9 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	p.injectSystemPrompt(body)
+
 	if path == "/v1/responses" {
 		body["stream"] = clientStream
 	}
@@ -629,4 +633,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(data)
+}
+
+func (p *Proxy) injectSystemPrompt(body map[string]any) {
+	if p.systemPrompt == "" {
+		return
+	}
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		return
+	}
+	sysMsg := map[string]any{"role": "system", "content": p.systemPrompt}
+	body["messages"] = append([]any{sysMsg}, msgs...)
+	if p.debug {
+		p.log.Printf("injected system prompt: len=%d chars, messages=%d", len(p.systemPrompt), len(body["messages"].([]any)))
+	}
 }
