@@ -17,6 +17,7 @@
 port: 1765                          # listen port (default: 1765)
 cooldown: 60s                       # key cooldown duration (default: 60s)
 force_stream: false                 # force Anthropic SSE format on all responses (default: false)
+system_prompt_file: system_prompt.txt  # prepend this file's content as a system message (default: none)
                                     # when a key gets 401/402/403, it's
                                     # skipped for this duration
 

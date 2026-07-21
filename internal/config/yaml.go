@@ -23,11 +23,12 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type yamlConfig struct {
-	Port        string         `yaml:"port,omitempty"`
-	Cooldown    string         `yaml:"cooldown,omitempty"`
-	ForceStream bool           `yaml:"force_stream,omitempty"`
-	Providers   []yamlProvider `yaml:"providers"`
-	Routes      []model.Rule   `yaml:"routes,omitempty"`
+	Port             string         `yaml:"port,omitempty"`
+	Cooldown         string         `yaml:"cooldown,omitempty"`
+	ForceStream      bool           `yaml:"force_stream,omitempty"`
+	SystemPromptFile string         `yaml:"system_prompt_file,omitempty"`
+	Providers        []yamlProvider `yaml:"providers"`
+	Routes           []model.Rule   `yaml:"routes,omitempty"`
 }
 
 type yamlProvider struct {
@@ -68,6 +69,14 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		}
 	}
 
+	var systemPrompt string
+	if yc.SystemPromptFile != "" {
+		data, err := os.ReadFile(yc.SystemPromptFile)
+		if err == nil {
+			systemPrompt = strings.TrimSpace(string(data))
+		}
+	}
+
 	var providers []ProviderConfig
 	for _, yp := range yc.Providers {
 		p := ProviderConfig{
@@ -97,12 +106,13 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 	client := &http.Client{Transport: newTransport()}
 
 	return &Config{
-		Port:        port,
-		Cooldown:    cooldown,
-		ForceStream: yc.ForceStream,
-		Providers:   providers,
-		Client:      client,
-		Routes:      yc.Routes,
+		Port:          port,
+		Cooldown:      cooldown,
+		ForceStream:   yc.ForceStream,
+		SystemPrompt:  systemPrompt,
+		Providers:     providers,
+		Client:        client,
+		Routes:        yc.Routes,
 	}, nil
 }
 

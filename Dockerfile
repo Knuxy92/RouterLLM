@@ -11,6 +11,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /out/routerllm .
+
 EXPOSE 1765
 USER 65532:65532
 ENTRYPOINT ["./routerllm"]

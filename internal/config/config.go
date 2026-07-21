@@ -22,12 +22,13 @@ type ProviderConfig struct {
 }
 
 type Config struct {
-	Port        string
-	Cooldown    time.Duration
-	ForceStream bool
-	Providers   []ProviderConfig
-	Client      *http.Client
-	Routes      []model.Rule
+	Port          string
+	Cooldown      time.Duration
+	ForceStream   bool
+	SystemPrompt  string
+	Providers     []ProviderConfig
+	Client        *http.Client
+	Routes        []model.Rule
 }
 
 func Load() *Config {
