@@ -7,14 +7,14 @@ import (
 )
 
 type OpenAIToAnthropicResponse struct {
-	ID            string                    `json:"id"`
-	Type          string                    `json:"type"`
-	Role          string                    `json:"role"`
-	Content       []OpenAIToAnthropicBlock  `json:"content"`
-	Model         string                    `json:"model"`
-	StopReason    *string                   `json:"stop_reason"`
-	StopSequence  *string                   `json:"stop_sequence"`
-	Usage         *OpenAIToAnthropicUsage   `json:"usage,omitempty"`
+	ID           string                   `json:"id"`
+	Type         string                   `json:"type"`
+	Role         string                   `json:"role"`
+	Content      []OpenAIToAnthropicBlock `json:"content"`
+	Model        string                   `json:"model"`
+	StopReason   *string                  `json:"stop_reason"`
+	StopSequence *string                  `json:"stop_sequence"`
+	Usage        *OpenAIToAnthropicUsage  `json:"usage,omitempty"`
 }
 
 type OpenAIToAnthropicBlock struct {
@@ -34,20 +34,90 @@ func AnthropicRequestToOpenAI(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	system, _ := body["system"].(string)
-	delete(body, "system")
+	var systemParts []string
 
-	if system != "" {
-		msgs, _ := body["messages"].([]any)
-		all := make([]any, 0, len(msgs)+1)
-		all = append(all, map[string]any{"role": "system", "content": system})
-		all = append(all, msgs...)
-		body["messages"] = all
+	if sys, ok := body["system"]; ok {
+		switch v := sys.(type) {
+		case []any:
+			for _, item := range v {
+				if block, ok := item.(map[string]any); ok {
+					if text, _ := block["text"].(string); text != "" {
+						systemParts = append(systemParts, text)
+					}
+				}
+			}
+		case string:
+			if v != "" {
+				systemParts = append(systemParts, v)
+			}
+		}
+		delete(body, "system")
 	}
 
-	delete(body, "stream")
+	var cleanMsgs []any
+	if msgs, ok := body["messages"].([]any); ok {
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			role, _ := msg["role"].(string)
+			if role == "system" {
+				systemParts = append(systemParts, flattenContent(msg["content"]))
+				continue
+			}
+			msg["content"] = flattenContent(msg["content"])
+			stripCacheControl(msg)
+			cleanMsgs = append(cleanMsgs, msg)
+		}
+	}
+
+	if len(systemParts) > 0 {
+		cleanMsgs = append([]any{
+			map[string]any{
+				"role":    "system",
+				"content": strings.Join(systemParts, "\n\n"),
+			},
+		}, cleanMsgs...)
+	}
+	body["messages"] = cleanMsgs
+
+	for _, key := range []string{"tools", "metadata"} {
+		delete(body, key)
+	}
 
 	return json.Marshal(body)
+}
+
+func flattenContent(content any) string {
+	if content == nil {
+		return ""
+	}
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		var parts []string
+		for _, block := range v {
+			if m, ok := block.(map[string]any); ok {
+				if text, _ := m["text"].(string); text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "")
+	}
+	return ""
+}
+
+func stripCacheControl(msg map[string]any) {
+	if content, ok := msg["content"].([]any); ok {
+		for _, block := range content {
+			if m, ok := block.(map[string]any); ok {
+				delete(m, "cache_control")
+			}
+		}
+	}
 }
 
 func OpenAIResponseToAnthropic(raw []byte) ([]byte, error) {
@@ -57,22 +127,23 @@ func OpenAIResponseToAnthropic(raw []byte) ([]byte, error) {
 		Created int64  `json:"created"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index        int                    `json:"index"`
-			Message      map[string]any         `json:"message"`
-			FinishReason string                 `json:"finish_reason"`
+			Index        int            `json:"index"`
+			Message      map[string]any `json:"message"`
+			FinishReason string         `json:"finish_reason"`
 		} `json:"choices"`
 		Usage json.RawMessage `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &openai); err != nil {
 		return nil, err
 	}
+
 	if len(openai.Choices) == 0 {
 		return json.Marshal(OpenAIToAnthropicResponse{
-			ID:   openai.ID,
-			Type: "message",
-			Role: "assistant",
+			ID:      openai.ID,
+			Type:    "message",
+			Role:    "assistant",
 			Content: []OpenAIToAnthropicBlock{},
-			Model: openai.Model,
+			Model:   openai.Model,
 		})
 	}
 
@@ -91,7 +162,7 @@ func OpenAIResponseToAnthropic(raw []byte) ([]byte, error) {
 		blocks = []OpenAIToAnthropicBlock{}
 	}
 
-	sr := mapStopReasonReverse(openai.Choices[0].FinishReason)
+	sr := MapStopReasonReverse(openai.Choices[0].FinishReason)
 
 	var usage *OpenAIToAnthropicUsage
 	if openai.Usage != nil {
@@ -121,7 +192,7 @@ func OpenAIResponseToAnthropic(raw []byte) ([]byte, error) {
 	return json.Marshal(result)
 }
 
-func mapStopReasonReverse(reason string) string {
+func MapStopReasonReverse(reason string) string {
 	switch reason {
 	case "length":
 		return "max_tokens"
@@ -149,9 +220,11 @@ func OpenAIStreamToAnthropicSSE(raw []byte, modelName string) []byte {
 	if err := json.Unmarshal(raw, &chunk); err != nil {
 		return raw
 	}
+
 	if len(chunk.Choices) == 0 {
 		return raw
 	}
+
 	delta := chunk.Choices[0].Delta
 	role, _ := delta["role"].(string)
 	content, _ := delta["content"].(string)
@@ -176,7 +249,7 @@ func OpenAIStreamToAnthropicSSE(raw []byte, modelName string) []byte {
 
 	if content != "" {
 		evt, _ := json.Marshal(map[string]any{
-			"type": "content_block_delta",
+			"type":  "content_block_delta",
 			"index": 0,
 			"delta": map[string]string{
 				"type": "text_delta",
@@ -187,7 +260,7 @@ func OpenAIStreamToAnthropicSSE(raw []byte, modelName string) []byte {
 	}
 	if reasoning != "" {
 		evt, _ := json.Marshal(map[string]any{
-			"type": "content_block_delta",
+			"type":  "content_block_delta",
 			"index": 0,
 			"delta": map[string]string{
 				"type":     "thinking_delta",
@@ -197,7 +270,7 @@ func OpenAIStreamToAnthropicSSE(raw []byte, modelName string) []byte {
 		events = append(events, fmt.Sprintf("data: %s\n\n", evt))
 	}
 	if fr != nil {
-		sr := mapStopReasonReverse(*fr)
+		sr := MapStopReasonReverse(*fr)
 		evt, _ := json.Marshal(map[string]any{
 			"type": "message_delta",
 			"delta": map[string]any{
