@@ -1,7 +1,8 @@
 # Binaries
 /routerllm
 /routerlm
-api
+/api
+/anthropic-capture
 *.exe
 *.exe~
 *.test
@@ -10,6 +11,10 @@ api
 # Environment
 .env
 routerllm.yaml
+
+# Captures / logs
+capture.txt
+*.capture.txt
 
 # IDE / OS
 .idea/
