@@ -37,7 +37,7 @@ func main() {
 
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
-	proxy := services.NewProxy(registry, cfg.Client, logger, debug)
+	proxy := services.NewProxy(registry, cfg.Client, logger, debug, cfg.ForceStream)
 	logger.Printf("loaded %d provider(s), %d model(s)", len(cfg.Providers), len(registry.AllModels()))
 
 	h := handlers.New(proxy, registry.AllModels())

@@ -18,6 +18,12 @@ type Handlers struct {
 	models []string
 }
 
+type captureWriter struct {
+	header http.Header
+	buf    bytes.Buffer
+	code   int
+}
+
 func New(proxy *services.Proxy, models []string) *Handlers {
 	return &Handlers{proxy: proxy, models: models}
 }
@@ -74,6 +80,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 				}
 				return false
 			}
+
 			translated := adapter.OpenAIStreamToAnthropicSSE([]byte(payload), modelVal)
 			w.Write(translated)
 			if f, ok := w.(http.Flusher); ok {
@@ -103,15 +110,17 @@ func extractModel(raw []byte) string {
 	return v.Model
 }
 
-type captureWriter struct {
-	header http.Header
-	buf    bytes.Buffer
-	code   int
+func (w *captureWriter) Header() http.Header {
+	return w.header
 }
 
-func (w *captureWriter) Header() http.Header { return w.header }
-func (w *captureWriter) Write(b []byte) (int, error) { return w.buf.Write(b) }
-func (w *captureWriter) WriteHeader(code int) { w.code = code }
+func (w *captureWriter) Write(b []byte) (int, error) {
+	return w.buf.Write(b)
+}
+
+func (w *captureWriter) WriteHeader(code int) {
+	w.code = code
+}
 
 func (h *Handlers) Embeddings(w http.ResponseWriter, r *http.Request) {
 	h.proxy.Passthrough("/v1/embeddings", w, r)

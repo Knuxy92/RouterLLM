@@ -28,14 +28,15 @@ var transientStatuses = map[int]bool{
 }
 
 type Proxy struct {
-	registry *provider.Registry
-	client   *http.Client
-	log      *log.Logger
-	debug    bool
+	registry    *provider.Registry
+	client      *http.Client
+	log         *log.Logger
+	debug       bool
+	forceStream bool
 }
 
-func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug}
+func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, forceStream bool) *Proxy {
+	return &Proxy{registry: reg, client: client, log: log, debug: debug, forceStream: forceStream}
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
@@ -44,6 +45,7 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	body, clientStream, err := parseAndForceStream(raw)
 	if err != nil {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
@@ -122,6 +124,11 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 
 		p.log.Printf("serving %s via %s: %s", path, pv.Name, respSummary(resp))
 
+		if p.forceStream && path == "/v1/chat/completions" {
+			p.serveForceStream(resp, route.ModelName, pv.Style, w)
+			return
+		}
+
 		if pv.Style == "anthropic" {
 			p.serveAnthropic(resp, clientStream, route.ModelName, w)
 		} else if path == "/v1/responses" {
@@ -148,6 +155,7 @@ func parseAndForceStream(raw []byte) (map[string]any, bool, error) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, false, err
 	}
+
 	clientStream, _ := body["stream"].(bool)
 	body["stream"] = true
 	return body, clientStream, nil
@@ -167,11 +175,23 @@ func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 			body["reasoning_effort"] = defaults.ReasoningEffort
 		}
 	}
+
 	if defaults.EnableThinking != nil {
-		if _, ok := body["enable_thinking"]; !ok {
-			body["enable_thinking"] = *defaults.EnableThinking
+		if *defaults.EnableThinking {
+			if _, ok := body["enable_thinking"]; !ok {
+				body["thinking"] = map[string]string{
+					"type": "enabled",
+				}
+			}
+		} else {
+			delete(body, "thinking")
+			if _, ok := body["enable_thinking"]; !ok {
+				body["enable_thinking"] = false
+			}
+			return
 		}
 	}
+
 	if defaults.ThinkingBudget > 0 {
 		if _, ok := body["thinking"]; !ok {
 			body["thinking"] = map[string]any{
@@ -324,12 +344,27 @@ func (p *Proxy) tryKeysMethod(pv *provider.Provider, method, path string, reqBod
 	return p.tryKeys(pv, method, path, reqBody, r)
 }
 
+func copyHeaders(w http.ResponseWriter, resp *http.Response) {
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+}
+
+func writeStreamHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+}
+
 func (p *Proxy) Passthrough(path string, w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	var body map[string]any
 	_ = json.Unmarshal(raw, &body)
 	modelName, _ := body["model"].(string)
@@ -338,6 +373,7 @@ func (p *Proxy) Passthrough(path string, w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("model %q not found", modelName), http.StatusNotFound)
 		return
 	}
+
 	for _, route := range routes {
 		pv := route.Provider
 		var reqBody []byte
@@ -356,17 +392,15 @@ func (p *Proxy) Passthrough(path string, w http.ResponseWriter, r *http.Request)
 		if resp == nil {
 			continue
 		}
+
 		p.log.Printf("served %s via %s: %s", path, route.Provider.Name, respSummary(resp))
-		for k, vv := range resp.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
+		copyHeaders(w, resp)
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 		resp.Body.Close()
 		return
 	}
+
 	http.Error(w, fmt.Sprintf("all providers exhausted for model %q", modelName), http.StatusBadGateway)
 }
 
@@ -377,13 +411,14 @@ func (p *Proxy) PassthroughMultipart(path string, w http.ResponseWriter, r *http
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Extract model from multipart without consuming the reader
+
 	modelName := r.FormValue("model")
 	routes := p.registry.Routes(modelName)
 	if len(routes) == 0 {
 		http.Error(w, fmt.Sprintf("model %q not found", modelName), http.StatusNotFound)
 		return
 	}
+
 	for _, route := range routes {
 		pv := route.Provider
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(raw))
@@ -405,51 +440,48 @@ func (p *Proxy) PassthroughMultipart(path string, w http.ResponseWriter, r *http
 		default:
 			req.Header.Set("Authorization", "Bearer "+pv.Keys.LiveKey())
 		}
+
 		resp, doErr := p.client.Do(req)
 		if doErr != nil {
 			p.log.Printf("proxy error via %s: %v", pv.Name, doErr)
 			continue
 		}
+
 		p.log.Printf("served %s via %s: %s", path, pv.Name, respSummary(resp))
-		for k, vv := range resp.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
+		copyHeaders(w, resp)
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 		resp.Body.Close()
 		return
 	}
+
 	http.Error(w, fmt.Sprintf("all providers exhausted for model %q", modelName), http.StatusBadGateway)
 }
 
 func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter) {
 	if clientStream {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
 		if err := util.StreamSSE(resp.Body, w, true); err != nil {
 			log.Printf("stream error: %v", err)
 		}
 		return
 	}
+
 	result := bufferStream(resp.Body)
 	writeJSON(w, http.StatusOK, result)
 }
 
 func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter) {
 	if clientStream {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
 		if err := util.StreamSSE(resp.Body, w, false); err != nil {
 			log.Printf("responses stream error: %v", err)
 		}
 		return
 	}
+
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -458,9 +490,7 @@ func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWrite
 
 func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
 	if clientStream {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
 		if err := adapter.StreamAnthropicToOpenAI(resp.Body, w, modelName); err != nil {
 			p.log.Printf("anthropic stream error: %v", err)
@@ -483,6 +513,7 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
 	finish := make(map[int]string)
+
 	var usage json.RawMessage
 	var resultID, modelName, systemFP string
 	var created int64
@@ -564,6 +595,33 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 		Choices:           choices,
 		Usage:             usage,
 	}
+}
+
+func (p *Proxy) serveForceStream(resp *http.Response, modelName, style string, w http.ResponseWriter) {
+	writeStreamHeaders(w)
+	w.WriteHeader(http.StatusOK)
+
+	if style == "anthropic" {
+		// Anthropic upstream → passthrough SSE with flush
+		flusher, _ := w.(http.Flusher)
+		buf := make([]byte, 4096)
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				w.Write(buf[:n])
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		return
+	}
+
+	// OpenAI upstream → convert to Anthropic SSE
+	adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

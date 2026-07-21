@@ -61,3 +61,39 @@ All provider fields (style, base_url, headers, auth_mode, share, query) must be 
 - **No hot-reload yet**: config is read at startup. Restart the server to apply changes.
 - **`routerllm.exe` binary in root is gitignored build artifact** — delete freely.
 - `memory-bank/` is gitignored (Cline memory bank, not part of the app).
+
+## Code style
+
+### Router
+Uses `go-chi/chi/v5` — not `http.ServeMux`. Route through `r.Group`, `r.Route`, `r.Use`. Middleware chaining via `r.Use(chimw.Logger, chimw.Recoverer, ...)`.
+
+### Blank lines
+- **Between declarations of different types**: separate with a blank line
+  ```go
+  finish := make(map[int]string)
+
+  var usage json.RawMessage
+  var resultID, modelName string
+  ```
+- **Before `return`**: if preceded by a multi-line block, insert a blank line
+  ```go
+  	}
+  
+  	return
+  ```
+- **After `if` block ending with `return`**: insert a blank line before the next statement
+  ```go
+  if err != nil {
+  	http.Error(w, "...", http.StatusBadRequest)
+  	return
+  }
+
+  body, clientStream, err := ...
+  ```
+
+### Extract reusable code
+Patterns appearing ≥2 times → extract to a helper function (e.g. `writeStreamHeaders`, `copyHeaders`).
+
+### if/else
+Short single-line branches can stay compact. Multi-line branches get a blank line after the closing `}` from the preceding branch.
+

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -57,9 +58,8 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 		}
 		if budget > 0 {
 			clampedThinking := make(map[string]any, len(thinking))
-			for k, v := range thinking {
-				clampedThinking[k] = v
-			}
+			maps.Copy(clampedThinking, thinking)
+
 			clampedThinking["budget_tokens"] = budget
 			req["thinking"] = clampedThinking
 		} else if !hasBudget {
@@ -120,6 +120,7 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	}
+
 	_, err := util.IterDataLines(src, func(payload string) bool {
 		var event struct {
 			Type    string `json:"type"`
@@ -322,4 +323,142 @@ func mapStopReason(reason string) string {
 	default:
 		return "stop"
 	}
+}
+
+type anthropicSSEState struct {
+	msgID          string
+	sentFirstChunk bool
+	blockStarted   bool
+	prevBlockType  string
+}
+
+// StreamOpenAIToAnthropicSSE reads OpenAI SSE chunks from src and writes
+// proper Anthropic SSE events (with event: prefix) to dst.
+func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) {
+	flusher, _ := dst.(http.Flusher)
+	var st anthropicSSEState
+
+	writeSSE := func(event string, data any) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(dst, "event: %s\ndata: %s\n\n", event, b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	_, _ = util.IterDataLines(src, func(payload string) bool {
+		var chunk struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Model   string `json:"model"`
+			Choices []struct {
+				Index        int            `json:"index"`
+				Delta        map[string]any `json:"delta"`
+				FinishReason *string        `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return true
+		}
+		if len(chunk.Choices) == 0 {
+			return true
+		}
+		if st.msgID == "" && chunk.ID != "" {
+			st.msgID = chunk.ID
+		}
+
+		delta := chunk.Choices[0].Delta
+		role, _ := delta["role"].(string)
+		content, _ := delta["content"].(string)
+		reasoning, _ := delta["reasoning_content"].(string)
+		fr := chunk.Choices[0].FinishReason
+
+		blockType := "text"
+		if reasoning != "" {
+			blockType = "thinking"
+		}
+
+		if role == "assistant" && !st.sentFirstChunk {
+			st.sentFirstChunk = true
+			writeSSE("message_start", map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id":      st.msgID,
+					"type":    "message",
+					"role":    "assistant",
+					"content": []any{},
+					"model":   modelName,
+				},
+			})
+		}
+
+		if !st.sentFirstChunk {
+			return true
+		}
+
+		// finish_reason on first chunk with no content
+		if fr != nil && !st.blockStarted && content == "" && reasoning == "" {
+			writeSSE("content_block_start", map[string]any{
+				"type": "content_block_start", "index": 0,
+				"content_block": map[string]any{"type": "text", "text": ""},
+			})
+			writeSSE("content_block_stop", map[string]any{
+				"type": "content_block_stop", "index": 0,
+			})
+			writeSSE("message_delta", map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{"stop_reason": MapStopReasonReverse(*fr), "stop_sequence": nil},
+			})
+			writeSSE("message_stop", map[string]any{"type": "message_stop"})
+			return false
+		}
+
+		if st.blockStarted && st.prevBlockType != blockType {
+			writeSSE("content_block_stop", map[string]any{
+				"type": "content_block_stop", "index": 0,
+			})
+			st.blockStarted = false
+		}
+
+		if (content != "" || reasoning != "") && !st.blockStarted {
+			st.blockStarted = true
+			st.prevBlockType = blockType
+			cb := map[string]any{"type": "text", "text": ""}
+			if blockType == "thinking" {
+				cb = map[string]any{"type": "thinking", "thinking": ""}
+			}
+			writeSSE("content_block_start", map[string]any{
+				"type": "content_block_start", "index": 0,
+				"content_block": cb,
+			})
+		}
+
+		if reasoning != "" {
+			writeSSE("content_block_delta", map[string]any{
+				"type": "content_block_delta", "index": 0,
+				"delta": map[string]string{"type": "thinking_delta", "thinking": reasoning},
+			})
+		}
+		if content != "" {
+			writeSSE("content_block_delta", map[string]any{
+				"type": "content_block_delta", "index": 0,
+				"delta": map[string]string{"type": "text_delta", "text": content},
+			})
+		}
+
+		if fr != nil {
+			if st.blockStarted {
+				writeSSE("content_block_stop", map[string]any{
+					"type": "content_block_stop", "index": 0,
+				})
+			}
+			writeSSE("message_delta", map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{"stop_reason": MapStopReasonReverse(*fr), "stop_sequence": nil},
+			})
+			writeSSE("message_stop", map[string]any{"type": "message_stop"})
+			return false
+		}
+		return true
+	})
 }

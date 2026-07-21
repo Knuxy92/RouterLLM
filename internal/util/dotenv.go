@@ -19,12 +19,10 @@ func LoadDotenv(path string) error {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		eq := strings.Index(line, "=")
-		if eq < 0 {
+		key, val, found := strings.Cut(line, "=")
+		if !found {
 			continue
 		}
-		key := strings.TrimSpace(line[:eq])
-		val := strings.TrimSpace(line[eq+1:])
 		val = strings.Trim(val, `"'`)
 		if _, ok := os.LookupEnv(key); !ok {
 			os.Setenv(key, val)
