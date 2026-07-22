@@ -29,7 +29,7 @@ func main() {
 	logger := log.New(logOut, "", log.LstdFlags)
 	cfg := config.Load()
 	if cfg == nil {
-		logger.Fatal("no config found — create routerllm.yaml")
+		logger.Fatal("failed to load routerllm.yaml — see log above for details")
 	}
 	if len(cfg.Providers) == 0 {
 		logger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
@@ -44,8 +44,10 @@ func main() {
 	handler := routers.New(h)
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: handler,
+		Addr:              ":" + cfg.Port,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

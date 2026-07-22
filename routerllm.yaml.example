@@ -195,6 +195,6 @@ routes:
 #     - provider: string                    # REQUIRED — must match a provider name above
 #       model: string                       # OPTIONAL — upstream model name (defaults to model)
 #       defaults:                           # OPTIONAL — request defaults
-#         reasoning_effort: string          # "low" | "medium" | "high"
+#         reasoning_effort: string          # "low" | "medium" | "high" | "max"
 #         enable_thinking: bool             # true | false (Qwen-style)
 #         thinking_budget: int              # max thinking tokens (Anthropic-style)

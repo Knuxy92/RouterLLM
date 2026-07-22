@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -47,12 +48,12 @@ func loadYAML(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var yc yamlConfig
 	if err := yaml.Unmarshal(data, &yc); err != nil {
 		return nil, err
 	}
-	
+
 	return yamlToConfig(&yc)
 }
 
@@ -64,21 +65,65 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 
 	cooldown := 60 * time.Second
 	if yc.Cooldown != "" {
-		if d, err := time.ParseDuration(yc.Cooldown); err == nil {
-			cooldown = d
+		d, err := time.ParseDuration(yc.Cooldown)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cooldown %q: %w", yc.Cooldown, err)
 		}
+		cooldown = d
 	}
 
 	var systemPrompt string
 	if yc.SystemPromptFile != "" {
 		data, err := os.ReadFile(yc.SystemPromptFile)
-		if err == nil {
-			systemPrompt = strings.TrimSpace(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read system_prompt_file %q: %w", yc.SystemPromptFile, err)
 		}
+		systemPrompt = strings.TrimSpace(string(data))
 	}
 
 	var providers []ProviderConfig
+	seenProviders := make(map[string]bool)
+
 	for _, yp := range yc.Providers {
+		if yp.Name == "" {
+			return nil, fmt.Errorf("provider at index %d has empty name", len(providers))
+		}
+		if seenProviders[yp.Name] {
+			return nil, fmt.Errorf("duplicate provider name %q", yp.Name)
+		}
+		seenProviders[yp.Name] = true
+
+		if yp.BaseURL == "" {
+			return nil, fmt.Errorf("provider %q has empty base_url", yp.Name)
+		}
+
+		switch yp.Style {
+		case "openai", "anthropic":
+		case "":
+			return nil, fmt.Errorf("provider %q: style is required (openai or anthropic)", yp.Name)
+		default:
+			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai or anthropic)", yp.Name, yp.Style)
+		}
+
+		switch yp.AuthMode {
+		case "bearer", "x-api-key", "both":
+		case "":
+			yp.AuthMode = "bearer"
+		default:
+			return nil, fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
+		}
+
+		if len(yp.APIKey) == 0 {
+			return nil, fmt.Errorf("provider %q: api_key is required", yp.Name)
+		}
+
+		keys := expandKeys(yp.APIKey)
+		for _, k := range keys {
+			if strings.HasPrefix(k, "${") && strings.HasSuffix(k, "}") {
+				return nil, fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
+			}
+		}
+
 		p := ProviderConfig{
 			Name:      yp.Name,
 			BaseURL:   strings.TrimRight(yp.BaseURL, "/"),
@@ -87,32 +132,54 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 			ShareKeys: yp.Share,
 			Query:     yp.Query,
 			Headers:   yp.Headers,
+			Keys:      keys,
 		}
-		
+
 		if p.Headers == nil {
 			p.Headers = make(map[string]string)
 		}
-		
 		p.BaseURL = strings.TrimSuffix(p.BaseURL, "/v1")
-		if len(yp.APIKey) > 0 {
-			p.Keys = expandKeys(yp.APIKey)
-		} else {
-			p.Keys = []string{}
-		}
-		
 		providers = append(providers, p)
+	}
+
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("at least one provider is required")
+	}
+
+	if len(yc.Routes) == 0 {
+		return nil, fmt.Errorf("at least one route is required")
+	}
+
+	for _, rule := range yc.Routes {
+		if rule.Model == "" {
+			return nil, fmt.Errorf("route has empty model name")
+		}
+		if len(rule.Routes) == 0 {
+			return nil, fmt.Errorf("route %q has no upstream routes", rule.Model)
+		}
+		for _, spec := range rule.Routes {
+			if spec.Provider == "" {
+				return nil, fmt.Errorf("route %q has a spec with empty provider", rule.Model)
+			}
+			if !seenProviders[spec.Provider] {
+				return nil, fmt.Errorf("route %q references unknown provider %q", rule.Model, spec.Provider)
+			}
+			if spec.Model == "" {
+				return nil, fmt.Errorf("route %q provider %q has empty upstream model", rule.Model, spec.Provider)
+			}
+		}
 	}
 
 	client := &http.Client{Transport: newTransport()}
 
 	return &Config{
-		Port:          port,
-		Cooldown:      cooldown,
-		ForceStream:   yc.ForceStream,
-		SystemPrompt:  systemPrompt,
-		Providers:     providers,
-		Client:        client,
-		Routes:        yc.Routes,
+		Port:         port,
+		Cooldown:     cooldown,
+		ForceStream:  yc.ForceStream,
+		SystemPrompt: systemPrompt,
+		Providers:    providers,
+		Client:       client,
+		Routes:       yc.Routes,
 	}, nil
 }
 
@@ -122,7 +189,7 @@ func expandKeys(raw []string) []string {
 		keys := resolveEnv(s)
 		out = append(out, keys...)
 	}
-	
+
 	return out
 }
 
@@ -133,6 +200,6 @@ func resolveEnv(s string) []string {
 			return splitList(v)
 		}
 	}
-	
+
 	return []string{s}
 }

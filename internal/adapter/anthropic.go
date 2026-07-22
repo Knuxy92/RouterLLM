@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"strings"
@@ -84,8 +85,13 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 }
 
 func intValue(v any, fallback int) int {
-	if f, ok := v.(float64); ok {
-		return int(f)
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
 	}
 	return fallback
 }
@@ -330,6 +336,29 @@ type anthropicSSEState struct {
 	sentFirstChunk bool
 	blockStarted   bool
 	prevBlockType  string
+	blockIndex     int
+	toolStates     map[int]*toolStreamState
+	toolOrder      []int
+	lastUsage      json.RawMessage
+}
+
+type toolStreamState struct {
+	id          string
+	name        string
+	argsBuf     strings.Builder
+	lastEmitLen int
+	started     bool
+	blockIndex  int
+}
+
+func (ts *toolStreamState) freshArgs() string {
+	s := ts.argsBuf.String()
+	if ts.lastEmitLen >= len(s) {
+		return ""
+	}
+	part := s[ts.lastEmitLen:]
+	ts.lastEmitLen = len(s)
+	return part
 }
 
 // StreamOpenAIToAnthropicSSE reads OpenAI SSE chunks from src and writes
@@ -345,6 +374,38 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 			flusher.Flush()
 		}
 	}
+	stopBlock := func() {
+		writeSSE("content_block_stop", map[string]any{
+			"type": "content_block_stop", "index": st.blockIndex,
+		})
+		st.blockStarted = false
+	}
+	closeTextBlock := func() {
+		if st.blockStarted {
+			stopBlock()
+			st.blockIndex++
+		}
+	}
+	startBlock := func(blockType string) {
+		if st.blockStarted && st.prevBlockType != blockType {
+			stopBlock()
+			st.blockIndex++
+		}
+		if st.blockStarted {
+			return
+		}
+
+		st.blockStarted = true
+		st.prevBlockType = blockType
+		contentBlock := map[string]any{"type": "text", "text": ""}
+		if blockType == "thinking" {
+			contentBlock = map[string]any{"type": "thinking", "thinking": ""}
+		}
+		writeSSE("content_block_start", map[string]any{
+			"type": "content_block_start", "index": st.blockIndex,
+			"content_block": contentBlock,
+		})
+	}
 
 	_, _ = util.IterDataLines(src, func(payload string) bool {
 		var chunk struct {
@@ -356,29 +417,39 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 				Delta        map[string]any `json:"delta"`
 				FinishReason *string        `json:"finish_reason"`
 			} `json:"choices"`
+			Usage json.RawMessage `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			return true
 		}
+
 		if len(chunk.Choices) == 0 {
+			if len(chunk.Usage) > 0 {
+				st.lastUsage = chunk.Usage
+			}
 			return true
 		}
+
+		if len(chunk.Usage) > 0 {
+			st.lastUsage = chunk.Usage
+		}
+
+		if len(chunk.Choices) > 1 {
+			log.Printf("warning: /v1/chat/completions returned %d choices, using only choices[0]", len(chunk.Choices))
+		}
+
 		if st.msgID == "" && chunk.ID != "" {
 			st.msgID = chunk.ID
 		}
 
 		delta := chunk.Choices[0].Delta
-		role, _ := delta["role"].(string)
 		content, _ := delta["content"].(string)
 		reasoning, _ := delta["reasoning_content"].(string)
 		fr := chunk.Choices[0].FinishReason
 
-		blockType := "text"
-		if reasoning != "" {
-			blockType = "thinking"
-		}
+		tcs, hasTC := delta["tool_calls"].([]any)
 
-		if role == "assistant" && !st.sentFirstChunk {
+		if !st.sentFirstChunk {
 			st.sentFirstChunk = true
 			writeSSE("message_start", map[string]any{
 				"type": "message_start",
@@ -392,12 +463,7 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 			})
 		}
 
-		if !st.sentFirstChunk {
-			return true
-		}
-
-		// finish_reason on first chunk with no content
-		if fr != nil && !st.blockStarted && content == "" && reasoning == "" {
+		if fr != nil && !st.blockStarted && content == "" && reasoning == "" && (!hasTC || len(tcs) == 0) && len(st.toolStates) == 0 {
 			writeSSE("content_block_start", map[string]any{
 				"type": "content_block_start", "index": 0,
 				"content_block": map[string]any{"type": "text", "text": ""},
@@ -406,56 +472,130 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 				"type": "content_block_stop", "index": 0,
 			})
 			writeSSE("message_delta", map[string]any{
-				"type": "message_delta",
+				"type":  "message_delta",
 				"delta": map[string]any{"stop_reason": MapStopReasonReverse(*fr), "stop_sequence": nil},
 			})
 			writeSSE("message_stop", map[string]any{"type": "message_stop"})
 			return false
 		}
 
-		if st.blockStarted && st.prevBlockType != blockType {
-			writeSSE("content_block_stop", map[string]any{
-				"type": "content_block_stop", "index": 0,
-			})
-			st.blockStarted = false
-		}
-
-		if (content != "" || reasoning != "") && !st.blockStarted {
-			st.blockStarted = true
-			st.prevBlockType = blockType
-			cb := map[string]any{"type": "text", "text": ""}
-			if blockType == "thinking" {
-				cb = map[string]any{"type": "thinking", "thinking": ""}
-			}
-			writeSSE("content_block_start", map[string]any{
-				"type": "content_block_start", "index": 0,
-				"content_block": cb,
-			})
-		}
-
 		if reasoning != "" {
+			startBlock("thinking")
 			writeSSE("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": 0,
+				"type": "content_block_delta", "index": st.blockIndex,
 				"delta": map[string]string{"type": "thinking_delta", "thinking": reasoning},
 			})
 		}
 		if content != "" {
+			startBlock("text")
 			writeSSE("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": 0,
+				"type": "content_block_delta", "index": st.blockIndex,
 				"delta": map[string]string{"type": "text_delta", "text": content},
 			})
 		}
 
+		if hasTC && len(tcs) > 0 {
+			closeTextBlock()
+
+			for _, tc := range tcs {
+				tcm, ok := tc.(map[string]any)
+				if !ok {
+					continue
+				}
+				tidx := 0
+				if fi, ok := tcm["index"].(float64); ok {
+					tidx = int(fi)
+				}
+
+				ts, exists := st.toolStates[tidx]
+				if !exists {
+					ts = &toolStreamState{}
+					if st.toolStates == nil {
+						st.toolStates = make(map[int]*toolStreamState)
+					}
+					st.toolStates[tidx] = ts
+					st.toolOrder = append(st.toolOrder, tidx)
+				}
+
+				if id, ok := tcm["id"].(string); ok && id != "" {
+					ts.id = id
+				}
+				if fn, ok := tcm["function"].(map[string]any); ok {
+					if name, ok := fn["name"].(string); ok && name != "" {
+						ts.name = name
+					}
+					if args, ok := fn["arguments"].(string); ok {
+						ts.argsBuf.WriteString(args)
+					}
+				}
+
+				if !ts.started && ts.id != "" && ts.name != "" {
+					ts.started = true
+					ts.blockIndex = st.blockIndex
+					st.blockIndex++
+					writeSSE("content_block_start", map[string]any{
+						"type": "content_block_start", "index": ts.blockIndex,
+						"content_block": map[string]any{
+							"type": "tool_use",
+							"id":   ts.id,
+							"name": ts.name,
+						},
+					})
+				}
+
+				if ts.started {
+					if part := ts.freshArgs(); part != "" {
+						writeSSE("content_block_delta", map[string]any{
+							"type": "content_block_delta", "index": ts.blockIndex,
+							"delta": map[string]string{"type": "input_json_delta", "partial_json": part},
+						})
+					}
+				}
+			}
+		}
+
 		if fr != nil {
 			if st.blockStarted {
-				writeSSE("content_block_stop", map[string]any{
-					"type": "content_block_stop", "index": 0,
-				})
+				stopBlock()
 			}
-			writeSSE("message_delta", map[string]any{
-				"type": "message_delta",
+
+			for _, tidx := range st.toolOrder {
+				ts := st.toolStates[tidx]
+				if ts.started {
+					writeSSE("content_block_stop", map[string]any{
+						"type": "content_block_stop", "index": ts.blockIndex,
+					})
+				} else if ts.id != "" && ts.name != "" {
+					ts.blockIndex = st.blockIndex
+					st.blockIndex++
+					writeSSE("content_block_start", map[string]any{
+						"type": "content_block_start", "index": ts.blockIndex,
+						"content_block": map[string]any{
+							"type": "tool_use",
+							"id":   ts.id,
+							"name": ts.name,
+						},
+					})
+					if part := ts.freshArgs(); part != "" {
+						writeSSE("content_block_delta", map[string]any{
+							"type": "content_block_delta", "index": ts.blockIndex,
+							"delta": map[string]string{"type": "input_json_delta", "partial_json": part},
+						})
+					}
+					writeSSE("content_block_stop", map[string]any{
+						"type": "content_block_stop", "index": ts.blockIndex,
+					})
+				}
+			}
+
+			msgDelta := map[string]any{
+				"type":  "message_delta",
 				"delta": map[string]any{"stop_reason": MapStopReasonReverse(*fr), "stop_sequence": nil},
-			})
+			}
+			if st.lastUsage != nil {
+				msgDelta["usage"] = st.lastUsage
+			}
+			writeSSE("message_delta", msgDelta)
 			writeSSE("message_stop", map[string]any{"type": "message_stop"})
 			return false
 		}

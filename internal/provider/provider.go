@@ -46,6 +46,7 @@ func NewRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 		} else {
 			km = keys.New(pc.Keys, cooldown)
 		}
+
 		providers[pc.Name] = &Provider{
 			Name:     pc.Name,
 			BaseURL:  pc.BaseURL,
