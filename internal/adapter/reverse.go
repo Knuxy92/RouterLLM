@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -19,6 +18,9 @@ type OpenAIToAnthropicResponse struct {
 
 type OpenAIToAnthropicBlock struct {
 	Type     string `json:"type"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Input    any    `json:"input,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
 }
@@ -66,7 +68,34 @@ func AnthropicRequestToOpenAI(raw []byte) ([]byte, error) {
 				systemParts = append(systemParts, flattenContent(msg["content"]))
 				continue
 			}
-			msg["content"] = flattenContent(msg["content"])
+			if role == "assistant" {
+				convertContentToToolCalls(msg)
+				stripCacheControl(msg)
+				cleanMsgs = append(cleanMsgs, msg)
+				continue
+			}
+			if role == "user" {
+				toolResults := extractToolResults(msg["content"])
+				if len(toolResults) > 0 {
+					for _, tr := range toolResults {
+						cleanMsgs = append(cleanMsgs, tr)
+					}
+					textContent := flattenContent(msg["content"])
+					if textContent != "" {
+						textMsg := map[string]any{
+							"role":    "user",
+							"content": textContent,
+						}
+						stripCacheControl(textMsg)
+						cleanMsgs = append(cleanMsgs, textMsg)
+					}
+					continue
+				}
+				msg["content"] = flattenContent(msg["content"])
+				stripCacheControl(msg)
+				cleanMsgs = append(cleanMsgs, msg)
+				continue
+			}
 			stripCacheControl(msg)
 			cleanMsgs = append(cleanMsgs, msg)
 		}
@@ -80,13 +109,167 @@ func AnthropicRequestToOpenAI(raw []byte) ([]byte, error) {
 			},
 		}, cleanMsgs...)
 	}
-	body["messages"] = cleanMsgs
 
-	for _, key := range []string{"tools", "metadata"} {
-		delete(body, key)
+	delete(body, "metadata")
+
+	if tools, ok := body["tools"].([]any); ok {
+		converted := make([]any, 0, len(tools))
+		for _, t := range tools {
+			if convertedTool := convertAnthropicTool(t); convertedTool != nil {
+				converted = append(converted, convertedTool)
+			}
+		}
+		if len(converted) > 0 {
+			body["tools"] = converted
+		} else {
+			delete(body, "tools")
+		}
 	}
 
+	if tc, ok := body["tool_choice"]; ok {
+		body["tool_choice"] = convertAnthropicToolChoice(tc)
+	}
+
+	body["messages"] = cleanMsgs
+
 	return json.Marshal(body)
+}
+
+func convertContentToToolCalls(msg map[string]any) {
+	content, ok := msg["content"].([]any)
+	if !ok {
+		return
+	}
+
+	var textParts []string
+	var toolCalls []any
+
+	for _, block := range content {
+		b, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		btype, _ := b["type"].(string)
+		switch btype {
+		case "text":
+			if t, _ := b["text"].(string); t != "" {
+				textParts = append(textParts, t)
+			}
+		case "tool_use":
+			tc := convertToolUseToToolCall(b)
+			if tc != nil {
+				toolCalls = append(toolCalls, tc)
+			}
+		case "thinking":
+			// pass through in content text
+			if t, _ := b["thinking"].(string); t != "" {
+				textParts = append(textParts, t)
+			}
+		}
+	}
+
+	msg["content"] = strings.Join(textParts, "")
+	if len(toolCalls) > 0 {
+		msg["tool_calls"] = toolCalls
+	}
+}
+
+func convertToolUseToToolCall(block map[string]any) any {
+	id, _ := block["id"].(string)
+	name, _ := block["name"].(string)
+	input := block["input"]
+
+	args, err := json.Marshal(input)
+	if err != nil {
+		args = []byte("{}")
+	}
+
+	return map[string]any{
+		"id":   id,
+		"type": "function",
+		"function": map[string]any{
+			"name":      name,
+			"arguments": string(args),
+		},
+	}
+}
+
+func extractToolResults(content any) []map[string]any {
+	blocks, ok := content.([]any)
+	if !ok {
+		return nil
+	}
+	var results []map[string]any
+	for _, block := range blocks {
+		b, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		btype, _ := b["type"].(string)
+		if btype != "tool_result" {
+			continue
+		}
+		toolUseID, _ := b["tool_use_id"].(string)
+		if toolUseID == "" {
+			continue
+		}
+		trContent := flattenContent(b["content"])
+
+		results = append(results, map[string]any{
+			"role":         "tool",
+			"tool_call_id": toolUseID,
+			"content":      trContent,
+		})
+	}
+	return results
+}
+
+func convertAnthropicTool(t any) any {
+	tool, ok := t.(map[string]any)
+	if !ok {
+		return nil
+	}
+	name, _ := tool["name"].(string)
+	if name == "" {
+		return nil
+	}
+	desc, _ := tool["description"].(string)
+	inputSchema := tool["input_schema"]
+
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        name,
+			"description": desc,
+			"parameters":  inputSchema,
+		},
+	}
+}
+
+func convertAnthropicToolChoice(tc any) any {
+	m, ok := tc.(map[string]any)
+	if !ok {
+		return tc
+	}
+	ttype, _ := m["type"].(string)
+	switch ttype {
+	case "auto":
+		return "auto"
+	case "any":
+		return "required"
+	case "tool":
+		if name, _ := m["name"].(string); name != "" {
+			return map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": name,
+				},
+			}
+		}
+		return "auto"
+	default:
+		return tc
+	}
 }
 
 func flattenContent(content any) string {
@@ -152,12 +335,38 @@ func OpenAIResponseToAnthropic(raw []byte) ([]byte, error) {
 	reasoning, _ := msg["reasoning_content"].(string)
 
 	var blocks []OpenAIToAnthropicBlock
-	if content != "" {
-		blocks = append(blocks, OpenAIToAnthropicBlock{Type: "text", Text: content})
-	}
 	if reasoning != "" {
 		blocks = append(blocks, OpenAIToAnthropicBlock{Type: "thinking", Thinking: reasoning})
 	}
+	if content != "" {
+		blocks = append(blocks, OpenAIToAnthropicBlock{Type: "text", Text: content})
+	}
+
+	if tcs, ok := msg["tool_calls"].([]any); ok {
+		for _, tc := range tcs {
+			tcm, ok := tc.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := tcm["id"].(string)
+			fn, _ := tcm["function"].(map[string]any)
+			if fn == nil {
+				continue
+			}
+			name, _ := fn["name"].(string)
+			argsStr, _ := fn["arguments"].(string)
+			var input any
+			json.Unmarshal([]byte(argsStr), &input)
+
+			blocks = append(blocks, OpenAIToAnthropicBlock{
+				Type:  "tool_use",
+				ID:    id,
+				Name:  name,
+				Input: input,
+			})
+		}
+	}
+
 	if blocks == nil {
 		blocks = []OpenAIToAnthropicBlock{}
 	}
@@ -205,85 +414,75 @@ func MapStopReasonReverse(reason string) string {
 	}
 }
 
-func OpenAIStreamToAnthropicSSE(raw []byte, modelName string) []byte {
-	var chunk struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		Model   string `json:"model"`
-		Choices []struct {
-			Index        int            `json:"index"`
-			Delta        map[string]any `json:"delta"`
-			FinishReason *string        `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &chunk); err != nil {
-		return raw
+// convertOpenAIToolsToAnthropic converts the body in-place, translating
+// tools and tool_choice from OpenAI format to Anthropic format.
+func convertOpenAIToolsToAnthropic(body map[string]any) {
+	tools, ok := body["tools"].([]any)
+	if !ok {
+		return
 	}
 
-	if len(chunk.Choices) == 0 {
-		return raw
+	converted := make([]any, 0, len(tools))
+	for _, t := range tools {
+		aiTool, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		ttype, _ := aiTool["type"].(string)
+		if ttype != "function" {
+			continue
+		}
+		fn, _ := aiTool["function"].(map[string]any)
+		if fn == nil {
+			continue
+		}
+		name, _ := fn["name"].(string)
+		if name == "" {
+			continue
+		}
+		desc, _ := fn["description"].(string)
+		params := fn["parameters"]
+
+		anthropicTool := map[string]any{
+			"name":         name,
+			"description":  desc,
+			"input_schema": params,
+		}
+		converted = append(converted, anthropicTool)
 	}
 
-	delta := chunk.Choices[0].Delta
-	role, _ := delta["role"].(string)
-	content, _ := delta["content"].(string)
-	reasoning, _ := delta["reasoning_content"].(string)
-	fr := chunk.Choices[0].FinishReason
+	body["tools"] = converted
 
-	var events []string
+	if tc, ok := body["tool_choice"]; ok {
+		body["tool_choice"] = convertOpenAIToolChoice(tc)
+	}
+}
 
-	if role == "assistant" {
-		evt, _ := json.Marshal(map[string]any{
-			"type": "message_start",
-			"message": map[string]any{
-				"id":      chunk.ID,
-				"type":    "message",
-				"role":    "assistant",
-				"content": []any{},
-				"model":   modelName,
-			},
-		})
-		events = append(events, fmt.Sprintf("event: message_start\ndata: %s\n\n", evt))
+func convertOpenAIToolChoice(tc any) any {
+	switch v := tc.(type) {
+	case string:
+		switch v {
+		case "auto":
+			return map[string]any{"type": "auto"}
+		case "required", "none":
+			return map[string]any{"type": v}
+		default:
+			return tc
+		}
+	case map[string]any:
+		ttype, _ := v["type"].(string)
+		if ttype == "function" {
+			if fn, ok := v["function"].(map[string]any); ok {
+				if name, _ := fn["name"].(string); name != "" {
+					return map[string]any{
+						"type": "tool",
+						"name": name,
+					}
+				}
+			}
+		}
+		return tc
+	default:
+		return tc
 	}
-
-	if content != "" {
-		evt, _ := json.Marshal(map[string]any{
-			"type":  "content_block_delta",
-			"index": 0,
-			"delta": map[string]string{
-				"type": "text_delta",
-				"text": content,
-			},
-		})
-		events = append(events, fmt.Sprintf("data: %s\n\n", evt))
-	}
-	if reasoning != "" {
-		evt, _ := json.Marshal(map[string]any{
-			"type":  "content_block_delta",
-			"index": 0,
-			"delta": map[string]string{
-				"type":     "thinking_delta",
-				"thinking": reasoning,
-			},
-		})
-		events = append(events, fmt.Sprintf("data: %s\n\n", evt))
-	}
-	if fr != nil {
-		sr := MapStopReasonReverse(*fr)
-		evt, _ := json.Marshal(map[string]any{
-			"type": "message_delta",
-			"delta": map[string]any{
-				"stop_reason":   sr,
-				"stop_sequence": nil,
-			},
-		})
-		events = append(events, fmt.Sprintf("data: %s\n\n", evt))
-		events = append(events, "event: message_stop\ndata: {}\n\n")
-	}
-
-	if len(events) == 0 {
-		return raw
-	}
-	return []byte(strings.Join(events, ""))
 }

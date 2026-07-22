@@ -22,7 +22,7 @@ func New(values []string, cooldown time.Duration) *Manager {
 	for _, v := range values {
 		entries = append(entries, entry{value: v})
 	}
-	
+
 	return &Manager{entries: entries, cooldown: cooldown}
 }
 
@@ -51,7 +51,7 @@ func (m *Manager) MarkDead(value string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	deadUntil := time.Now().Add(m.cooldown)
-	
+
 	for i := range m.entries {
 		if m.entries[i].value == value {
 			m.entries[i].deadUntil = deadUntil
@@ -63,17 +63,17 @@ func (m *Manager) LiveKey() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	
+
 	for _, e := range m.entries {
 		if !e.deadUntil.After(now) {
 			return e.value
 		}
 	}
-	
+
 	if len(m.entries) > 0 {
 		return m.entries[0].value
 	}
-	
+
 	return ""
 }
 
@@ -82,13 +82,13 @@ func (m *Manager) AliveCount() int {
 	defer m.mu.Unlock()
 	now := time.Now()
 	alive := 0
-	
+
 	for _, e := range m.entries {
 		if !e.deadUntil.After(now) {
 			alive++
 		}
 	}
-	
+
 	return alive
 }
 

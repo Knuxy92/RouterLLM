@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"routerllm/internal/adapter"
@@ -41,6 +42,106 @@ func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debu
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
+	p.forward(path, w, r, p.forceStream)
+}
+
+// ForwardRaw does routing, default injection, and upstream call.
+// Returns the upstream *http.Response even for non-2xx — the caller must check
+// resp.StatusCode. The caller MUST close resp.Body when non-nil.
+// Returns (resp, route, nil) when any upstream responds (even non-2xx).
+// Returns (nil, nil, error) for pre-request failures (model not found,
+// keys exhausted, cancelled).
+func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*http.Response, *provider.Route, error) {
+	p.injectSystemPrompt(body)
+
+	modelName, _ := body["model"].(string)
+	routes := p.registry.Routes(modelName)
+	if len(routes) == 0 {
+		return nil, nil, fmt.Errorf("model %q not found", modelName)
+	}
+
+	if path != "/v1/chat/completions" {
+		var filtered []provider.Route
+		for _, r := range routes {
+			if r.Provider.Style == "openai" {
+				filtered = append(filtered, r)
+			}
+		}
+		routes = filtered
+		if len(routes) == 0 {
+			return nil, nil, fmt.Errorf("model %q not found for %s", modelName, path)
+		}
+	}
+
+	p.log.Printf("%s model=%s routes=%d", path, modelName, len(routes))
+
+	var lastResp *http.Response
+	var lastRoute *provider.Route
+	var lastErr error
+
+	for _, route := range routes {
+		pv := route.Provider
+		routeBody := cloneBody(body)
+		applyDefaults(routeBody, route.Defaults)
+
+		var reqBody []byte
+		var reqPath string
+		var err error
+
+		if pv.Style == "anthropic" {
+			reqBody, reqPath, err = adapter.TranslateRequest(routeBody, route.ModelName)
+		} else {
+			routeBody["model"] = route.ModelName
+			reqBody, err = json.Marshal(routeBody)
+			reqPath = path
+		}
+		if err != nil {
+			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
+			continue
+		}
+
+		resp, status, errBody, served := p.tryKeys(pv, http.MethodPost, reqPath, reqBody, r)
+		if served {
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
+			return nil, nil, fmt.Errorf("request cancelled")
+		}
+		if resp == nil {
+			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
+			lastErr = fmt.Errorf("all keys exhausted for %s via %s (status=%d)", modelName, pv.Name, status)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			eb, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(eb))
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
+			lastResp = resp
+			lastRoute = &route
+			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
+			lastErr = fmt.Errorf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, briefBody(eb))
+			continue
+		}
+
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		p.log.Printf("serving %s via %s: %s", path, pv.Name, respSummary(resp))
+		return resp, &route, nil
+	}
+
+	if lastResp != nil {
+		return lastResp, lastRoute, lastErr
+	}
+	return nil, nil, lastErr
+}
+
+func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, forceStream bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read request body: "+err.Error(), http.StatusBadRequest)
@@ -53,87 +154,28 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.injectSystemPrompt(body)
-
 	if path == "/v1/responses" {
 		body["stream"] = clientStream
 	}
 
-	model, _ := body["model"].(string)
-	routes := p.registry.Routes(model)
-	if len(routes) == 0 {
-		http.Error(w, fmt.Sprintf("model %q not found", model), http.StatusNotFound)
-		return
-	}
-
-	if path != "/v1/chat/completions" {
-		var filtered []provider.Route
-		for _, r := range routes {
-			if r.Provider.Style == "openai" {
-				filtered = append(filtered, r)
-			}
-		}
-		routes = filtered
-		if len(routes) == 0 {
-			http.Error(w, fmt.Sprintf("model %q not available for %s", model, path), http.StatusNotFound)
-			return
-		}
-	}
-
-	p.log.Printf("%s model=%s stream=%v routes=%d", path, model, clientStream, len(routes))
-
-	var lastStatus int
-	var lastErrBody []byte
-
-	for _, route := range routes {
-		pv := route.Provider
-		routeBody := cloneBody(body)
-		applyDefaults(routeBody, route.Defaults)
-
-		var reqBody []byte
-		var reqPath string
-
-		if pv.Style == "anthropic" {
-			reqBody, reqPath, err = adapter.TranslateRequest(routeBody, route.ModelName)
-		} else {
-			routeBody["model"] = route.ModelName
-			reqBody, err = json.Marshal(routeBody)
-			reqPath = path
-		}
-		if err != nil {
-			http.Error(w, "failed to encode body: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		resp, status, errBody, served := p.tryKeys(pv, http.MethodPost, reqPath, reqBody, r)
-		if served {
-			return
-		}
-		if resp == nil {
-			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", model, pv.Name), status, errBody)
-			lastStatus = status
-			lastErrBody = errBody
-			continue
-		}
+	resp, route, err := p.ForwardRaw(path, r, body)
+	if resp != nil {
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
 			w.Write(eb)
 			return
 		}
 
-		p.log.Printf("serving %s via %s: %s", path, pv.Name, respSummary(resp))
-
-		if p.forceStream && path == "/v1/chat/completions" {
-			p.serveForceStream(resp, route.ModelName, pv.Style, w)
+		if forceStream && path == "/v1/chat/completions" {
+			p.serveForceStream(resp, route.ModelName, route.Provider.Style, w)
 			return
 		}
 
-		if pv.Style == "anthropic" {
+		if route.Provider.Style == "anthropic" {
 			p.serveAnthropic(resp, clientStream, route.ModelName, w)
 		} else if path == "/v1/responses" {
 			serveResponses(resp, clientStream, w)
@@ -143,14 +185,15 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if lastErrBody != nil {
-		p.logErr(fmt.Sprintf("all providers exhausted for %s", model), lastStatus, lastErrBody)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(lastStatus)
-		w.Write(lastErrBody)
-	} else {
-		p.log.Printf("all providers exhausted for %s: no routes available", model)
-		http.Error(w, "all providers exhausted for model "+model, http.StatusBadGateway)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else if strings.Contains(err.Error(), "request cancelled") {
+			return
+		} else {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+		return
 	}
 }
 
@@ -183,7 +226,7 @@ func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	if defaults.EnableThinking != nil {
 		if *defaults.EnableThinking {
 			if _, ok := body["enable_thinking"]; !ok {
-				body["thinking"] = map[string]string{
+				body["thinking"] = map[string]any{
 					"type": "enabled",
 				}
 			}
@@ -197,7 +240,11 @@ func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	}
 
 	if defaults.ThinkingBudget > 0 {
-		if _, ok := body["thinking"]; !ok {
+		if existing, ok := body["thinking"].(map[string]any); ok {
+			if _, ok := existing["budget_tokens"]; !ok {
+				existing["budget_tokens"] = defaults.ThinkingBudget
+			}
+		} else {
 			body["thinking"] = map[string]any{
 				"type":          "enabled",
 				"budget_tokens": defaults.ThinkingBudget,
@@ -344,125 +391,14 @@ func (p *Proxy) backoff(ctx context.Context, retry int) bool {
 	}
 }
 
-func (p *Proxy) tryKeysMethod(pv *provider.Provider, method, path string, reqBody []byte, r *http.Request) (*http.Response, int, []byte, bool) {
-	return p.tryKeys(pv, method, path, reqBody, r)
-}
-
-func copyHeaders(w http.ResponseWriter, resp *http.Response) {
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-}
-
 func writeStreamHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 }
 
-func (p *Proxy) Passthrough(path string, w http.ResponseWriter, r *http.Request) {
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var body map[string]any
-	_ = json.Unmarshal(raw, &body)
-	modelName, _ := body["model"].(string)
-	routes := p.registry.Routes(modelName)
-	if len(routes) == 0 {
-		http.Error(w, fmt.Sprintf("model %q not found", modelName), http.StatusNotFound)
-		return
-	}
-
-	for _, route := range routes {
-		pv := route.Provider
-		var reqBody []byte
-		if len(raw) > 0 {
-			body["model"] = route.ModelName
-			reqBody, _ = json.Marshal(body)
-		}
-		method := r.Method
-		if method == "" {
-			method = http.MethodPost
-		}
-		resp, _, _, served := p.tryKeysMethod(pv, method, path, reqBody, r)
-		if served {
-			return
-		}
-		if resp == nil {
-			continue
-		}
-
-		p.log.Printf("served %s via %s: %s", path, route.Provider.Name, respSummary(resp))
-		copyHeaders(w, resp)
-		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
-		resp.Body.Close()
-		return
-	}
-
-	http.Error(w, fmt.Sprintf("all providers exhausted for model %q", modelName), http.StatusBadGateway)
-}
-
-func (p *Proxy) PassthroughMultipart(path string, w http.ResponseWriter, r *http.Request) {
-	ct := r.Header.Get("Content-Type")
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	modelName := r.FormValue("model")
-	routes := p.registry.Routes(modelName)
-	if len(routes) == 0 {
-		http.Error(w, fmt.Sprintf("model %q not found", modelName), http.StatusNotFound)
-		return
-	}
-
-	for _, route := range routes {
-		pv := route.Provider
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, pv.BaseURL+path+pv.Query, bytes.NewReader(raw))
-		if err != nil {
-			continue
-		}
-		for k, v := range pv.Headers {
-			req.Header[k] = []string{v}
-		}
-		if ct != "" && req.Header.Get("Content-Type") == "" {
-			req.Header.Set("Content-Type", ct)
-		}
-		switch pv.AuthMode {
-		case "both":
-			req.Header["Authorization"] = []string{"Bearer " + pv.Keys.LiveKey()}
-			req.Header["x-api-key"] = []string{pv.Keys.LiveKey()}
-		case "x-api-key":
-			req.Header["x-api-key"] = []string{pv.Keys.LiveKey()}
-		default:
-			req.Header.Set("Authorization", "Bearer "+pv.Keys.LiveKey())
-		}
-
-		resp, doErr := p.client.Do(req)
-		if doErr != nil {
-			p.log.Printf("proxy error via %s: %v", pv.Name, doErr)
-			continue
-		}
-
-		p.log.Printf("served %s via %s: %s", path, pv.Name, respSummary(resp))
-		copyHeaders(w, resp)
-		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
-		resp.Body.Close()
-		return
-	}
-
-	http.Error(w, fmt.Sprintf("all providers exhausted for model %q", modelName), http.StatusBadGateway)
-}
-
 func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter) {
+	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
@@ -477,6 +413,7 @@ func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter) 
 }
 
 func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter) {
+	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
@@ -493,6 +430,7 @@ func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWrite
 }
 
 func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)

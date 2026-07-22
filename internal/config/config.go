@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -22,13 +23,13 @@ type ProviderConfig struct {
 }
 
 type Config struct {
-	Port          string
-	Cooldown      time.Duration
-	ForceStream   bool
-	SystemPrompt  string
-	Providers     []ProviderConfig
-	Client        *http.Client
-	Routes        []model.Rule
+	Port         string
+	Cooldown     time.Duration
+	ForceStream  bool
+	SystemPrompt string
+	Providers    []ProviderConfig
+	Client       *http.Client
+	Routes       []model.Rule
 }
 
 func Load() *Config {
@@ -38,12 +39,13 @@ func Load() *Config {
 	if configFile == "" {
 		configFile = "routerllm.yaml"
 	}
-	
+
 	cfg, err := loadYAML(configFile)
 	if err != nil {
+		log.Printf("config error: %v", err)
 		return nil
 	}
-	
+
 	return cfg
 }
 
@@ -67,6 +69,6 @@ func splitList(raw string) []string {
 			out = append(out, s)
 		}
 	}
-	
+
 	return out
 }
