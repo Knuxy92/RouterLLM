@@ -100,9 +100,17 @@ routes:
         model: gpt-4              # upstream model name
         defaults:
           reasoning_effort: high  # low | medium | high | max
-          enable_thinking: true   # Qwen-style thinking
+          enable_thinking: true   # OpenAI-style, required to turn on thinking
           thinking_budget: 32000  # Anthropic-style thinking tokens
 ```
+
+### Defaults reference
+
+| Field             | Values                       | Provider style | Notes                                                |
+|-------------------|------------------------------|----------------|------------------------------------------------------|
+| `enable_thinking` | `true` / `false`             | openai         | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. |
+| `reasoning_effort`| `low` / `medium` / `high` / `max` | openai    | Only sets the `reasoning_effort` body field. Does **not** enable thinking by itself — you must also set `enable_thinking: true`. |
+| `thinking_budget` | integer (tokens)             | anthropic      | Maps to Anthropic `thinking.budget_tokens`. When set positively, creates a `thinking` block automatically. |
 
 ### Examples
 
@@ -114,7 +122,7 @@ routes:
       model: deepseek-v4-flash-free
 ```
 
-**Multi-provider fallback with defaults:**
+**Multi-provider fallback with defaults (thinking off):**
 ```yaml
 - model: gpt-5.5
   routes:
@@ -124,6 +132,7 @@ routes:
       model: gpt-5.5
       defaults:
         reasoning_effort: max
+        enable_thinking: true    # required — reasoning_effort alone does not enable thinking
 ```
 
 ## Routing and Failover
