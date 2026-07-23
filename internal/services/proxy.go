@@ -95,6 +95,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		}
+		
 		if err != nil {
 			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
 			continue

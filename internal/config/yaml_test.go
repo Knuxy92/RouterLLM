@@ -35,10 +35,12 @@ routes:
       - provider: test
         model: upstream-model
 `)
+	
 	cfg, err := loadYAML(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	
 	if cfg.Port != "9999" {
 		t.Errorf("port = %q, want 9999", cfg.Port)
 	}

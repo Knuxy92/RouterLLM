@@ -1,0 +1,152 @@
+### RouterLLM Smoke Tests
+### =======================
+### Set your auth key below if the server requires one (e.g. Authorization: Bearer <key>).
+### Leave empty if the server is open / no proxy auth.
+### Start the server first: go run ./cmd/routerllm
+
+@baseUrl = http://localhost:1765
+@auth = 
+
+### Health check
+GET {{baseUrl}}/health
+
+### List models
+GET {{baseUrl}}/v1/models
+
+### --- /v1/chat/completions ---
+
+### Chat completions — streaming (default)
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "user", "content": "Say hello in one word."}
+  ],
+  "stream": true
+}
+
+### Chat completions — non-streaming
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "user", "content": "Say hello in one word."}
+  ]
+}
+
+### Chat completions — with reasoning effort
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "user", "content": "Solve 2+2 step by step"}
+  ],
+  "reasoning_effort": "high",
+  "stream": true
+}
+
+### Chat completions — with system message and thinking
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Explain quantum computing in 3 sentences."}
+  ],
+  "stream": true
+}
+
+### --- /v1/messages (Anthropic-compatible) ---
+
+### Messages — streaming (translated to OpenAI, then back to Anthropic SSE)
+POST {{baseUrl}}/v1/messages
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "user", "content": "Say hello in one word."}
+  ],
+  "max_tokens": 1024,
+  "stream": true
+}
+
+### Messages — with system prompt (Anthropic format)
+POST {{baseUrl}}/v1/messages
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "system": "You are Claude, a helpful AI.",
+  "messages": [
+    {"role": "user", "content": "What is 2+2?"}
+  ],
+  "max_tokens": 500,
+  "stream": true
+}
+
+### --- /v1/responses (OpenAI-only) ---
+
+### Responses — streaming
+POST {{baseUrl}}/v1/responses
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "input": "Say hello in one word.",
+  "stream": true
+}
+
+### Responses — non-streaming
+POST {{baseUrl}}/v1/responses
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "input": "Say hello in one word."
+}
+
+### --- Error cases ---
+
+### Missing model
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "nonexistent-model",
+  "messages": [{"role": "user", "content": "hi"}]
+}
+
+### Malformed body
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+this is not json
+
+### Empty messages
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+{{auth}}
+
+{
+  "model": "my-model",
+  "messages": []
+}
