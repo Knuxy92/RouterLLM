@@ -95,7 +95,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		}
-		
+
 		if err != nil {
 			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
 			continue
@@ -145,13 +145,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read request body: "+err.Error(), http.StatusBadRequest)
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read request body: "+err.Error())
 		return
 	}
 
 	body, clientStream, err := parseAndForceStream(raw)
 	if err != nil {
-		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -165,9 +165,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(eb)
+			util.WriteUpstreamError(w, resp.StatusCode, eb)
 			return
 		}
 
@@ -188,11 +186,11 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
 		} else {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		}
 		return
 	}
@@ -443,7 +441,7 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 
 	openaiBody, err := adapter.BufferAnthropicToOpenAI(resp.Body, modelName)
 	if err != nil {
-		http.Error(w, "failed to translate response: "+err.Error(), http.StatusBadGateway)
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
 		return
 	}
 
