@@ -9,6 +9,7 @@ import (
 	"routerllm/internal/adapter"
 	"routerllm/internal/model"
 	"routerllm/internal/services"
+	"routerllm/internal/util"
 )
 
 type Handlers struct {
@@ -32,19 +33,19 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read body: "+err.Error())
 		return
 	}
 
 	openaiBody, err := adapter.AnthropicRequestToOpenAI(raw)
 	if err != nil {
-		http.Error(w, "invalid Anthropic request: "+err.Error(), http.StatusBadRequest)
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid Anthropic request: "+err.Error())
 		return
 	}
 
 	var reqBody map[string]any
 	if err := json.Unmarshal(openaiBody, &reqBody); err != nil {
-		http.Error(w, "internal translation error: "+err.Error(), http.StatusInternalServerError)
+		util.WriteError(w, http.StatusInternalServerError, "translation_error", "internal translation error: "+err.Error())
 		return
 	}
 	reqBody["stream"] = true
@@ -56,9 +57,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		ct := resp.Header.Get("Content-Type")
 		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
 			eb, _ := io.ReadAll(resp.Body)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(eb)
+			util.WriteUpstreamError(w, resp.StatusCode, eb)
 			return
 		}
 
@@ -72,7 +71,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
 }

@@ -51,3 +51,33 @@ func TestMessagesDoesNotDoubleConvertForceStream(t *testing.T) {
 		t.Fatalf("missing translated text delta:\n%s", body)
 	}
 }
+
+func TestMessagesNormalizesUpstreamErrors(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}`)
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name: "test", BaseURL: upstream.URL, Style: "openai", Keys: []string{"key"},
+	}}, []model.Rule{{
+		Model: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
+	}}, time.Minute)
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, true, "")
+	h := New(proxy, registry.AllModels())
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
+		`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`,
+	))
+	w := httptest.NewRecorder()
+
+	h.Messages(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"upstream_error"`) || !strings.Contains(w.Body.String(), `"message":"bad request"`) {
+		t.Fatalf("unexpected error body: %s", w.Body.String())
+	}
+}
