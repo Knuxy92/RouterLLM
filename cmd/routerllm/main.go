@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,34 +15,52 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/routers"
 	"routerllm/internal/services"
+	"routerllm/internal/util"
 )
 
 func main() {
-	logOut := os.Stdout
+	_ = util.LoadDotenv(".env")
+
+	var operationalOut io.Writer = os.Stdout
+	var logFile *os.File
 	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {
 		f, err := os.OpenFile(lf, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			log.Fatalf("failed to open log file %s: %v", lf, err)
 		}
 		defer f.Close()
-		logOut = f
+		logFile = f
+		operationalOut = io.MultiWriter(os.Stdout, f)
 	}
-	logger := log.New(logOut, "", log.LstdFlags)
+	log.SetOutput(operationalOut)
+	overviewLogger := log.New(os.Stdout, "", log.LstdFlags)
+	operationalLogger := log.New(operationalOut, "", log.LstdFlags)
 	cfg := config.Load()
+
 	if cfg == nil {
-		logger.Fatal("failed to load routerllm.yaml — see log above for details")
+		overviewLogger.Fatal("failed to load routerllm.yaml — see log file for details")
 	}
+
 	if len(cfg.Providers) == 0 {
-		logger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
+		overviewLogger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
 	}
 
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
+	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
-	proxy := services.NewProxy(registry, cfg.Client, logger, debug, cfg.ForceStream, cfg.SystemPrompt)
-	logger.Printf("loaded %d provider(s), %d model(s)", len(cfg.Providers), len(registry.AllModels()))
+	proxy := services.NewProxy(registry, cfg.Client, operationalLogger, debug, advancedDebug, cfg.ForceStream, cfg.SystemPrompt, cfg.AutoModel)
+	overviewLogger.Printf("loaded %d provider(s), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", len(cfg.Providers), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
 
-	h := handlers.New(proxy, registry.AllModels())
-	handler := routers.New(h)
+	models := registry.AllModels()
+	if cfg.AutoModel.Enabled {
+		models = append(models, "auto")
+	}
+	h := handlers.New(proxy, models)
+	var auditLogger *log.Logger
+	if advancedDebug && logFile != nil {
+		auditLogger = log.New(logFile, "", log.LstdFlags)
+	}
+	handler := routers.New(h, auditLogger)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -51,21 +70,21 @@ func main() {
 	}
 
 	go func() {
-		logger.Printf("listening on :%s", cfg.Port)
+		overviewLogger.Printf("listening on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal(err)
+			overviewLogger.Fatal(err)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	logger.Println("shutting down server...")
+	overviewLogger.Println("shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Fatal("server forced to shutdown:", err)
+		overviewLogger.Fatal("server forced to shutdown:", err)
 	}
-	logger.Println("server stopped")
+	overviewLogger.Println("server stopped")
 }

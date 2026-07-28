@@ -92,9 +92,16 @@ providers:
 
 Map client-facing model names to upstream provider+model pairs. Routes are tried in order until one succeeds.
 
+### Auto Model
+
+Set `auto_model.enabled: true` to expose an `auto` model. The router sends the
+request input to the configured classifier, then maps its exact category to
+`small_model`, `analysis_model`, or `coding_model`. Set `AUTOMODEL_API_KEY` in
+`.env` or the environment before startup.
+
 ```yaml
 routes:
-  - model: my-model               # name clients send in requests
+  - model_id: my-model            # ID clients send in requests
     routes:
       - provider: forge           # must match a provider name above
         model: gpt-4              # upstream model name
@@ -108,15 +115,15 @@ routes:
 
 | Field             | Values                       | Provider style | Notes                                                |
 |-------------------|------------------------------|----------------|------------------------------------------------------|
-| `enable_thinking` | `true` / `false`             | openai         | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. |
+| `enable_thinking` | `true` / `false`             | openai/anthropic | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. |
 | `reasoning_effort`| `low` / `medium` / `high` / `max` | openai    | Only sets the `reasoning_effort` body field. Does **not** enable thinking by itself — you must also set `enable_thinking: true`. |
-| `thinking_budget` | integer (tokens)             | anthropic      | Maps to Anthropic `thinking.budget_tokens`. When set positively, creates a `thinking` block automatically. |
+| `thinking_budget` | integer (tokens)             |     anthropic      | Maps to Anthropic `thinking.budget_tokens`. When set positively, creates a `thinking` block automatically. |
 
 ### Examples
 
 **Single provider, no defaults:**
 ```yaml
-- model: deepseek-v4-flash
+- model_id: deepseek-v4-flash
   routes:
     - provider: opencode
       model: deepseek-v4-flash-free
@@ -124,7 +131,7 @@ routes:
 
 **Multi-provider fallback with defaults (thinking off):**
 ```yaml
-- model: gpt-5.5
+- model_id: gpt-5.5
   routes:
     - provider: freemodel-api
       model: gpt-5.5
@@ -154,8 +161,9 @@ routes:
 |--------------------------|------------------|---------------------------------------|
 | `ROUTERLLM_PORT`         | `1765`           | Server listen port                    |
 | `ROUTERLLM_CONFIG_FILE`  | `routerllm.yaml` | Config file path                      |
-| `ROUTERLLM_DEBUG`        | —                | Enable debug logging (`"true"`)       |
-| `ROUTERLLM_LOG_FILE`     | —                | Write logs to file instead of stdout  |
+| `ROUTERLLM_DEBUG`        | `false`          | Show operational routing/retry logs   |
+| `ROUTERLLM_DEBUG_ADVANCED` | `false`        | Log client/system headers and bodies to the log file |
+| `ROUTERLLM_LOG_FILE`     | —                | Also write operational logs to file   |
 | Provider API keys        | —                | `*_API_KEY` vars per your config      |
 
 `.env` files are loaded automatically (real env vars take precedence).

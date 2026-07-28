@@ -22,11 +22,23 @@ type ProviderConfig struct {
 	Query     string
 }
 
+type AutoModelConfig struct {
+	Enabled       bool
+	BaseURL       string
+	APIKey        string
+	Model         string
+	Prompt        string
+	SmallModel    string
+	AnalysisModel string
+	CodingModel   string
+}
+
 type Config struct {
 	Port         string
 	Cooldown     time.Duration
 	ForceStream  bool
 	SystemPrompt string
+	AutoModel    AutoModelConfig
 	Providers    []ProviderConfig
 	Client       *http.Client
 	Routes       []model.Rule
@@ -44,6 +56,9 @@ func Load() *Config {
 	if err != nil {
 		log.Printf("config error: %v", err)
 		return nil
+	}
+	if port := os.Getenv("ROUTERLLM_PORT"); port != "" {
+		cfg.Port = port
 	}
 
 	return cfg

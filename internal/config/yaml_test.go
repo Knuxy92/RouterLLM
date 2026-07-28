@@ -30,19 +30,89 @@ providers:
     base_url: https://example.com
     api_key: sk-test
 routes:
-  - model: test-model
+  - model_id: test-model
     routes:
       - provider: test
         model: upstream-model
 `)
-	
+
 	cfg, err := loadYAML(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if cfg.Port != "9999" {
 		t.Errorf("port = %q, want 9999", cfg.Port)
+	}
+}
+
+func TestLoadPortEnvironmentOverride(t *testing.T) {
+	path := writeTempYAML(t, `
+port: "9999"
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+`)
+	t.Setenv("ROUTERLLM_CONFIG_FILE", path)
+	t.Setenv("ROUTERLLM_PORT", "8888")
+
+	cfg := Load()
+	if cfg == nil {
+		t.Fatal("Load() returned nil")
+	}
+	if cfg.Port != "8888" {
+		t.Fatalf("port = %q, want environment override 8888", cfg.Port)
+	}
+}
+
+func TestLoadYAMLAutoModel(t *testing.T) {
+	t.Setenv("AUTOMODEL_TEST_KEY", "auto-key")
+
+	promptFile, err := os.CreateTemp("", "routerllm-prompt-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(promptFile.Name())
+	if _, err := promptFile.WriteString("classify"); err != nil {
+		t.Fatal(err)
+	}
+	promptFile.Close()
+
+	path := writeTempYAML(t, `
+auto_model:
+  enabled: true
+  api_key: ${AUTOMODEL_TEST_KEY}
+  base_url: https://opencode.ai/zen
+  model: deepseek-v4-flash-free
+  prompt_file: `+promptFile.Name()+`
+  small_model: deepseek-v4-flash
+  analysis_model: glm-5.2
+  coding_model: gpt-5.6-luna
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.AutoModel.Enabled || cfg.AutoModel.APIKey != "auto-key" {
+		t.Fatalf("unexpected auto model config: %+v", cfg.AutoModel)
 	}
 }
 
@@ -53,7 +123,7 @@ providers:
     base_url: https://example.com
     api_key: sk-test
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: test
         model: m
@@ -76,7 +146,7 @@ providers:
     base_url: https://b.com
     api_key: k2
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: dup
         model: m
@@ -95,7 +165,7 @@ providers:
     base_url: https://example.com
     api_key: sk-test
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: bad
         model: m
@@ -115,7 +185,7 @@ providers:
     api_key: sk-test
     auth_mode: magic
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: bad
         model: m
@@ -135,7 +205,7 @@ providers:
     base_url: https://example.com
     api_key: sk-test
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: test
         model: m
@@ -153,7 +223,7 @@ providers:
     style: openai
     base_url: https://example.com
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: test
         model: m
@@ -172,7 +242,7 @@ providers:
     base_url: https://example.com
     api_key: sk-test
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: missing
         model: m
@@ -191,7 +261,7 @@ providers:
     base_url: https://example.com
     api_key: ${DOES_NOT_EXIST_XYZ123}
 routes:
-  - model: m
+  - model_id: m
     routes:
       - provider: test
         model: m
