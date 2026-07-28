@@ -31,6 +31,10 @@ type OpenAIToAnthropicUsage struct {
 }
 
 func AnthropicRequestToOpenAI(raw []byte) ([]byte, error) {
+	return AnthropicRequestToOpenAIWithResolver(raw, nil)
+}
+
+func AnthropicRequestToOpenAIWithResolver(raw []byte, resolve MediaResolver) ([]byte, error) {
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
@@ -91,7 +95,11 @@ func AnthropicRequestToOpenAI(raw []byte) ([]byte, error) {
 					}
 					continue
 				}
-				msg["content"] = flattenContent(msg["content"])
+				if blocks := anthropicContentToOpenAI(msg["content"]); len(blocks) > 0 && hasNonTextContent(blocks) {
+					msg["content"] = blocks
+				} else {
+					msg["content"] = flattenContent(msg["content"])
+				}
 				stripCacheControl(msg)
 				cleanMsgs = append(cleanMsgs, msg)
 				continue

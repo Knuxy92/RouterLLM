@@ -57,3 +57,25 @@ func StreamSSE(src io.Reader, dst http.ResponseWriter, filterChoices bool) error
 	}
 	return err
 }
+
+func StreamRawSSE(src io.Reader, dst http.ResponseWriter) error {
+	flusher, _ := dst.(http.Flusher)
+	buf := make([]byte, 4096)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}

@@ -8,6 +8,7 @@ services:
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:ro
       - ./system_prompt.txt:/app/system_prompt.txt:ro
+      - ./prompt_routing.txt:/app/prompt_routing.txt:ro
     restart: unless-stopped
     env_file:
       - .env

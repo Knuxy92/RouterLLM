@@ -15,6 +15,10 @@ import (
 )
 
 func TranslateRequest(body map[string]any, modelName string) ([]byte, string, error) {
+	return TranslateRequestWithResolver(body, modelName, nil)
+}
+
+func TranslateRequestWithResolver(body map[string]any, modelName string, resolve MediaResolver) ([]byte, string, error) {
 	req := make(map[string]any)
 	req["model"] = modelName
 
@@ -32,6 +36,13 @@ func TranslateRequest(body map[string]any, modelName string) ([]byte, string, er
 					systemParts = append(systemParts, t)
 				}
 				continue
+			}
+			if content, ok := msg["content"]; ok {
+				converted, err := translateOpenAIContent(content, resolve)
+				if err != nil {
+					return nil, "", fmt.Errorf("message content: %w", err)
+				}
+				msg["content"] = converted
 			}
 			messages = append(messages, msg)
 		}

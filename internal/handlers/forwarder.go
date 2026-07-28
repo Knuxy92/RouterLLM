@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -29,6 +30,10 @@ func (h *Handlers) Responses(w http.ResponseWriter, r *http.Request) {
 	h.proxy.Forward("/v1/responses", w, r)
 }
 
+func (h *Handlers) Files(w http.ResponseWriter, r *http.Request) {
+	h.proxy.ForwardFile(w, r)
+}
+
 func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	raw, err := io.ReadAll(r.Body)
@@ -50,7 +55,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBody["stream"] = true
 
-	resp, _, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
+	resp, route, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
 	if resp != nil {
 		defer resp.Body.Close()
 
@@ -66,12 +71,20 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 
-		adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, extractModel(raw))
+		if route.Provider.Style == "anthropic" {
+			_ = util.StreamRawSSE(resp.Body, w)
+		} else {
+			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, extractModel(raw))
+		}
 		return
 	}
 
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		if errors.Is(err, services.ErrAutoModelDisabled) {
+			util.WriteError(w, http.StatusBadRequest, "model_disabled", err.Error())
+		} else {
+			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		}
 		return
 	}
 }

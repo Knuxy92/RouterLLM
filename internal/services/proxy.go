@@ -4,21 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"routerllm/internal/adapter"
+	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
 	"routerllm/internal/util"
 )
 
 const maxRetries = 3
+const autoModelCacheTTL = 30 * time.Minute
+const autoModelCacheSize = 1000
 
 var deadStatuses = map[int]bool{
 	401: true, 402: true, 403: true,
@@ -29,20 +34,66 @@ var transientStatuses = map[int]bool{
 }
 
 type Proxy struct {
-	registry     *provider.Registry
-	client       *http.Client
-	log          *log.Logger
-	debug        bool
-	forceStream  bool
-	systemPrompt string
+	registry      *provider.Registry
+	client        *http.Client
+	log           *log.Logger
+	debug         bool
+	advancedDebug bool
+	forceStream   bool
+	systemPrompt  string
+	autoModel     config.AutoModelConfig
+	autoCacheMu   sync.Mutex
+	autoCache     map[string]autoModelCacheEntry
 }
 
-func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, forceStream bool, systemPrompt string) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug, forceStream: forceStream, systemPrompt: systemPrompt}
+type autoModelCacheEntry struct {
+	result    autoModelResult
+	expiresAt time.Time
+}
+
+func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, systemPrompt string, autoModel config.AutoModelConfig) *Proxy {
+	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry)}
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 	p.forward(path, w, r, p.forceStream)
+}
+
+func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
+	modelName := r.URL.Query().Get("model")
+	if modelName == "" {
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "model query parameter is required")
+		return
+	}
+	routes := p.registry.Routes(modelName)
+	if len(routes) == 0 {
+		util.WriteError(w, http.StatusNotFound, "model_not_found", fmt.Sprintf("model %q not found", modelName))
+		return
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxResolvedMediaSize))
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read file request: "+err.Error())
+		return
+	}
+	path := r.URL.Path
+	for _, route := range routes {
+		if route.Provider.Style != "openai" {
+			continue
+		}
+		resp, status, errBody, served := p.tryKeys(route.Provider, r.Method, path, body, r.Header.Get("Content-Type"), r)
+		if served {
+			return
+		}
+		if resp == nil {
+			p.logErr("file upstream failed", status, errBody)
+			continue
+		}
+		defer resp.Body.Close()
+		copyResponse(w, resp)
+		return
+	}
+	util.WriteError(w, http.StatusBadGateway, "unsupported_file", "no OpenAI-compatible file route is configured")
 }
 
 // ForwardRaw does routing, default injection, and upstream call.
@@ -55,6 +106,26 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	p.injectSystemPrompt(body)
 
 	modelName, _ := body["model"].(string)
+	if modelName == "auto" {
+		chatID := chatIdentifier(r, body)
+		result, cached := p.resolveAutoModel(r.Context(), body, chatID)
+		if result.err != nil {
+			p.log.Printf("auto-model failed: error=%v request_id=%s chat_id=%s", result.err, requestID(r), chatID)
+		} else if cached {
+			p.log.Printf("auto-model cache hit: model=%s category=%s request_id=%s chat_id=%s", result.model, result.category, requestID(r), chatID)
+		} else if p.advancedDebug {
+			p.log.Printf("auto-model selected: %s from row %s raw_content=%q request_id=%s chat_id=%s", result.model, result.category, result.rawContent, requestID(r), chatID)
+		} else {
+			p.log.Printf("auto-model selected: %s from row %s request_id=%s chat_id=%s", result.model, result.category, requestID(r), chatID)
+		}
+		resolvedModel := result.model
+		err := result.err
+		if err != nil {
+			return nil, nil, err
+		}
+		modelName = resolvedModel
+		body["model"] = modelName
+	}
 	routes := p.registry.Routes(modelName)
 	if len(routes) == 0 {
 		return nil, nil, fmt.Errorf("model %q not found", modelName)
@@ -73,7 +144,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 	}
 
-	p.log.Printf("%s model=%s routes=%d", path, modelName, len(routes))
+	p.log.Printf("%s model=%s routes=%d request_id=%s", path, modelName, len(routes), requestID(r))
 
 	var lastResp *http.Response
 	var lastRoute *provider.Route
@@ -89,7 +160,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		var err error
 
 		if pv.Style == "anthropic" {
-			reqBody, reqPath, err = adapter.TranslateRequest(routeBody, route.ModelName)
+			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
 		} else {
 			routeBody["model"] = route.ModelName
 			reqBody, err = json.Marshal(routeBody)
@@ -101,7 +172,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			continue
 		}
 
-		resp, status, errBody, served := p.tryKeys(pv, http.MethodPost, reqPath, reqBody, r)
+		resp, status, errBody, served := p.tryKeys(pv, http.MethodPost, reqPath, reqBody, "application/json", r)
 		if served {
 			if lastResp != nil {
 				lastResp.Body.Close()
@@ -131,7 +202,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if lastResp != nil {
 			lastResp.Body.Close()
 		}
-		p.log.Printf("serving %s via %s: %s", path, pv.Name, respSummary(resp))
+		p.log.Printf("serving %s via provider=%s upstream_model=%s: %s request_id=%s", path, pv.Name, route.ModelName, respSummary(resp), requestID(r))
 		return resp, &route, nil
 	}
 
@@ -139,6 +210,61 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		return lastResp, lastRoute, lastErr
 	}
 	return nil, nil, lastErr
+}
+
+type autoModelResolution struct {
+	autoModelResult
+	err error
+}
+
+func (p *Proxy) resolveAutoModel(ctx context.Context, body map[string]any, chatID string) (autoModelResolution, bool) {
+	if chatID != "" {
+		p.autoCacheMu.Lock()
+		entry, ok := p.autoCache[chatID]
+		if ok && time.Now().Before(entry.expiresAt) {
+			p.autoCacheMu.Unlock()
+			return autoModelResolution{autoModelResult: entry.result}, true
+		}
+		if ok {
+			delete(p.autoCache, chatID)
+		}
+		p.autoCacheMu.Unlock()
+	}
+
+	result, err := classifyAutoModel(ctx, p.client, p.autoModel, body)
+	if err == nil && chatID != "" {
+		p.autoCacheMu.Lock()
+		if len(p.autoCache) >= autoModelCacheSize {
+			for key := range p.autoCache {
+				delete(p.autoCache, key)
+				break
+			}
+		}
+		p.autoCache[chatID] = autoModelCacheEntry{result: result, expiresAt: time.Now().Add(autoModelCacheTTL)}
+		p.autoCacheMu.Unlock()
+	}
+
+	return autoModelResolution{autoModelResult: result, err: err}, false
+}
+
+func requestID(r *http.Request) string {
+	return r.Header.Get("X-Request-ID")
+}
+
+func chatIdentifier(r *http.Request, body map[string]any) string {
+	for _, name := range []string{"X-Chat-ID", "X-Conversation-ID"} {
+		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+
+	if metadata, ok := body["metadata"].(map[string]any); ok {
+		if value, ok := metadata["chat_id"].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+
+	return ""
 }
 
 func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, forceStream bool) {
@@ -185,7 +311,9 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 	}
 
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrAutoModelDisabled) {
+			util.WriteError(w, http.StatusBadRequest, "model_disabled", err.Error())
+		} else if strings.Contains(err.Error(), "not found") {
 			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
@@ -200,6 +328,9 @@ func parseAndForceStream(raw []byte) (map[string]any, bool, error) {
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, false, err
+	}
+	if body == nil {
+		return nil, false, errors.New("body must be a JSON object")
 	}
 
 	clientStream, _ := body["stream"].(bool)
@@ -252,7 +383,7 @@ func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	}
 }
 
-func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []byte, r *http.Request) (*http.Response, int, []byte, bool) {
+func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []byte, contentType string, r *http.Request) (*http.Response, int, []byte, bool) {
 	maxAttempts := pv.Keys.AliveCount()
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
@@ -278,8 +409,8 @@ func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []by
 			for k, v := range pv.Headers {
 				req.Header[k] = []string{v}
 			}
-			if req.Header.Get("Content-Type") == "" {
-				req.Header.Set("Content-Type", "application/json")
+			if req.Header.Get("Content-Type") == "" && contentType != "" {
+				req.Header.Set("Content-Type", contentType)
 			}
 			switch pv.AuthMode {
 			case "both":
@@ -338,7 +469,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []by
 }
 
 func (p *Proxy) logResp(msg string, r *http.Response, body []byte) {
-	if p.debug {
+	if p.advancedDebug {
 		p.log.Printf("%s: %s body=%s", msg, respSummary(r), briefBody(body))
 	} else {
 		p.log.Printf("%s: %s", msg, respSummary(r))
@@ -346,7 +477,7 @@ func (p *Proxy) logResp(msg string, r *http.Response, body []byte) {
 }
 
 func (p *Proxy) logErr(msg string, status int, body []byte) {
-	if p.debug {
+	if p.advancedDebug {
 		p.log.Printf("%s: status=%d body=%s", msg, status, briefBody(body))
 	} else {
 		p.log.Printf("%s: status=%d", msg, status)
@@ -543,25 +674,12 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, style string, w
 	w.WriteHeader(http.StatusOK)
 
 	if style == "anthropic" {
-		// Anthropic upstream → passthrough SSE with flush
-		flusher, _ := w.(http.Flusher)
-		buf := make([]byte, 4096)
-		for {
-			n, err := resp.Body.Read(buf)
-			if n > 0 {
-				w.Write(buf[:n])
-				if flusher != nil {
-					flusher.Flush()
-				}
-			}
-			if err != nil {
-				break
-			}
+		if err := util.StreamRawSSE(resp.Body, w); err != nil {
+			p.log.Printf("anthropic passthrough stream error: %v", err)
 		}
 		return
 	}
 
-	// OpenAI upstream → convert to Anthropic SSE
 	adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
 }
 
@@ -582,7 +700,7 @@ func (p *Proxy) injectSystemPrompt(body map[string]any) {
 	}
 	sysMsg := map[string]any{"role": "system", "content": p.systemPrompt}
 	body["messages"] = append([]any{sysMsg}, msgs...)
-	if p.debug {
+	if p.advancedDebug {
 		p.log.Printf("injected system prompt: len=%d chars, messages=%d", len(p.systemPrompt), len(body["messages"].([]any)))
 	}
 }

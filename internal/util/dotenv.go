@@ -23,6 +23,10 @@ func LoadDotenv(path string) error {
 		if !found {
 			continue
 		}
+		val = strings.TrimSpace(val)
+		if comment := strings.Index(val, " #"); comment >= 0 {
+			val = strings.TrimSpace(val[:comment])
+		}
 		val = strings.Trim(val, `"'`)
 		if _, ok := os.LookupEnv(key); !ok {
 			os.Setenv(key, val)

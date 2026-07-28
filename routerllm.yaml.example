@@ -21,6 +21,16 @@ system_prompt_file: system_prompt.txt  # prepend this file's content as a system
                                     # when a key gets 401/402/403, it's
                                     # skipped for this duration
 
+auto_model:
+  enabled: false
+  api_key: ${AUTOMODEL_API_KEY}
+  base_url: https://opencode.ai/zen
+  model: deepseek-v4-flash-free
+  prompt_file: prompt_routing.txt
+  small_model: deepseek-v4-flash
+  analysis_model: glm-5.2
+  coding_model: gpt-5.6-luna
+
 # --- Providers ---------------------------------------------------------------
 # Each provider requires at minimum: name, api_key, style, base_url.
 # Everything else is optional.
@@ -137,7 +147,7 @@ providers:
   #     X-Title: Continue
 
 # --- Routes ------------------------------------------------------------------
-# Model routing rules: maps a model name → list of upstream routes.
+# Model routing rules: maps a model ID → list of upstream routes.
 # Routes are tried in order until one succeeds.
 #
 # Routes must be defined here — there are no built-in defaults.
@@ -145,13 +155,13 @@ providers:
 routes:
 
   # Single provider, no defaults
-  - model: my-model
+  - model_id: my-model
     routes:
       - provider: forge
         model: gpt-4                        # upstream model name
 
   # Multiple fallback providers (tried in order)
-  - model: claude-opus-4-8
+  - model_id: claude-opus-4-8
     routes:
       - provider: freemodel-cc
         model: claude-opus-4-8
@@ -161,7 +171,7 @@ routes:
         model: claude-opus-4-8
 
   # With reasoning effort (OpenAI-style)
-  - model: gpt-5.5
+  - model_id: gpt-5.5
     routes:
       - provider: freemodel-api
         model: gpt-5.5
@@ -171,7 +181,7 @@ routes:
         model: gpt-5.5
 
   # Enable thinking on Qwen models (Alibaba)
-  - model: qwen3.7-max
+  - model_id: qwen3.7-max
     routes:
       - provider: alibaba
         model: qwen3.7-max
@@ -179,7 +189,7 @@ routes:
           enable_thinking: true
 
   # Free model, single provider
-  - model: deepseek-v4-flash-free
+  - model_id: deepseek-v4-flash-free
     routes:
       - provider: opencode
         model: deepseek-v4-flash-free
@@ -189,7 +199,7 @@ routes:
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:
 #
-#   model: string                           # REQUIRED — model name clients use
+#   model_id: string                        # REQUIRED — model ID clients use
 #
 #   routes:                                 # REQUIRED — list of upstream targets
 #     - provider: string                    # REQUIRED — must match a provider name above

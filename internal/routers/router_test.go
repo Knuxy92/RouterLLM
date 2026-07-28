@@ -1,15 +1,18 @@
 package routers
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"routerllm/internal/handlers"
 )
 
 func TestRemovedRoutesReturnNotFound(t *testing.T) {
-	router := New(handlers.New(nil, nil))
+	router := New(handlers.New(nil, nil), nil)
 	tests := []struct {
 		method string
 		path   string
@@ -36,5 +39,34 @@ func TestRemovedRoutesReturnNotFound(t *testing.T) {
 				t.Fatalf("status = %d, want 404", w.Code)
 			}
 		})
+	}
+}
+
+func TestAuditLogUsesConfiguredLogger(t *testing.T) {
+	var output bytes.Buffer
+	router := New(handlers.New(nil, nil), log.New(&output, "", 0))
+	req := httptest.NewRequest(http.MethodPost, "/missing", strings.NewReader(`{"message":"hello"}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("X-Test", "value")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	logs := output.String()
+	for _, want := range []string{
+		"user_request time=",
+		"system_response time=",
+		`body="{\"message\":\"hello\"}"`,
+		`"Authorization":["[REDACTED]"]`,
+		`"X-Test":["value"]`,
+		"status=404",
+		"duration=",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("log missing %q:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "Bearer secret") {
+		t.Fatalf("authorization leaked into log:\n%s", logs)
 	}
 }

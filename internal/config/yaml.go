@@ -28,8 +28,20 @@ type yamlConfig struct {
 	Cooldown         string         `yaml:"cooldown,omitempty"`
 	ForceStream      bool           `yaml:"force_stream,omitempty"`
 	SystemPromptFile string         `yaml:"system_prompt_file,omitempty"`
+	AutoModel        yamlAutoModel  `yaml:"auto_model,omitempty"`
 	Providers        []yamlProvider `yaml:"providers"`
 	Routes           []model.Rule   `yaml:"routes,omitempty"`
+}
+
+type yamlAutoModel struct {
+	Enabled       bool   `yaml:"enabled"`
+	BaseURL       string `yaml:"base_url,omitempty"`
+	APIKey        string `yaml:"api_key,omitempty"`
+	Model         string `yaml:"model,omitempty"`
+	PromptFile    string `yaml:"prompt_file,omitempty"`
+	SmallModel    string `yaml:"small_model,omitempty"`
+	AnalysisModel string `yaml:"analysis_model,omitempty"`
+	CodingModel   string `yaml:"coding_model,omitempty"`
 }
 
 type yamlProvider struct {
@@ -146,26 +158,31 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		return nil, fmt.Errorf("at least one provider is required")
 	}
 
+	autoModel, err := buildAutoModel(&yc.AutoModel)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(yc.Routes) == 0 {
 		return nil, fmt.Errorf("at least one route is required")
 	}
 
 	for _, rule := range yc.Routes {
-		if rule.Model == "" {
+		if rule.ModelID == "" {
 			return nil, fmt.Errorf("route has empty model name")
 		}
 		if len(rule.Routes) == 0 {
-			return nil, fmt.Errorf("route %q has no upstream routes", rule.Model)
+			return nil, fmt.Errorf("route %q has no upstream routes", rule.ModelID)
 		}
 		for _, spec := range rule.Routes {
 			if spec.Provider == "" {
-				return nil, fmt.Errorf("route %q has a spec with empty provider", rule.Model)
+				return nil, fmt.Errorf("route %q has a spec with empty provider", rule.ModelID)
 			}
 			if !seenProviders[spec.Provider] {
-				return nil, fmt.Errorf("route %q references unknown provider %q", rule.Model, spec.Provider)
+				return nil, fmt.Errorf("route %q references unknown provider %q", rule.ModelID, spec.Provider)
 			}
 			if spec.Model == "" {
-				return nil, fmt.Errorf("route %q provider %q has empty upstream model", rule.Model, spec.Provider)
+				return nil, fmt.Errorf("route %q provider %q has empty upstream model", rule.ModelID, spec.Provider)
 			}
 		}
 	}
@@ -177,9 +194,42 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		Cooldown:     cooldown,
 		ForceStream:  yc.ForceStream,
 		SystemPrompt: systemPrompt,
+		AutoModel:    autoModel,
 		Providers:    providers,
 		Client:       client,
 		Routes:       yc.Routes,
+	}, nil
+}
+
+func buildAutoModel(yam *yamlAutoModel) (AutoModelConfig, error) {
+	if !yam.Enabled {
+		return AutoModelConfig{}, nil
+	}
+
+	if yam.BaseURL == "" || yam.APIKey == "" || yam.Model == "" || yam.PromptFile == "" {
+		return AutoModelConfig{}, fmt.Errorf("auto_model requires base_url, api_key, model, and prompt_file when enabled")
+	}
+	key := resolveEnv(yam.APIKey)
+	if len(key) != 1 || strings.HasPrefix(key[0], "${") {
+		return AutoModelConfig{}, fmt.Errorf("auto_model: environment variable %s is not set", yam.APIKey)
+	}
+	prompt, err := os.ReadFile(yam.PromptFile)
+	if err != nil {
+		return AutoModelConfig{}, fmt.Errorf("failed to read auto_model prompt_file %q: %w", yam.PromptFile, err)
+	}
+	if yam.SmallModel == "" || yam.AnalysisModel == "" || yam.CodingModel == "" {
+		return AutoModelConfig{}, fmt.Errorf("auto_model requires small_model, analysis_model, and coding_model when enabled")
+	}
+
+	return AutoModelConfig{
+		Enabled:       true,
+		BaseURL:       strings.TrimSuffix(strings.TrimRight(yam.BaseURL, "/"), "/v1"),
+		APIKey:        key[0],
+		Model:         yam.Model,
+		Prompt:        strings.TrimSpace(string(prompt)),
+		SmallModel:    yam.SmallModel,
+		AnalysisModel: yam.AnalysisModel,
+		CodingModel:   yam.CodingModel,
 	}, nil
 }
 
