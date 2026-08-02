@@ -75,7 +75,7 @@ providers:
   - name: forge                   # unique name, referenced in routes
     api_key: ${FORGE_API_KEY}     # env var or list: [key1, key2]
     base_url: https://forge-gateway-api.fly.dev
-    style: openai                 # openai | anthropic
+    style: openai                 # openai | anthropic | cline
     auth_mode: bearer             # bearer | x-api-key | both
     headers:                      # optional extra headers
       Content-Type: application/json
@@ -87,6 +87,33 @@ providers:
 - `${ENV_VAR}` — reads from environment
 - Comma-separated env var values auto-split into multiple keys
 - `[key1, key2, key3]` — YAML list of static keys (not recommended in public repos)
+
+### Cline free model
+
+`style: cline` authenticates with Cline accounts instead of API keys. Log in first:
+
+```bash
+routerllm --cline-login
+```
+
+The command prints a login URL and user code, waits for authorization, then stores the
+account refresh token in `cline-accounts.json` next to the executable (`0600`). Override the
+location with `CLINE_ACCOUNTS_FILE`. Access tokens are refreshed automatically and kept in
+memory only. Run the command again to add more accounts — RouterLLM rotates them and fails
+over when one is rejected.
+
+```yaml
+providers:
+  - name: cline
+    style: cline
+    base_url: https://api.cline.bot/api
+
+routes:
+  - model_id: cline-free/glm-5.2
+    routes:
+      - provider: cline
+        model: cline-free/glm-5.2
+```
 
 ### Routes
 

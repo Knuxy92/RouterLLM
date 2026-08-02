@@ -11,6 +11,7 @@
 # Environment
 .env
 routerllm.yaml
+cline-accounts.json
 
 # Captures / logs
 capture.txt

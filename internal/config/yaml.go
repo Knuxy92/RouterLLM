@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"routerllm/internal/cline"
 	"routerllm/internal/model"
 
 	"gopkg.in/yaml.v3"
@@ -110,11 +111,11 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		}
 
 		switch yp.Style {
-		case "openai", "anthropic":
+		case "openai", "anthropic", "cline":
 		case "":
-			return nil, fmt.Errorf("provider %q: style is required (openai or anthropic)", yp.Name)
+			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, or cline)", yp.Name)
 		default:
-			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai or anthropic)", yp.Name, yp.Style)
+			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, or cline)", yp.Name, yp.Style)
 		}
 
 		switch yp.AuthMode {
@@ -125,7 +126,7 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 			return nil, fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
 		}
 
-		if len(yp.APIKey) == 0 {
+		if len(yp.APIKey) == 0 && yp.Style != "cline" {
 			return nil, fmt.Errorf("provider %q: api_key is required", yp.Name)
 		}
 
@@ -133,6 +134,17 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		for _, k := range keys {
 			if strings.HasPrefix(k, "${") && strings.HasSuffix(k, "}") {
 				return nil, fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
+			}
+		}
+
+		if yp.Style == "cline" && len(keys) == 0 {
+			store, err := cline.LoadAccountStore(cline.DefaultAccountsPath())
+			if err != nil {
+				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
+			}
+			keys = store.RefreshTokens()
+			if len(keys) == 0 {
+				return nil, fmt.Errorf("provider %q: no cline accounts found in %s — run `routerllm --cline-login`", yp.Name, store.Path())
 			}
 		}
 
