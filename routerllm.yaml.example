@@ -101,6 +101,14 @@ providers:
       Content-Type: application/json
     auth_mode: bearer
 
+  # --- Cline free model ---
+  # No api_key: credentials come from `routerllm --cline-login`, stored in
+  # cline-accounts.json next to the executable (override with CLINE_ACCOUNTS_FILE).
+
+  - name: cline
+    style: cline
+    base_url: https://api.cline.bot/api
+
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these
 # headers to match the expected client environment:
@@ -195,6 +203,13 @@ routes:
         model: deepseek-v4-flash-free
         defaults:
           thinking_budget: 8192
+
+  # Cline free model (requires `routerllm --cline-login`)
+  - model_id: cline-free/glm-5.2
+    routes:
+      - provider: cline
+        model: cline-free/glm-5.2
+
 
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:

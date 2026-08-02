@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,54 @@ routes:
 	}
 	if cfg.Port != "8888" {
 		t.Fatalf("port = %q, want environment override 8888", cfg.Port)
+	}
+}
+
+func TestLoadYAMLClineProviderReadsAccountsFile(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "cline-accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"accounts":[{"accountId":"acc_1","email":"a@example.test","refreshToken":"refresh-1"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLINE_ACCOUNTS_FILE", accounts)
+
+	path := writeTempYAML(t, `
+providers:
+  - name: cline
+    style: cline
+    base_url: https://api.cline.bot/api
+routes:
+  - model_id: cline-free/glm-5.2
+    routes:
+      - provider: cline
+        model: cline-free/glm-5.2
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 1 || cfg.Providers[0].Keys[0] != "refresh-1" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLClineProviderWithoutAccountsFails(t *testing.T) {
+	t.Setenv("CLINE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: cline
+    style: cline
+    base_url: https://api.cline.bot/api
+routes:
+  - model_id: cline-free/glm-5.2
+    routes:
+      - provider: cline
+        model: cline-free/glm-5.2
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "--cline-login") {
+		t.Fatalf("error = %v, want cline-login hint", err)
 	}
 }
 

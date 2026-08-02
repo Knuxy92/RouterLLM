@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"routerllm/internal/adapter"
+	"routerllm/internal/cline"
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
@@ -44,6 +45,8 @@ type Proxy struct {
 	autoModel     config.AutoModelConfig
 	autoCacheMu   sync.Mutex
 	autoCache     map[string]autoModelCacheEntry
+	clineMu       sync.Mutex
+	clineManagers map[string]*cline.Manager
 }
 
 type autoModelCacheEntry struct {
@@ -51,8 +54,36 @@ type autoModelCacheEntry struct {
 	expiresAt time.Time
 }
 
+type upstreamCall struct {
+	method      string
+	path        string
+	body        []byte
+	contentType string
+	sessionID   string
+}
+
+func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken string, force bool) (string, error) {
+	p.clineMu.Lock()
+	manager, ok := p.clineManagers[baseURL]
+	if !ok {
+		store, err := cline.LoadAccountStore(cline.DefaultAccountsPath())
+		if err != nil {
+			p.log.Printf("cline accounts unavailable: %v", err)
+			store = nil
+		}
+		manager = cline.NewManager(&cline.Client{
+			HTTPClient: p.client,
+			Endpoints:  cline.Endpoints{Refresh: baseURL + "/v1/auth/refresh"},
+		}, store)
+		p.clineManagers[baseURL] = manager
+	}
+	p.clineMu.Unlock()
+
+	return manager.AccessToken(ctx, refreshToken, force)
+}
+
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, systemPrompt string, autoModel config.AutoModelConfig) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry)}
+	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry), clineManagers: make(map[string]*cline.Manager)}
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
@@ -81,7 +112,13 @@ func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
 		if route.Provider.Style != "openai" {
 			continue
 		}
-		resp, status, errBody, served := p.tryKeys(route.Provider, r.Method, path, body, r.Header.Get("Content-Type"), r)
+		resp, status, errBody, served := p.tryKeys(route.Provider, upstreamCall{
+			method:      r.Method,
+			path:        path,
+			body:        body,
+			contentType: r.Header.Get("Content-Type"),
+		}, r)
+
 		if served {
 			return
 		}
@@ -157,12 +194,16 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 
 		var reqBody []byte
 		var reqPath string
+		var sessionID string
 		var err error
 
 		if pv.Style == "anthropic" {
 			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
 		} else {
 			routeBody["model"] = route.ModelName
+			if pv.Style == "cline" {
+				sessionID = cline.PrepareBody(routeBody)
+			}
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		}
@@ -172,7 +213,13 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			continue
 		}
 
-		resp, status, errBody, served := p.tryKeys(pv, http.MethodPost, reqPath, reqBody, "application/json", r)
+		resp, status, errBody, served := p.tryKeys(pv, upstreamCall{
+			method:      http.MethodPost,
+			path:        reqPath,
+			body:        reqBody,
+			contentType: "application/json",
+			sessionID:   sessionID,
+		}, r)
 		if served {
 			if lastResp != nil {
 				lastResp.Body.Close()
@@ -383,7 +430,7 @@ func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	}
 }
 
-func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []byte, contentType string, r *http.Request) (*http.Response, int, []byte, bool) {
+func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
 	maxAttempts := pv.Keys.AliveCount()
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
@@ -397,9 +444,11 @@ func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []by
 		if !ok {
 			break
 		}
+		forceRefresh := false
+		refreshed := false
 
 		for retry := 0; retry < maxRetries; retry++ {
-			req, err := http.NewRequestWithContext(r.Context(), method, pv.BaseURL+path+pv.Query, bytes.NewReader(reqBody))
+			req, err := http.NewRequestWithContext(r.Context(), call.method, pv.BaseURL+call.path+pv.Query, bytes.NewReader(call.body))
 			if err != nil {
 				p.log.Printf("failed to build request for %s: %v", pv.Name, err)
 				lastStatus = http.StatusInternalServerError
@@ -409,17 +458,30 @@ func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []by
 			for k, v := range pv.Headers {
 				req.Header[k] = []string{v}
 			}
-			if req.Header.Get("Content-Type") == "" && contentType != "" {
-				req.Header.Set("Content-Type", contentType)
+			if req.Header.Get("Content-Type") == "" && call.contentType != "" {
+				req.Header.Set("Content-Type", call.contentType)
 			}
-			switch pv.AuthMode {
-			case "both":
-				req.Header["Authorization"] = []string{"Bearer " + key}
-				req.Header["x-api-key"] = []string{key}
-			case "x-api-key":
-				req.Header["x-api-key"] = []string{key}
-			default:
-				req.Header.Set("Authorization", "Bearer "+key)
+
+			if pv.Style == "cline" {
+				token, err := p.clineAccessToken(r.Context(), pv.BaseURL, key, forceRefresh)
+				if err != nil {
+					p.log.Printf("cline token refresh failed via %s: %v", pv.Name, err)
+					lastStatus = http.StatusUnauthorized
+					lastErrBody = []byte(err.Error())
+					pv.Keys.MarkDead(key)
+					break
+				}
+				cline.SetHeaders(req.Header, token, call.sessionID)
+			} else {
+				switch pv.AuthMode {
+				case "both":
+					req.Header["Authorization"] = []string{"Bearer " + key}
+					req.Header["x-api-key"] = []string{key}
+				case "x-api-key":
+					req.Header["x-api-key"] = []string{key}
+				default:
+					req.Header.Set("Authorization", "Bearer "+key)
+				}
 			}
 
 			r2, err := p.client.Do(req)
@@ -434,6 +496,17 @@ func (p *Proxy) tryKeys(pv *provider.Provider, method, path string, reqBody []by
 					continue
 				}
 				break
+			}
+
+			if pv.Style == "cline" && r2.StatusCode == http.StatusUnauthorized && !refreshed {
+				eb, _ := io.ReadAll(r2.Body)
+				r2.Body.Close()
+				p.logResp(fmt.Sprintf("cline token stale via %s, refreshing", pv.Name), r2, eb)
+				lastStatus = r2.StatusCode
+				lastErrBody = eb
+				forceRefresh = true
+				refreshed = true
+				continue
 			}
 
 			if deadStatuses[r2.StatusCode] {

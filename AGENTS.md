@@ -54,7 +54,7 @@ All provider fields (style, base_url, headers, auth_mode, share, query) must be 
 - **Base URL**: trailing `/v1` is trimmed from base_url in YAML. Routes append `/v1/...` paths themselves.
 - **Streaming is forced**: `stream=true` on every `/v1/chat/completions` outbound request regardless of client. Non-stream clients get the SSE buffered into a single JSON response.
 - **`/v1/responses` is OpenAI-only**: anthropic-style providers are filtered out for that path; only `openai`-style providers serve it.
-- **Provider styles**: `openai` (passthrough OpenAI shape) vs `anthropic` (request translated to `/v1/messages`, response translated back).
+- **Provider styles**: `openai` (passthrough OpenAI shape), `anthropic` (request translated to `/v1/messages`, response translated back), `cline` (Cline account auth via `routerllm --cline-login`, refresh tokens in `cline-accounts.json`, access tokens in memory only).
 - **AuthMode**: `bearer` (default, `Authorization: Bearer <key>`), `x-api-key`, `both` (sends both headers).
 - **Shared keys**: use `share:` in YAML to share a key manager across providers. A key marked dead in one is dead for all.
 - **Dead vs transient**: HTTP 401/402/403 marks the key dead (cooldown, skipped until revived). 408/429/5xx triggers up to 3 retries with exponential backoff on the _same_ key before moving on.

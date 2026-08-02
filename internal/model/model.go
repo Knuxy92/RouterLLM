@@ -71,6 +71,6 @@ type Spec struct {
 }
 
 type Rule struct {
-	Model  string `yaml:"model" json:"model"`
-	Routes []Spec `yaml:"routes" json:"routes"`
+	ModelID string `yaml:"model_id" json:"model_id"`
+	Routes  []Spec `yaml:"routes" json:"routes"`
 }

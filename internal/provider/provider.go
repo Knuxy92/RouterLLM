@@ -69,8 +69,8 @@ func NewRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 			}
 		}
 		if len(rts) > 0 {
-			routes[rule.Model] = rts
-			modelSet[rule.Model] = true
+			routes[rule.ModelID] = rts
+			modelSet[rule.ModelID] = true
 		}
 	}
 

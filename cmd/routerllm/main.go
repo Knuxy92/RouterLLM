@@ -21,6 +21,13 @@ import (
 func main() {
 	_ = util.LoadDotenv(".env")
 
+	if len(os.Args) > 1 && os.Args[1] == "--cline-login" {
+		if err := runClineLogin(); err != nil {
+			log.Fatalf("cline login failed: %v", err)
+		}
+		return
+	}
+
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
 	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {
