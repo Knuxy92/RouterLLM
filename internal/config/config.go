@@ -34,14 +34,16 @@ type AutoModelConfig struct {
 }
 
 type Config struct {
-	Port         string
-	Cooldown     time.Duration
-	ForceStream  bool
-	SystemPrompt string
-	AutoModel    AutoModelConfig
-	Providers    []ProviderConfig
-	Client       *http.Client
-	Routes       []model.Rule
+	Port                 string
+	Cooldown             time.Duration
+	ForceStream          bool
+	ForwardClientHeaders bool
+	AllowClientHeaders   []string
+	SystemPrompt         string
+	AutoModel            AutoModelConfig
+	Providers            []ProviderConfig
+	Client               *http.Client
+	Routes               []model.Rule
 }
 
 func Load() *Config {

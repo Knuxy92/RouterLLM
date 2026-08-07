@@ -120,7 +120,7 @@ func TestProxyResolveAutoModelCachesByChatID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	proxy := NewProxy(nil, server.Client(), nil, false, false, false, "", config.AutoModelConfig{
+	proxy := NewProxy(nil, server.Client(), nil, false, false, false, true, nil, "", config.AutoModelConfig{
 		Enabled:    true,
 		BaseURL:    server.URL,
 		APIKey:     "key",
@@ -154,7 +154,7 @@ func TestProxyResolveAutoModelDoesNotCacheWithoutChatID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	proxy := NewProxy(nil, server.Client(), nil, false, false, false, "", config.AutoModelConfig{
+	proxy := NewProxy(nil, server.Client(), nil, false, false, false, true, nil, "", config.AutoModelConfig{
 		Enabled:    true,
 		BaseURL:    server.URL,
 		APIKey:     "key",

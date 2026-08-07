@@ -25,13 +25,15 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type yamlConfig struct {
-	Port             string         `yaml:"port,omitempty"`
-	Cooldown         string         `yaml:"cooldown,omitempty"`
-	ForceStream      bool           `yaml:"force_stream,omitempty"`
-	SystemPromptFile string         `yaml:"system_prompt_file,omitempty"`
-	AutoModel        yamlAutoModel  `yaml:"auto_model,omitempty"`
-	Providers        []yamlProvider `yaml:"providers"`
-	Routes           []model.Rule   `yaml:"routes,omitempty"`
+	Port                 string         `yaml:"port,omitempty"`
+	Cooldown             string         `yaml:"cooldown,omitempty"`
+	ForceStream          bool           `yaml:"force_stream,omitempty"`
+	ForwardClientHeaders *bool          `yaml:"forward_client_headers,omitempty"`
+	AllowClientHeaders   []string       `yaml:"allow_client_headers,omitempty"`
+	SystemPromptFile     string         `yaml:"system_prompt_file,omitempty"`
+	AutoModel            yamlAutoModel  `yaml:"auto_model,omitempty"`
+	Providers            []yamlProvider `yaml:"providers"`
+	Routes               []model.Rule   `yaml:"routes,omitempty"`
 }
 
 type yamlAutoModel struct {
@@ -200,16 +202,22 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 	}
 
 	client := &http.Client{Transport: newTransport()}
+	forwardClientHeaders := true
+	if yc.ForwardClientHeaders != nil {
+		forwardClientHeaders = *yc.ForwardClientHeaders
+	}
 
 	return &Config{
-		Port:         port,
-		Cooldown:     cooldown,
-		ForceStream:  yc.ForceStream,
-		SystemPrompt: systemPrompt,
-		AutoModel:    autoModel,
-		Providers:    providers,
-		Client:       client,
-		Routes:       yc.Routes,
+		Port:                 port,
+		Cooldown:             cooldown,
+		ForceStream:          yc.ForceStream,
+		ForwardClientHeaders: forwardClientHeaders,
+		AllowClientHeaders:   yc.AllowClientHeaders,
+		SystemPrompt:         systemPrompt,
+		AutoModel:            autoModel,
+		Providers:            providers,
+		Client:               client,
+		Routes:               yc.Routes,
 	}, nil
 }
 

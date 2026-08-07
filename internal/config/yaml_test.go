@@ -45,6 +45,60 @@ routes:
 	if cfg.Port != "9999" {
 		t.Errorf("port = %q, want 9999", cfg.Port)
 	}
+	if !cfg.ForwardClientHeaders {
+		t.Error("forward_client_headers = false, want true by default")
+	}
+}
+
+func TestLoadYAMLForwardClientHeadersCanBeDisabled(t *testing.T) {
+	path := writeTempYAML(t, `
+forward_client_headers: false
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ForwardClientHeaders {
+		t.Error("forward_client_headers = true, want false")
+	}
+}
+
+func TestLoadYAMLAllowClientHeaders(t *testing.T) {
+	path := writeTempYAML(t, `
+allow_client_headers:
+  - X-Request-ID
+  - User-Agent
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"X-Request-ID", "User-Agent"}
+	if len(cfg.AllowClientHeaders) != 2 || cfg.AllowClientHeaders[0] != want[0] || cfg.AllowClientHeaders[1] != want[1] {
+		t.Fatalf("allow_client_headers = %#v, want %#v", cfg.AllowClientHeaders, want)
+	}
 }
 
 func TestLoadPortEnvironmentOverride(t *testing.T) {

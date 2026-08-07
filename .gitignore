@@ -2,20 +2,16 @@
 /routerllm
 /routerlm
 /api
-/anthropic-capture
 *.exe
 *.exe~
 *.test
 *.out
+*.log
 
 # Environment
 .env
 routerllm.yaml
 cline-accounts.json
-
-# Captures / logs
-capture.txt
-*.capture.txt
 
 # IDE / OS
 .idea/

@@ -51,7 +51,7 @@ func TestForwardRawSendsClineHeadersAndSession(t *testing.T) {
 	upstream := httptest.NewServer(mux)
 	defer upstream.Close()
 
-	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, "", config.AutoModelConfig{})
+	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
 	resp, route, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
@@ -115,7 +115,7 @@ func TestForwardRawRefreshesClineTokenOnUnauthorized(t *testing.T) {
 	upstream := httptest.NewServer(mux)
 	defer upstream.Close()
 
-	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, "", config.AutoModelConfig{})
+	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
 	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
@@ -161,7 +161,7 @@ func TestForwardRawRotatesClineAccountsAfterUnauthorized(t *testing.T) {
 	upstream := httptest.NewServer(mux)
 	defer upstream.Close()
 
-	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1", "refresh-2"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, "", config.AutoModelConfig{})
+	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1", "refresh-2"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
 	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
