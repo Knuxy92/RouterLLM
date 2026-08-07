@@ -34,19 +34,34 @@ var transientStatuses = map[int]bool{
 	408: true, 429: true, 500: true, 502: true, 503: true, 504: true,
 }
 
+var hopByHopHeaders = map[string]bool{
+	"connection":          true,
+	"content-length":      true,
+	"host":                true,
+	"keep-alive":          true,
+	"proxy-authorization": true,
+	"proxy-connection":    true,
+	"te":                  true,
+	"trailer":             true,
+	"transfer-encoding":   true,
+	"upgrade":             true,
+}
+
 type Proxy struct {
-	registry      *provider.Registry
-	client        *http.Client
-	log           *log.Logger
-	debug         bool
-	advancedDebug bool
-	forceStream   bool
-	systemPrompt  string
-	autoModel     config.AutoModelConfig
-	autoCacheMu   sync.Mutex
-	autoCache     map[string]autoModelCacheEntry
-	clineMu       sync.Mutex
-	clineManagers map[string]*cline.Manager
+	registry             *provider.Registry
+	client               *http.Client
+	log                  *log.Logger
+	debug                bool
+	advancedDebug        bool
+	forceStream          bool
+	forwardClientHeaders bool
+	allowClientHeaders   []string
+	systemPrompt         string
+	autoModel            config.AutoModelConfig
+	autoCacheMu          sync.Mutex
+	autoCache            map[string]autoModelCacheEntry
+	clineMu              sync.Mutex
+	clineManagers        map[string]*cline.Manager
 }
 
 type autoModelCacheEntry struct {
@@ -82,8 +97,25 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 	return manager.AccessToken(ctx, refreshToken, force)
 }
 
-func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, systemPrompt string, autoModel config.AutoModelConfig) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry), clineManagers: make(map[string]*cline.Manager)}
+func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string, autoModel config.AutoModelConfig) *Proxy {
+	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry), clineManagers: make(map[string]*cline.Manager)}
+}
+
+func copyClientHeaders(dst, src *http.Request, allow []string) {
+	allowed := make(map[string]bool, len(allow))
+	for _, h := range allow {
+		allowed[strings.ToLower(strings.TrimSpace(h))] = true
+	}
+	for key, values := range src.Header {
+		lk := strings.ToLower(key)
+		if hopByHopHeaders[lk] {
+			continue
+		}
+		if len(allow) > 0 && !allowed[lk] {
+			continue
+		}
+		dst.Header[key] = append([]string(nil), values...)
+	}
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
@@ -454,6 +486,9 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				lastStatus = http.StatusInternalServerError
 				lastErrBody = []byte(err.Error())
 				break
+			}
+			if p.forwardClientHeaders {
+				copyClientHeaders(req, r, p.allowClientHeaders)
 			}
 			for k, v := range pv.Headers {
 				req.Header[k] = []string{v}

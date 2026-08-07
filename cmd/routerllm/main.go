@@ -55,7 +55,7 @@ func main() {
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
-	proxy := services.NewProxy(registry, cfg.Client, operationalLogger, debug, advancedDebug, cfg.ForceStream, cfg.SystemPrompt, cfg.AutoModel)
+	proxy := services.NewProxy(registry, cfg.Client, operationalLogger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt, cfg.AutoModel)
 	overviewLogger.Printf("loaded %d provider(s), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", len(cfg.Providers), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
 
 	models := registry.AllModels()
