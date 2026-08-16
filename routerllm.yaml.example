@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=./schema.json
+
 # =============================================================================
 # routerllm.yaml — RouterLLM configuration
 # =============================================================================
@@ -222,7 +224,7 @@ routes:
 #
 #   routes:                                 # REQUIRED — list of upstream targets
 #     - provider: string                    # REQUIRED — must match a provider name above
-#       model: string                       # OPTIONAL — upstream model name (defaults to model)
+#       model: string                       # REQUIRED — upstream model name (no fallback to model_id)
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # "low" | "medium" | "high" | "max"
 #         enable_thinking: bool             # true | false (Qwen-style)
