@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routerllm.dev/schema/routerllm.schema.json",
+  "title": "RouterLLM Configuration",
+  "description": "Schema for routerllm.yaml configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "port": {
+      "description": "HTTP server listen port. Overridden by the ROUTERLLM_PORT environment variable.",
+      "default": 1765,
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      ]
+    },
+    "cooldown": {
+      "type": "string",
+      "description": "How long a key is skipped after a dead response (401/402/403). Go duration syntax; compound values like 1h30m are allowed.",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+      "default": "60s"
+    },
+    "force_stream": {
+      "type": "boolean",
+      "default": false,
+      "description": "Always serve /v1/chat/completions responses as Anthropic-style SSE, regardless of the client's stream flag."
+    },
+    "forward_client_headers": {
+      "type": "boolean",
+      "default": true,
+      "description": "Forward safe client headers upstream."
+    },
+    "allow_client_headers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "If specified, only these client headers are forwarded (case-insensitive; hop-by-hop headers are always blocked)."
+    },
+    "system_prompt_file": {
+      "type": "string",
+      "description": "Path to a file whose contents are prepended as a system message."
+    },
+    "auto_model": {
+      "$ref": "#/$defs/autoModel"
+    },
+    "providers": {
+      "type": "array",
+      "description": "Upstream provider configurations.",
+      "items": {
+        "$ref": "#/$defs/provider"
+      }
+    },
+    "routes": {
+      "type": "array",
+      "description": "Model routing rules.",
+      "items": {
+        "$ref": "#/$defs/modelRoute"
+      }
+    }
+  },
+  "$defs": {
+    "apiKey": {
+      "description": "API key(s). A string may be a ${VAR} environment reference; env values containing commas are split into multiple keys.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      ]
+    },
+    "headers": {
+      "type": "object",
+      "description": "Additional HTTP headers sent to the provider.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "style", "base_url"],
+      "if": {
+        "properties": {
+          "style": {
+            "const": "cline"
+          }
+        },
+        "required": ["style"]
+      },
+      "then": {},
+      "else": {
+        "required": ["api_key"]
+      },
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique provider name."
+        },
+        "api_key": {
+          "$ref": "#/$defs/apiKey"
+        },
+        "style": {
+          "type": "string",
+          "enum": ["openai", "anthropic", "cline"],
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth)."
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Provider base URL. A trailing / and /v1 suffix are trimmed automatically."
+        },
+        "headers": {
+          "$ref": "#/$defs/headers"
+        },
+        "auth_mode": {
+          "type": "string",
+          "enum": ["bearer", "x-api-key", "both"],
+          "default": "bearer",
+          "description": "Authentication mode."
+        },
+        "share": {
+          "type": "string",
+          "description": "Shared key group: providers with the same share value share keys and cooldown state."
+        },
+        "query": {
+          "type": "string",
+          "description": "Query string appended verbatim to every upstream request path, including the leading '?' (e.g. \"?beta=true\")."
+        }
+      }
+    },
+    "autoModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        },
+        "required": ["enabled"]
+      },
+      "then": {
+        "required": [
+          "api_key",
+          "base_url",
+          "model",
+          "prompt_file",
+          "small_model",
+          "analysis_model",
+          "coding_model"
+        ]
+      },
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "api_key": {
+          "$ref": "#/$defs/apiKey"
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "model": {
+          "type": "string"
+        },
+        "prompt_file": {
+          "type": "string"
+        },
+        "small_model": {
+          "type": "string"
+        },
+        "analysis_model": {
+          "type": "string"
+        },
+        "coding_model": {
+          "type": "string"
+        }
+      }
+    },
+    "routeDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reasoning_effort": {
+          "type": "string",
+          "description": "Reasoning effort passed through verbatim to the provider (e.g. low, medium, high, max; some providers accept minimal or ultra). Only applied when the request doesn't already set reasoning_effort."
+        },
+        "enable_thinking": {
+          "type": "boolean",
+          "description": "Enable thinking for models that support it."
+        },
+        "thinking_budget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of thinking tokens."
+        }
+      }
+    },
+    "upstreamRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider name. Must match a provider defined above."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Upstream model name. Required — there is no fallback to model_id."
+        },
+        "defaults": {
+          "$ref": "#/$defs/routeDefaults"
+        }
+      }
+    },
+    "modelRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "routes"],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model ID exposed to clients."
+        },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Upstream routes tried in order.",
+          "items": {
+            "$ref": "#/$defs/upstreamRoute"
+          }
+        }
+      }
+    }
+  }
+}
