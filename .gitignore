@@ -21,5 +21,13 @@ cline-accounts.json
 *~
 .DS_Store
 
+# Frontend — internal/admin/dist is intentionally committed: go:embed needs it,
+# so `go build ./...` must work in a clean clone without running Node.
+web/node_modules/
+web/.vite/
+
+# Admin write-back backups
+*.bak
+
 # Project memory
 memory-bank/

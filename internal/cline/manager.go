@@ -48,6 +48,7 @@ func (m *Manager) AccessToken(ctx context.Context, refreshToken string, force bo
 	}
 
 	m.mu.Lock()
+	m.pruneExpiredLocked()
 	m.tokens[refreshToken] = token
 	m.mu.Unlock()
 
@@ -58,6 +59,19 @@ func (m *Manager) AccessToken(ctx context.Context, refreshToken string, force bo
 	}
 
 	return token.AccessToken, nil
+}
+
+// pruneExpiredLocked drops tokens that can no longer satisfy a request. Refresh
+// tokens rotate and every config reload re-reads the account file, so without
+// this the map keeps one entry per historical token for the process lifetime.
+// Caller must hold m.mu.
+func (m *Manager) pruneExpiredLocked() {
+	cutoff := time.Now().Add(tokenSkew)
+	for key, token := range m.tokens {
+		if token.AccessToken == "" || !cutoff.Before(token.ExpiresAt) {
+			delete(m.tokens, key)
+		}
+	}
 }
 
 func (m *Manager) Login(ctx context.Context, notify func(DeviceAuth)) (Account, error) {
@@ -93,6 +107,7 @@ func (m *Manager) Login(ctx context.Context, notify func(DeviceAuth)) (Account, 
 	}
 
 	m.mu.Lock()
+	m.pruneExpiredLocked()
 	m.tokens[token.RefreshToken] = token
 	m.mu.Unlock()
 

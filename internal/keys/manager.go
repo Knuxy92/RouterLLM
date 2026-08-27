@@ -98,3 +98,56 @@ func Mask(value string) string {
 	}
 	return "..." + value[len(value)-4:]
 }
+
+type State struct {
+	Masked    string
+	Alive     bool
+	DeadUntil time.Time
+}
+
+func (m *Manager) States() []State {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	out := make([]State, 0, len(m.entries))
+
+	for _, e := range m.entries {
+		out = append(out, State{
+			Masked:    Mask(e.value),
+			Alive:     !e.deadUntil.After(now),
+			DeadUntil: e.deadUntil,
+		})
+	}
+
+	return out
+}
+
+func (m *Manager) Snapshot() map[string]time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]time.Time, len(m.entries))
+
+	for _, e := range m.entries {
+		if !e.deadUntil.IsZero() {
+			out[e.value] = e.deadUntil
+		}
+	}
+
+	return out
+}
+
+func (m *Manager) Restore(state map[string]time.Time) {
+	if len(state) == 0 {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+
+	for i := range m.entries {
+		if deadUntil, ok := state[m.entries[i].value]; ok && deadUntil.After(now) {
+			m.entries[i].deadUntil = deadUntil
+		}
+	}
+}

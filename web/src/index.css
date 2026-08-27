@@ -1,0 +1,197 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ---------------------------------------------------------------------------
+   RouterLLM admin console — design tokens
+
+   Palette rule: color carries state, never decoration. The four signal colors
+   map 1:1 onto the key state machine in internal/keys/manager.go:
+     live    emerald  key alive, provider serving
+     cooling amber    transient retry / cooldown counting down
+     dead    rose     401/402/403 — key marked dead
+     parked  indigo   disabled: true in routerllm.yaml
+   Nothing else in the UI is allowed to use these hues.
+
+   Base is cool graphite with a blue cast, not flat black.
+--------------------------------------------------------------------------- */
+
+:root {
+  --radius: 0.5rem;
+
+  --bg-void: oklch(0.16 0.014 265);
+  --bg-panel: oklch(0.21 0.016 265);
+  --bg-inset: oklch(0.135 0.012 265);
+  --bg-raised: oklch(0.255 0.018 265);
+
+  --line: oklch(0.31 0.018 265);
+  --line-strong: oklch(0.42 0.022 265);
+
+  --ink: oklch(0.95 0.005 265);
+  --ink-dim: oklch(0.72 0.012 265);
+  --ink-faint: oklch(0.55 0.014 265);
+  --ink-ghost: oklch(0.42 0.016 265);
+
+  --live: oklch(0.76 0.16 162);
+  --live-bg: oklch(0.76 0.16 162 / 0.12);
+  --cooling: oklch(0.81 0.15 78);
+  --cooling-bg: oklch(0.81 0.15 78 / 0.12);
+  --dead: oklch(0.67 0.2 17);
+  --dead-bg: oklch(0.67 0.2 17 / 0.12);
+  --parked: oklch(0.62 0.16 279);
+  --parked-bg: oklch(0.62 0.16 279 / 0.14);
+
+  --background: var(--bg-void);
+  --foreground: var(--ink);
+  --card: var(--bg-panel);
+  --card-foreground: var(--ink);
+  --popover: var(--bg-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--live);
+  --primary-foreground: oklch(0.16 0.014 265);
+  --secondary: var(--bg-raised);
+  --secondary-foreground: var(--ink);
+  --muted: var(--bg-raised);
+  --muted-foreground: var(--ink-faint);
+  --accent: var(--bg-raised);
+  --accent-foreground: var(--ink);
+  --destructive: var(--dead);
+  --destructive-foreground: var(--ink);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--live);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-void: var(--bg-void);
+  --color-panel: var(--bg-panel);
+  --color-inset: var(--bg-inset);
+  --color-raised: var(--bg-raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-ghost: var(--ink-ghost);
+
+  --color-live: var(--live);
+  --color-live-bg: var(--live-bg);
+  --color-cooling: var(--cooling);
+  --color-cooling-bg: var(--cooling-bg);
+  --color-dead: var(--dead);
+  --color-dead-bg: var(--dead-bg);
+  --color-parked: var(--parked);
+  --color-parked-bg: var(--parked-bg);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Identifiers are literal YAML strings — they always read as code. */
+  code,
+  .ident {
+    font-family: var(--font-mono);
+    font-feature-settings: "zero", "ss01";
+  }
+
+  ::selection {
+    background-color: var(--live-bg);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg-inset);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border: 2px solid var(--bg-inset);
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-ghost);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Rack rails: faint vertical scoring behind panel group headers. */
+  .rack {
+    background-image: repeating-linear-gradient(
+      to right,
+      transparent 0 3px,
+      color-mix(in oklch, var(--line) 45%, transparent) 3px 4px
+    );
+    background-size: 4px 100%;
+  }
+
+  .signal-glow {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--live) 40%, transparent),
+      0 0 18px -6px var(--live);
+  }
+}
+
+@keyframes border-beam {
+  to {
+    offset-distance: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

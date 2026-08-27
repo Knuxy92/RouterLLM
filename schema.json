@@ -48,9 +48,6 @@
       "type": "string",
       "description": "Path to a file whose contents are prepended as a system message."
     },
-    "auto_model": {
-      "$ref": "#/$defs/autoModel"
-    },
     "providers": {
       "type": "array",
       "description": "Upstream provider configurations.",
@@ -94,12 +91,24 @@
       "additionalProperties": false,
       "required": ["name", "style", "base_url"],
       "if": {
-        "properties": {
-          "style": {
-            "const": "cline"
+        "anyOf": [
+          {
+            "properties": {
+              "style": {
+                "const": "cline"
+              }
+            },
+            "required": ["style"]
+          },
+          {
+            "properties": {
+              "disabled": {
+                "const": true
+              }
+            },
+            "required": ["disabled"]
           }
-        },
-        "required": ["style"]
+        ]
       },
       "then": {},
       "else": {
@@ -140,57 +149,11 @@
         "query": {
           "type": "string",
           "description": "Query string appended verbatim to every upstream request path, including the leading '?' (e.g. \"?beta=true\")."
-        }
-      }
-    },
-    "autoModel": {
-      "type": "object",
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "enabled": {
-            "const": true
-          }
         },
-        "required": ["enabled"]
-      },
-      "then": {
-        "required": [
-          "api_key",
-          "base_url",
-          "model",
-          "prompt_file",
-          "small_model",
-          "analysis_model",
-          "coding_model"
-        ]
-      },
-      "properties": {
-        "enabled": {
+        "disabled": {
           "type": "boolean",
-          "default": false
-        },
-        "api_key": {
-          "$ref": "#/$defs/apiKey"
-        },
-        "base_url": {
-          "type": "string",
-          "format": "uri"
-        },
-        "model": {
-          "type": "string"
-        },
-        "prompt_file": {
-          "type": "string"
-        },
-        "small_model": {
-          "type": "string"
-        },
-        "analysis_model": {
-          "type": "string"
-        },
-        "coding_model": {
-          "type": "string"
+          "default": false,
+          "description": "When true, this provider is skipped entirely and its api_key/credential validation is relaxed \u2014 use it to park a provider without deleting it."
         }
       }
     },
@@ -230,6 +193,11 @@
         },
         "defaults": {
           "$ref": "#/$defs/routeDefaults"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this upstream route entry is skipped; other entries for the same model_id still serve it."
         }
       }
     },

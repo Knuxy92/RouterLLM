@@ -67,6 +67,7 @@ type RequestDefaults struct {
 type Spec struct {
 	Provider string          `yaml:"provider" json:"provider"`
 	Model    string          `yaml:"model" json:"model"`
+	Disabled bool            `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 	Defaults RequestDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
 }
 

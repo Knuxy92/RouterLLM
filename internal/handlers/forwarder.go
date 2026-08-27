@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -14,12 +13,11 @@ import (
 )
 
 type Handlers struct {
-	proxy  *services.Proxy
-	models []string
+	proxy *services.Proxy
 }
 
-func New(proxy *services.Proxy, models []string) *Handlers {
-	return &Handlers{proxy: proxy, models: models}
+func New(proxy *services.Proxy) *Handlers {
+	return &Handlers{proxy: proxy}
 }
 
 func (h *Handlers) ChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -80,11 +78,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		if errors.Is(err, services.ErrAutoModelDisabled) {
-			util.WriteError(w, http.StatusBadRequest, "model_disabled", err.Error())
-		} else {
-			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
-		}
+		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
 }
@@ -98,8 +92,10 @@ func extractModel(raw []byte) string {
 }
 
 func (h *Handlers) Models(w http.ResponseWriter, r *http.Request) {
-	data := make([]model.Model, 0, len(h.models))
-	for _, id := range h.models {
+	models := h.proxy.Models()
+	data := make([]model.Model, 0, len(models))
+
+	for _, id := range models {
 		data = append(data, model.Model{
 			ID:      id,
 			Object:  "model",
@@ -107,6 +103,7 @@ func (h *Handlers) Models(w http.ResponseWriter, r *http.Request) {
 			OwnedBy: "RouterLLM",
 		})
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(model.ModelList{Object: "list", Data: data})
 }

@@ -53,7 +53,7 @@ func TestForwardRawClientHeaders(t *testing.T) {
 				ModelID: "test-model",
 				Routes:  []model.Spec{{Provider: "test", Model: "upstream-model"}},
 			}}, time.Minute)
-			proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, tt.forward, tt.allow, "", config.AutoModelConfig{})
+			proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, tt.forward, tt.allow, "")
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			req.Header.Set("X-Client-Header", "client-value")
 			req.Header.Set("Authorization", "Bearer client-token")

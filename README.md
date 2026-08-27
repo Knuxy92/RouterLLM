@@ -119,13 +119,6 @@ routes:
 
 Map client-facing model names to upstream provider+model pairs. Routes are tried in order until one succeeds.
 
-### Auto Model
-
-Set `auto_model.enabled: true` to expose an `auto` model. The router sends the
-request input to the configured classifier, then maps its exact category to
-`small_model`, `analysis_model`, or `coding_model`. Set `AUTOMODEL_API_KEY` in
-`.env` or the environment before startup.
-
 ```yaml
 routes:
   - model_id: my-model            # ID clients send in requests
@@ -188,7 +181,7 @@ routes:
 |--------------------------|------------------|---------------------------------------|
 | `ROUTERLLM_PORT`         | `1765`           | Server listen port                    |
 | `ROUTERLLM_CONFIG_FILE`  | `routerllm.yaml` | Config file path                      |
-| `ROUTERLLM_DEBUG`        | `false`          | Show operational routing/retry logs   |
+| `ROUTERLLM_DEBUG`        | `false`          | Per-request routing trace (model, chosen provider). Failures — dead keys, retries, exhausted providers — are always logged. |
 | `ROUTERLLM_DEBUG_ADVANCED` | `false`        | Log client/system headers and bodies to the log file |
 | `ROUTERLLM_LOG_FILE`     | —                | Also write operational logs to file   |
 | Provider API keys        | —                | `*_API_KEY` vars per your config      |

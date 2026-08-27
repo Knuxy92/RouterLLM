@@ -1,23 +1,23 @@
-package main
+package adapter
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"routerllm/internal/adapter"
 )
 
-func TestTranslateClaudeCodeToOpenAI(t *testing.T) {
+func TestAnthropicRequestToOpenAIFlattensClaudeCodeSystemBlocks(t *testing.T) {
 	raw := `{"model":"deepseek-v4-flash-free","messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.215.f11; cc_entrypoint=cli;"},{"type":"text","text":"You are Claude Code.","cache_control":{"type":"ephemeral"}},{"type":"text","text":"Be helpful.","cache_control":{"type":"ephemeral"}}],"tools":[],"metadata":{"user_id":"abc"},"max_tokens":32000,"stream":true}`
 
-	got, err := adapter.AnthropicRequestToOpenAI([]byte(raw))
+	got, err := AnthropicRequestToOpenAI([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var body map[string]any
-	json.Unmarshal(got, &body)
+	if err := json.Unmarshal(got, &body); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, ok := body["system"]; ok {
 		t.Error("system field should be removed")
@@ -37,23 +37,19 @@ func TestTranslateClaudeCodeToOpenAI(t *testing.T) {
 	if !ok {
 		t.Fatal("system message content should be a string")
 	}
-	if !strings.Contains(content, "x-anthropic-billing-header") {
-		t.Error("missing billing header")
-	}
-	if !strings.Contains(content, "You are Claude Code") {
-		t.Error("missing Claude Code identity")
-	}
-	if !strings.Contains(content, "Be helpful") {
-		t.Error("missing helpful instruction")
+	for _, want := range []string{"x-anthropic-billing-header", "You are Claude Code", "Be helpful"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("system content missing %q", want)
+		}
 	}
 
 	second, _ := msgs[1].(map[string]any)
-	content2, ok := second["content"].(string)
+	userContent, ok := second["content"].(string)
 	if !ok {
 		t.Fatal("user message content should be a string")
 	}
-	if content2 != "Hello" {
-		t.Errorf("user content = %q, want Hello", content2)
+	if userContent != "Hello" {
+		t.Errorf("user content = %q, want Hello", userContent)
 	}
 
 	for _, key := range []string{"tools", "metadata"} {
@@ -63,53 +59,62 @@ func TestTranslateClaudeCodeToOpenAI(t *testing.T) {
 	}
 }
 
-func TestTranslateWithSystemRoleMessage(t *testing.T) {
+func TestAnthropicRequestToOpenAIMergesSystemRoleMessage(t *testing.T) {
 	raw := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]},{"role":"system","content":[{"type":"text","text":"Tools available.","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"You are Claude Code."}],"max_tokens":32000}`
 
-	got, err := adapter.AnthropicRequestToOpenAI([]byte(raw))
+	got, err := AnthropicRequestToOpenAI([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var body map[string]any
-	json.Unmarshal(got, &body)
-	msgs := body["messages"].([]any)
-
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	if err := json.Unmarshal(got, &body); err != nil {
+		t.Fatal(err)
 	}
 
-	first := msgs[0].(map[string]any)
-	if first["role"] != "system" {
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		t.Fatal("messages should be an array")
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(msgs))
+	}
+
+	first, _ := msgs[0].(map[string]any)
+	if first == nil || first["role"] != "system" {
 		t.Fatal("first message should be system")
 	}
-	content := first["content"].(string)
-	if !strings.Contains(content, "You are Claude Code") {
-		t.Error("missing top-level system")
-	}
-	if !strings.Contains(content, "Tools available") {
-		t.Error("missing role:system message")
+	content, _ := first["content"].(string)
+	for _, want := range []string{"You are Claude Code", "Tools available"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("system content missing %q", want)
+		}
 	}
 }
 
-func TestTranslateWithContentBlocks(t *testing.T) {
+func TestAnthropicRequestToOpenAIJoinsMultipleTextBlocks(t *testing.T) {
 	raw := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>"},{"type":"text","text":"Hey Claude"}]}],"max_tokens":32000}`
 
-	got, err := adapter.AnthropicRequestToOpenAI([]byte(raw))
+	got, err := AnthropicRequestToOpenAI([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var body map[string]any
-	json.Unmarshal(got, &body)
-	msgs := body["messages"].([]any)
-	msg := msgs[0].(map[string]any)
-	content := msg["content"].(string)
-
-	if !strings.Contains(content, "<system-reminder>") {
-		t.Error("missing text block 1")
+	if err := json.Unmarshal(got, &body); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(content, "Hey Claude") {
-		t.Error("missing text block 2")
+
+	msgs, ok := body["messages"].([]any)
+	if !ok || len(msgs) == 0 {
+		t.Fatal("messages should be a non-empty array")
+	}
+	msg, _ := msgs[0].(map[string]any)
+	content, _ := msg["content"].(string)
+
+	for _, want := range []string{"<system-reminder>", "Hey Claude"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("content missing %q", want)
+		}
 	}
 }

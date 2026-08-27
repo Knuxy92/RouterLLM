@@ -6,9 +6,8 @@ services:
     ports:
       - "${ROUTERLLM_PORT:-1765}:${ROUTERLLM_PORT:-1765}"
     volumes:
-      - ./routerllm.yaml:/app/routerllm.yaml:ro
+      - ./routerllm.yaml:/app/routerllm.yaml:rw
       - ./system_prompt.txt:/app/system_prompt.txt:ro
-      - ./prompt_routing.txt:/app/prompt_routing.txt:ro
       - ./cline-accounts.json:/app/cline-accounts.json:ro
     restart: unless-stopped
     env_file:
