@@ -32,8 +32,8 @@ func TestMessagesDoesNotDoubleConvertForceStream(t *testing.T) {
 	}}, []model.Rule{{
 		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
 	}}, time.Minute)
-	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, registry.AllModels())
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
 		`{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`,
 	))
@@ -71,8 +71,8 @@ func TestMessagesPassesThroughAnthropicRoute(t *testing.T) {
 	}}, []model.Rule{{
 		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
 	}}, time.Minute)
-	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, registry.AllModels())
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
 		`{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`,
 	))
@@ -89,8 +89,8 @@ func TestMessagesPassesThroughAnthropicRoute(t *testing.T) {
 }
 
 func TestChatCompletionsRejectsJSONNull(t *testing.T) {
-	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, nil)
+	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("null"))
 	w := httptest.NewRecorder()
 
@@ -117,8 +117,8 @@ func TestMessagesNormalizesUpstreamErrors(t *testing.T) {
 	}}, []model.Rule{{
 		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
 	}}, time.Minute)
-	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, registry.AllModels())
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
 		`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`,
 	))
@@ -135,8 +135,8 @@ func TestMessagesNormalizesUpstreamErrors(t *testing.T) {
 }
 
 func TestFilesRequiresModelQuery(t *testing.T) {
-	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, nil)
+	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodGet, "/v1/files", nil)
 	w := httptest.NewRecorder()
 
@@ -171,8 +171,8 @@ func TestFilesPassesThroughSelectedOpenAIProvider(t *testing.T) {
 	}}, []model.Rule{{
 		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
 	}}, time.Minute)
-	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "", config.AutoModelConfig{})
-	h := New(proxy, registry.AllModels())
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "")
+	h := New(proxy)
 	req := httptest.NewRequest(http.MethodPost, "/v1/files?model=test-model", strings.NewReader("file-bytes"))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
 	w := httptest.NewRecorder()

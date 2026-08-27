@@ -15,3 +15,9 @@ __pycache__/
 routerllm
 *.log
 /tmp
+
+# Frontend build inputs/outputs (regenerated in the web-builder stage)
+web/node_modules/
+web/.vite/
+internal/admin/dist/
+ui-mockups/

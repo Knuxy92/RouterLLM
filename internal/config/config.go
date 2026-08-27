@@ -20,17 +20,7 @@ type ProviderConfig struct {
 	ShareKeys string
 	AuthMode  string
 	Query     string
-}
-
-type AutoModelConfig struct {
-	Enabled       bool
-	BaseURL       string
-	APIKey        string
-	Model         string
-	Prompt        string
-	SmallModel    string
-	AnalysisModel string
-	CodingModel   string
+	Disabled  bool
 }
 
 type Config struct {
@@ -40,7 +30,6 @@ type Config struct {
 	ForwardClientHeaders bool
 	AllowClientHeaders   []string
 	SystemPrompt         string
-	AutoModel            AutoModelConfig
 	Providers            []ProviderConfig
 	Client               *http.Client
 	Routes               []model.Rule
@@ -49,12 +38,7 @@ type Config struct {
 func Load() *Config {
 	_ = util.LoadDotenv(".env")
 
-	configFile := os.Getenv("ROUTERLLM_CONFIG_FILE")
-	if configFile == "" {
-		configFile = "routerllm.yaml"
-	}
-
-	cfg, err := loadYAML(configFile)
+	cfg, err := loadYAML(ConfigPath())
 	if err != nil {
 		log.Printf("config error: %v", err)
 		return nil

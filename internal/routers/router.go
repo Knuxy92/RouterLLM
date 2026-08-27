@@ -19,7 +19,7 @@ import (
 
 const auditBodyLimit = 10 << 20
 
-func New(h *handlers.Handlers, logger *log.Logger) http.Handler {
+func New(h *handlers.Handlers, logger *log.Logger, mountAdmin func(chi.Router)) http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestID, auditLog(logger), chimw.Recoverer)
 
@@ -36,6 +36,10 @@ func New(h *handlers.Handlers, logger *log.Logger) http.Handler {
 		r.HandleFunc("/files", h.Files)
 		r.HandleFunc("/files/*", h.Files)
 	})
+
+	if mountAdmin != nil {
+		mountAdmin(r)
+	}
 
 	return r
 }

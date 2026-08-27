@@ -12,7 +12,7 @@ import (
 )
 
 func TestRemovedRoutesReturnNotFound(t *testing.T) {
-	router := New(handlers.New(nil, nil), nil)
+	router := New(handlers.New(nil), nil, nil)
 	tests := []struct {
 		method string
 		path   string
@@ -44,7 +44,7 @@ func TestRemovedRoutesReturnNotFound(t *testing.T) {
 
 func TestAuditLogUsesConfiguredLogger(t *testing.T) {
 	var output bytes.Buffer
-	router := New(handlers.New(nil, nil), log.New(&output, "", 0))
+	router := New(handlers.New(nil), log.New(&output, "", 0), nil)
 	req := httptest.NewRequest(http.MethodPost, "/missing", strings.NewReader(`{"message":"hello"}`))
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-Test", "value")

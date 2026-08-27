@@ -175,29 +175,11 @@ routes:
 	}
 }
 
-func TestLoadYAMLAutoModel(t *testing.T) {
-	t.Setenv("AUTOMODEL_TEST_KEY", "auto-key")
-
-	promptFile, err := os.CreateTemp("", "routerllm-prompt-*.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(promptFile.Name())
-	if _, err := promptFile.WriteString("classify"); err != nil {
-		t.Fatal(err)
-	}
-	promptFile.Close()
-
+func TestLoadYAMLAutoModelKeyIsIgnored(t *testing.T) {
 	path := writeTempYAML(t, `
 auto_model:
   enabled: true
-  api_key: ${AUTOMODEL_TEST_KEY}
-  base_url: https://opencode.ai/zen
-  model: deepseek-v4-flash-free
-  prompt_file: `+promptFile.Name()+`
-  small_model: deepseek-v4-flash
-  analysis_model: glm-5.2
-  coding_model: gpt-5.6-luna
+  model: some-model
 providers:
   - name: test
     style: openai
@@ -214,8 +196,8 @@ routes:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !cfg.AutoModel.Enabled || cfg.AutoModel.APIKey != "auto-key" {
-		t.Fatalf("unexpected auto model config: %+v", cfg.AutoModel)
+	if len(cfg.Routes) != 1 || cfg.Routes[0].ModelID != "test-model" {
+		t.Fatalf("routes = %+v, want the configured route to load unaffected", cfg.Routes)
 	}
 }
 

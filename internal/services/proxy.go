@@ -12,19 +12,17 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"routerllm/internal/adapter"
 	"routerllm/internal/cline"
-	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
 	"routerllm/internal/util"
 )
 
 const maxRetries = 3
-const autoModelCacheTTL = 30 * time.Minute
-const autoModelCacheSize = 1000
 
 var deadStatuses = map[int]bool{
 	401: true, 402: true, 403: true,
@@ -48,7 +46,7 @@ var hopByHopHeaders = map[string]bool{
 }
 
 type Proxy struct {
-	registry             *provider.Registry
+	registry             atomic.Pointer[provider.Registry]
 	client               *http.Client
 	log                  *log.Logger
 	debug                bool
@@ -56,17 +54,9 @@ type Proxy struct {
 	forceStream          bool
 	forwardClientHeaders bool
 	allowClientHeaders   []string
-	systemPrompt         string
-	autoModel            config.AutoModelConfig
-	autoCacheMu          sync.Mutex
-	autoCache            map[string]autoModelCacheEntry
+	systemPrompt         atomic.Pointer[string]
 	clineMu              sync.Mutex
 	clineManagers        map[string]*cline.Manager
-}
-
-type autoModelCacheEntry struct {
-	result    autoModelResult
-	expiresAt time.Time
 }
 
 type upstreamCall struct {
@@ -97,8 +87,52 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 	return manager.AccessToken(ctx, refreshToken, force)
 }
 
-func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string, autoModel config.AutoModelConfig) *Proxy {
-	return &Proxy{registry: reg, client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, systemPrompt: systemPrompt, autoModel: autoModel, autoCache: make(map[string]autoModelCacheEntry), clineManagers: make(map[string]*cline.Manager)}
+// debug controls the per-request routing trace (which model, which provider
+// served it). advancedDebug additionally logs response bodies. Failure lines —
+// dead keys, retries, exhausted providers — are always logged regardless, since
+// they are what an operator needs when a provider breaks.
+func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, clineManagers: make(map[string]*cline.Manager)}
+	p.registry.Store(reg)
+	p.systemPrompt.Store(&systemPrompt)
+
+	return p
+}
+
+func (p *Proxy) Registry() *provider.Registry {
+	return p.registry.Load()
+}
+
+// Apply swaps in a rebuilt registry. Cline managers are keyed by provider
+// base URL, so any manager whose URL is no longer configured is dropped here —
+// otherwise it would retain its account store and refresh-token cache for the
+// process lifetime.
+func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
+	p.registry.Store(reg)
+	p.systemPrompt.Store(&systemPrompt)
+	p.pruneClineManagers(reg)
+}
+
+func (p *Proxy) pruneClineManagers(reg *provider.Registry) {
+	live := make(map[string]bool)
+	for _, pc := range reg.ProviderConfigs() {
+		if pc.Style == "cline" && !pc.Disabled {
+			live[pc.BaseURL] = true
+		}
+	}
+
+	p.clineMu.Lock()
+	defer p.clineMu.Unlock()
+
+	for baseURL := range p.clineManagers {
+		if !live[baseURL] {
+			delete(p.clineManagers, baseURL)
+		}
+	}
+}
+
+func (p *Proxy) Models() []string {
+	return p.registry.Load().AllModels()
 }
 
 func copyClientHeaders(dst, src *http.Request, allow []string) {
@@ -128,7 +162,7 @@ func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
 		util.WriteError(w, http.StatusBadRequest, "invalid_request", "model query parameter is required")
 		return
 	}
-	routes := p.registry.Routes(modelName)
+	routes := p.registry.Load().Routes(modelName)
 	if len(routes) == 0 {
 		util.WriteError(w, http.StatusNotFound, "model_not_found", fmt.Sprintf("model %q not found", modelName))
 		return
@@ -175,27 +209,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	p.injectSystemPrompt(body)
 
 	modelName, _ := body["model"].(string)
-	if modelName == "auto" {
-		chatID := chatIdentifier(r, body)
-		result, cached := p.resolveAutoModel(r.Context(), body, chatID)
-		if result.err != nil {
-			p.log.Printf("auto-model failed: error=%v request_id=%s chat_id=%s", result.err, requestID(r), chatID)
-		} else if cached {
-			p.log.Printf("auto-model cache hit: model=%s category=%s request_id=%s chat_id=%s", result.model, result.category, requestID(r), chatID)
-		} else if p.advancedDebug {
-			p.log.Printf("auto-model selected: %s from row %s raw_content=%q request_id=%s chat_id=%s", result.model, result.category, result.rawContent, requestID(r), chatID)
-		} else {
-			p.log.Printf("auto-model selected: %s from row %s request_id=%s chat_id=%s", result.model, result.category, requestID(r), chatID)
-		}
-		resolvedModel := result.model
-		err := result.err
-		if err != nil {
-			return nil, nil, err
-		}
-		modelName = resolvedModel
-		body["model"] = modelName
-	}
-	routes := p.registry.Routes(modelName)
+	routes := p.registry.Load().Routes(modelName)
 	if len(routes) == 0 {
 		return nil, nil, fmt.Errorf("model %q not found", modelName)
 	}
@@ -213,7 +227,9 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 	}
 
-	p.log.Printf("%s model=%s routes=%d request_id=%s", path, modelName, len(routes), requestID(r))
+	if p.debug {
+		p.log.Printf("%s model=%s routes=%d request_id=%s", path, modelName, len(routes), requestID(r))
+	}
 
 	var lastResp *http.Response
 	var lastRoute *provider.Route
@@ -281,7 +297,9 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if lastResp != nil {
 			lastResp.Body.Close()
 		}
-		p.log.Printf("serving %s via provider=%s upstream_model=%s: %s request_id=%s", path, pv.Name, route.ModelName, respSummary(resp), requestID(r))
+		if p.debug {
+			p.log.Printf("serving %s via provider=%s upstream_model=%s: %s request_id=%s", path, pv.Name, route.ModelName, respSummary(resp), requestID(r))
+		}
 		return resp, &route, nil
 	}
 
@@ -291,59 +309,8 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	return nil, nil, lastErr
 }
 
-type autoModelResolution struct {
-	autoModelResult
-	err error
-}
-
-func (p *Proxy) resolveAutoModel(ctx context.Context, body map[string]any, chatID string) (autoModelResolution, bool) {
-	if chatID != "" {
-		p.autoCacheMu.Lock()
-		entry, ok := p.autoCache[chatID]
-		if ok && time.Now().Before(entry.expiresAt) {
-			p.autoCacheMu.Unlock()
-			return autoModelResolution{autoModelResult: entry.result}, true
-		}
-		if ok {
-			delete(p.autoCache, chatID)
-		}
-		p.autoCacheMu.Unlock()
-	}
-
-	result, err := classifyAutoModel(ctx, p.client, p.autoModel, body)
-	if err == nil && chatID != "" {
-		p.autoCacheMu.Lock()
-		if len(p.autoCache) >= autoModelCacheSize {
-			for key := range p.autoCache {
-				delete(p.autoCache, key)
-				break
-			}
-		}
-		p.autoCache[chatID] = autoModelCacheEntry{result: result, expiresAt: time.Now().Add(autoModelCacheTTL)}
-		p.autoCacheMu.Unlock()
-	}
-
-	return autoModelResolution{autoModelResult: result, err: err}, false
-}
-
 func requestID(r *http.Request) string {
 	return r.Header.Get("X-Request-ID")
-}
-
-func chatIdentifier(r *http.Request, body map[string]any) string {
-	for _, name := range []string{"X-Chat-ID", "X-Conversation-ID"} {
-		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
-			return value
-		}
-	}
-
-	if metadata, ok := body["metadata"].(map[string]any); ok {
-		if value, ok := metadata["chat_id"].(string); ok {
-			return strings.TrimSpace(value)
-		}
-	}
-
-	return ""
 }
 
 func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, forceStream bool) {
@@ -390,9 +357,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 	}
 
 	if err != nil {
-		if errors.Is(err, ErrAutoModelDisabled) {
-			util.WriteError(w, http.StatusBadRequest, "model_disabled", err.Error())
-		} else if strings.Contains(err.Error(), "not found") {
+		if strings.Contains(err.Error(), "not found") {
 			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
@@ -468,6 +433,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 		return nil, 0, nil, false
 	}
 
+	pv.RecordRequest()
 	var lastStatus int
 	var lastErrBody []byte
 
@@ -569,9 +535,15 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				break
 			}
 
+			if r2.StatusCode >= 400 {
+				pv.RecordError()
+			}
+
 			return r2, 0, nil, false
 		}
 	}
+
+	pv.RecordError()
 
 	return nil, lastStatus, lastErrBody, false
 }
@@ -799,16 +771,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (p *Proxy) injectSystemPrompt(body map[string]any) {
-	if p.systemPrompt == "" {
+	prompt := *p.systemPrompt.Load()
+	if prompt == "" {
 		return
 	}
 	msgs, ok := body["messages"].([]any)
 	if !ok {
 		return
 	}
-	sysMsg := map[string]any{"role": "system", "content": p.systemPrompt}
+	sysMsg := map[string]any{"role": "system", "content": prompt}
 	body["messages"] = append([]any{sysMsg}, msgs...)
 	if p.advancedDebug {
-		p.log.Printf("injected system prompt: len=%d chars, messages=%d", len(p.systemPrompt), len(body["messages"].([]any)))
+		p.log.Printf("injected system prompt: len=%d chars, messages=%d", len(prompt), len(body["messages"].([]any)))
 	}
 }

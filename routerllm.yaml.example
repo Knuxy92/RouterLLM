@@ -15,6 +15,9 @@
 # =============================================================================
 
 # --- Server settings ---------------------------------------------------------
+# This file is hot-reloaded: the server re-reads it every 3s and applies changes
+# without a restart. Invalid YAML or a failed validation is rejected — the
+# previous working config keeps serving. `port` still requires a restart.
 
 port: 1765                          # listen port (default: 1765)
 cooldown: 60s                       # key cooldown duration (default: 60s)
@@ -26,16 +29,6 @@ forward_client_headers: true        # forward safe client headers upstream (defa
 system_prompt_file: system_prompt.txt  # prepend this file's content as a system message (default: none)
                                     # when a key gets 401/402/403, it's
                                     # skipped for this duration
-
-auto_model:
-  enabled: false
-  api_key: ${AUTOMODEL_API_KEY}
-  base_url: https://opencode.ai/zen
-  model: deepseek-v4-flash-free
-  prompt_file: prompt_routing.txt
-  small_model: deepseek-v4-flash
-  analysis_model: glm-5.2
-  coding_model: gpt-5.6-luna
 
 # --- Providers ---------------------------------------------------------------
 # Each provider requires at minimum: name, api_key, style, base_url.
@@ -56,6 +49,7 @@ providers:
     #   Content-Type: application/json
     auth_mode: bearer
     # share: ""                             # shared key group name (optional)
+    # disabled: false                       # skip this provider entirely (optional)
 
   - name: opencode
     api_key: ${OPENCODE_API_KEY}
@@ -105,6 +99,20 @@ providers:
     base_url: https://forge-gateway-api.fly.dev
     headers:
       Content-Type: application/json
+    auth_mode: bearer
+
+  # --- Parked provider ---
+  # `disabled: true` skips the provider at startup and on every reload, and
+  # relaxes its validation: no api_key needed (and a disabled `style: cline`
+  # provider needs no logged-in cline accounts). Park a provider whose key died
+  # instead of deleting the block — deleting it breaks startup while routes
+  # still reference it. Route entries pointing at a disabled provider are
+  # silently dropped from the routing table (logged as a notice).
+
+  - name: retired-gateway
+    disabled: true
+    style: openai
+    base_url: https://api.retired-gateway.example
     auth_mode: bearer
 
   # --- Cline free model ---
@@ -216,6 +224,17 @@ routes:
       - provider: cline
         model: cline-free/glm-5.2
 
+  # Disabled fallback entry: skipped, the remaining entries still serve the
+  # model. If every entry for a model_id is disabled the model disappears from
+  # /v1/models and requests for it return 404.
+  - model_id: gpt-5.6-luna
+    routes:
+      - provider: forge
+        model: gpt-5.6-luna
+      - provider: freemodel-api
+        model: gpt-5.6-luna
+        disabled: true                      # temporarily out of rotation
+
 
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:
@@ -225,6 +244,7 @@ routes:
 #   routes:                                 # REQUIRED — list of upstream targets
 #     - provider: string                    # REQUIRED — must match a provider name above
 #       model: string                       # REQUIRED — upstream model name (no fallback to model_id)
+#       disabled: bool                      # OPTIONAL — skip just this entry
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # "low" | "medium" | "high" | "max"
 #         enable_thinking: bool             # true | false (Qwen-style)
