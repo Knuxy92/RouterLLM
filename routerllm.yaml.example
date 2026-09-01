@@ -116,12 +116,14 @@ providers:
     auth_mode: bearer
 
   # --- Cline free model ---
-  # No api_key: credentials come from `routerllm --cline-login`, stored in
-  # cline-accounts.json next to the executable (override with CLINE_ACCOUNTS_FILE).
-
-  - name: cline
-    style: cline
-    base_url: https://api.cline.bot/api
+  # Commented out on purpose: an ENABLED cline provider refuses to start until
+  # `routerllm --cline-login` has created cline-accounts.json next to the
+  # executable (override with CLINE_ACCOUNTS_FILE). Uncomment BOTH this block
+  # and the cline route below after logging in.
+  #
+  # - name: cline
+  #   style: cline
+  #   base_url: https://api.cline.bot/api
 
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these
@@ -218,11 +220,12 @@ routes:
         defaults:
           thinking_budget: 8192
 
-  # Cline free model (requires `routerllm --cline-login`)
-  - model_id: cline-free/glm-5.2
-    routes:
-      - provider: cline
-        model: cline-free/glm-5.2
+  # Cline free model — uncomment together with the cline provider above
+  # (requires `routerllm --cline-login` first).
+  # - model_id: cline-free/glm-5.2
+  #   routes:
+  #     - provider: cline
+  #       model: cline-free/glm-5.2
 
   # Disabled fallback entry: skipped, the remaining entries still serve the
   # model. If every entry for a model_id is disabled the model disappears from

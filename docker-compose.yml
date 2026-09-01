@@ -10,7 +10,10 @@ services:
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:rw
       - ./system_prompt.txt:/app/system_prompt.txt:ro
-      - ./cline-accounts.json:/app/cline-accounts.json:ro
+      # Cline providers only: mount cline-accounts.json AFTER running
+      # `routerllm --cline-login` on the host (the file must exist first —
+      # a missing host path is auto-created as a directory by Docker).
+      # - ./cline-accounts.json:/app/cline-accounts.json:ro
     restart: unless-stopped
     env_file:
       - .env
