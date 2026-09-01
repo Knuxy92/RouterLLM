@@ -29,5 +29,9 @@ web/.vite/
 # Admin write-back backups
 *.bak
 
+# Self-signed TLS cert for the admin console (generated on first run)
+admin-tls.crt
+admin-tls.key
+
 # Project memory
 memory-bank/

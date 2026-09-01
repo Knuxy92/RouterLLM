@@ -5,6 +5,8 @@ services:
     container_name: routerllm
     ports:
       - "${ROUTERLLM_PORT:-1765}:${ROUTERLLM_PORT:-1765}"
+      # Uncomment to expose the HTTPS admin console (also set ROUTERLLM_ADMIN_TLS_PORT in .env):
+      # - "1766:1766"
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:rw
       - ./system_prompt.txt:/app/system_prompt.txt:ro

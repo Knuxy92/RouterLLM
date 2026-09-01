@@ -1,3 +1,5 @@
+import { hmacProof } from "@/lib/hmac"
+
 export type KeyState = {
   masked: string
   alive: boolean
@@ -112,6 +114,25 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+/**
+ * Challenge–response login. The secret never crosses the wire: the server
+ * hands us a one-time nonce, we answer with hex(HMAC-SHA256(secret, nonce)),
+ * and store only the opaque session id it mints in return.
+ */
+export async function login(secret: string): Promise<void> {
+  const challenge = await call<{ challenge_id: string; nonce: string }>("/auth/challenge", {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+  const proof = hmacProof(secret, challenge.nonce)
+  const verified = await call<{ session: string }>("/auth/verify", {
+    method: "POST",
+    body: JSON.stringify({ challenge_id: challenge.challenge_id, proof }),
+  })
+
+  setToken(verified.session)
+}
+
 export const api = {
   status: (signal?: AbortSignal) => call<Status>("/status", { signal }),
   logs: (since: number, signal?: AbortSignal) => call<{ entries: LogEntry[] }>(`/logs?since=${since}`, { signal }),
@@ -125,6 +146,16 @@ export const api = {
     call<Status>(`/routes/${encodeURIComponent(modelId)}/${index}`, {
       method: "POST",
       body: JSON.stringify({ disabled }),
+    }),
+  addRouteLeg: (modelId: string, leg: { provider: string; model: string; reasoning_effort?: string; disabled?: boolean }) =>
+    call<Status>(`/routes/${encodeURIComponent(modelId)}/add`, {
+      method: "POST",
+      body: JSON.stringify(leg),
+    }),
+  removeRouteLeg: (modelId: string, index: number) =>
+    call<Status>(`/routes/${encodeURIComponent(modelId)}/remove`, {
+      method: "POST",
+      body: JSON.stringify({ index }),
     }),
   moveRoute: (modelId: string, index: number, direction: "up" | "down") =>
     call<Status>(`/routes/${encodeURIComponent(modelId)}/move`, {

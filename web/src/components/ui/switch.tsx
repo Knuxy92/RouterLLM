@@ -19,6 +19,7 @@ type SwitchProps = {
   label: string
   size?: SwitchSize
   className?: string
+  id?: string
 }
 
 export function Switch({
@@ -28,12 +29,14 @@ export function Switch({
   label,
   size = "md",
   className,
+  id,
 }: SwitchProps) {
   const geometry = sizeClass[size]
 
   return (
     <button
       type="button"
+      id={id}
       role="switch"
       aria-checked={checked}
       aria-label={label}

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -17,47 +18,86 @@ type Deps struct {
 	Registry  func() *provider.Registry
 	Reload    func() error
 	Editor    *Editor
+	Sessions  *SessionStore
 	Logs      *LogBuffer
 	Reloads   *ReloadTracker
 	StartedAt time.Time
 }
 
 func Mount(r chi.Router, deps Deps) {
-	if deps.Reload == nil || deps.Registry == nil || deps.Editor == nil || deps.Logs == nil || deps.Reloads == nil {
+	if deps.Reload == nil || deps.Registry == nil || deps.Editor == nil || deps.Sessions == nil || deps.Logs == nil || deps.Reloads == nil {
 		panic("admin.Mount: Deps is missing a required field")
 	}
 
-	token := strings.TrimSpace(os.Getenv("ROUTERLLM_ADMIN_TOKEN"))
-
 	r.Route("/admin/api", func(api chi.Router) {
-		api.Use(requireToken(token))
+		// The handshake itself runs without a session — it is how one is earned.
+		api.Post("/auth/challenge", deps.handleAuthChallenge)
+		api.Post("/auth/verify", deps.handleAuthVerify)
 
-		api.Get("/status", deps.handleStatus)
-		api.Get("/logs", deps.handleLogs)
-		api.Post("/reload", deps.handleReload)
-		api.Post("/providers/{name}", deps.handleProviderToggle)
-		api.Post("/routes/{model}/move", deps.handleRouteMove)
-		api.Post("/routes/{model}/{index}", deps.handleRouteToggle)
+		api.Group(func(authed chi.Router) {
+			authed.Use(deps.requireSession())
+
+			authed.Get("/status", deps.handleStatus)
+			authed.Get("/logs", deps.handleLogs)
+			authed.Post("/reload", deps.handleReload)
+			authed.Post("/providers/{name}", deps.handleProviderToggle)
+			authed.Post("/routes/{model}/move", deps.handleRouteMove)
+			authed.Post("/routes/{model}/add", deps.handleRouteAdd)
+			authed.Post("/routes/{model}/remove", deps.handleRouteRemove)
+			authed.Post("/routes/{model}/{index}", deps.handleRouteToggle)
+		})
 	})
 }
 
-func requireToken(token string) func(http.Handler) http.Handler {
+// requireSession accepts only opaque session ids minted by the challenge–
+// response handshake. The raw admin secret is never a valid credential on the
+// wire.
+func (d Deps) requireSession() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if token == "" {
+			if strings.TrimSpace(os.Getenv("ROUTERLLM_ADMIN_TOKEN")) == "" {
 				writeError(w, http.StatusForbidden, "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it")
 				return
 			}
 
-			supplied := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if strings.TrimSpace(supplied) != token {
-				writeError(w, http.StatusUnauthorized, "invalid admin token")
+			supplied := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+			if !d.Sessions.Valid(supplied) {
+				writeError(w, http.StatusUnauthorized, "invalid or expired admin session")
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (d Deps) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(os.Getenv("ROUTERLLM_ADMIN_TOKEN")) == "" {
+		writeError(w, http.StatusForbidden, "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it")
+		return
+	}
+
+	id, nonce, expiresIn := d.Sessions.Challenge()
+	writeJSON(w, http.StatusOK, map[string]any{"challenge_id": id, "nonce": nonce, "expires_in": expiresIn})
+}
+
+func (d Deps) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ChallengeID string `json:"challenge_id"`
+		Proof       string `json:"proof"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	session, expiresIn, ok := d.Sessions.Verify(body.ChallengeID, body.Proof)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid or expired challenge proof")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"session": session, "expires_in": expiresIn})
 }
 
 func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +179,65 @@ func (d Deps) handleRouteMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.applyNow(w)
+}
+
+func (d Deps) handleRouteAdd(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Provider        string `json:"provider"`
+		Model           string `json:"model"`
+		ReasoningEffort string `json:"reasoning_effort"`
+		Disabled        bool   `json:"disabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	switch body.ReasoningEffort {
+	case "", "low", "medium", "high", "max":
+	default:
+		writeError(w, http.StatusBadRequest, `reasoning_effort must be one of "low", "medium", "high", "max" or omitted`)
+		return
+	}
+
+	if !d.providerConfigured(body.Provider) {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("provider %q is not configured", body.Provider))
+		return
+	}
+
+	if err := d.Editor.AddRoute(chi.URLParam(r, "model"), body.Provider, body.Model, body.ReasoningEffort, body.Disabled); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	d.applyNow(w)
+}
+
+func (d Deps) handleRouteRemove(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Index int `json:"index"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := d.Editor.RemoveRoute(chi.URLParam(r, "model"), body.Index); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	d.applyNow(w)
+}
+
+func (d Deps) providerConfigured(name string) bool {
+	for _, pc := range d.Registry().ProviderConfigs() {
+		if pc.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (d Deps) applyNow(w http.ResponseWriter) {

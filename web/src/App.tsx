@@ -301,6 +301,7 @@ export default function App() {
                   model={model}
                   pending={pending === `model:${model.model_id}`}
                   controlsDisabled={controlsDisabled}
+                  providers={status.providers.map((provider) => provider.name)}
                   onToggleLeg={(index, disabled) =>
                     void mutate(`model:${model.model_id}`, () =>
                       api.setRouteDisabled(model.model_id, index, disabled),
@@ -309,6 +310,16 @@ export default function App() {
                   onMoveLeg={(index, direction) =>
                     void mutate(`model:${model.model_id}`, () =>
                       api.moveRoute(model.model_id, index, direction),
+                    )
+                  }
+                  onAddLeg={(leg) =>
+                    void mutate(`model:${model.model_id}`, () =>
+                      api.addRouteLeg(model.model_id, leg),
+                    )
+                  }
+                  onRemoveLeg={(index) =>
+                    void mutate(`model:${model.model_id}`, () =>
+                      api.removeRouteLeg(model.model_id, index),
                     )
                   }
                 />
