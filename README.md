@@ -184,9 +184,56 @@ routes:
 | `ROUTERLLM_DEBUG`        | `false`          | Per-request routing trace (model, chosen provider). Failures — dead keys, retries, exhausted providers — are always logged. |
 | `ROUTERLLM_DEBUG_ADVANCED` | `false`        | Log client/system headers and bodies to the log file |
 | `ROUTERLLM_LOG_FILE`     | —                | Also write operational logs to file   |
+| `AUTHTOKEN`              | —                | Bearer token(s) for `/v1` write endpoints (comma-separated); unset = open |
+| `ROUTERLLM_ADMIN_TLS_PORT` | —              | Serve the admin console over HTTPS on this port; main port drops `/admin` |
+| `ROUTERLLM_ADMIN_TLS_CERT` / `_KEY` | auto  | TLS cert/key paths; self-signed pair generated beside the config when missing |
 | Provider API keys        | —                | `*_API_KEY` vars per your config      |
 
 `.env` files are loaded automatically (real env vars take precedence).
+
+### Admin auth: HMAC challenge–response
+
+The console never sends `ROUTERLLM_ADMIN_TOKEN` over the wire. It proves knowledge of the secret instead:
+
+1. `POST /admin/api/auth/challenge` → `{"challenge_id", "nonce", "expires_in":60}` (nonce is single-use).
+2. Compute `proof = hex(HMAC-SHA256(secret, nonce))` client-side.
+3. `POST /admin/api/auth/verify {"challenge_id", "proof"}` → `{"session", "expires_in":43200}`.
+4. Call every admin API with `Authorization: Bearer <session>`. Sending the raw secret is a 401.
+
+Sessions are in-memory (≤100 live, 12h TTL) — a server restart requires logging in again.
+
+**HTTPS for the console (recommended outside localhost):** set `ROUTERLLM_ADMIN_TLS_PORT=1766` and open `https://<host>:1766/admin/`. A self-signed certificate is generated on first start (`admin-tls.crt`/`admin-tls.key` beside the config — the browser warns once; import the `.crt` as a trusted root to silence it, or point `ROUTERLLM_ADMIN_TLS_CERT`/`_KEY` at your own cert). With TLS on, the main port stops serving `/admin` so the console never exists over plain HTTP.
+
+**`/v1` auth:** set `AUTHTOKEN` in `.env` and pass `Authorization: Bearer $AUTHTOKEN` on every write call — `POST /v1/chat/completions`, `/v1/responses`, `/v1/messages`, file uploads. `GET /v1/models` and `/health` stay open. Unset keeps the old open behaviour.
+
+Scripting example:
+
+```bash
+NONCE_JSON=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/challenge)
+CID=$(echo "$NONCE_JSON" | jq -r .challenge_id)
+NONCE=$(echo "$NONCE_JSON" | jq -r .nonce)
+PROOF=$(printf %s "$NONCE" | openssl dgst -sha256 -hmac "$ROUTERLLM_ADMIN_TOKEN" -hex | awk '{print $2}')
+SESSION=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/verify   -d "{"challenge_id":"$CID","proof":"$PROOF"}" | jq -r .session)
+
+# With ROUTERLLM_ADMIN_TLS_PORT set, reach the console over HTTPS instead:
+# curl -s https://127.0.0.1:1766/admin/api/status --cacert admin-tls.crt -H "Authorization: Bearer $SESSION"
+curl -s http://127.0.0.1:1765/admin/api/status -H "Authorization: Bearer $SESSION"
+```
+
+For the proxy API, pass the `AUTHTOKEN` value on write endpoints:
+
+```bash
+curl -s http://127.0.0.1:1765/v1/chat/completions \
+  -H "Authorization: Bearer $AUTHTOKEN" \
+  -d '{"model":"my-model","messages":[{"role":"user","content":"hi"}]}'
+```
+
+### Add & remove route legs
+
+With a session, the console gains two write paths on Signal paths:
+
+- **`+`** opens a dialog (Provider, Upstream model, Reasoning Effort, Disabled) that appends a fallback leg to `routerllm.yaml` — same surgery as a hand edit, comments and `${VAR}` placeholders survive — and reloads.
+- **`✕`** on a leg removes it. The last leg of a model cannot be removed (disable it or delete the model instead).
 
 ## Docker
 

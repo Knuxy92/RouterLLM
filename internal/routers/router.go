@@ -3,6 +3,8 @@ package routers
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -15,11 +17,12 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"routerllm/internal/handlers"
+	"routerllm/internal/util"
 )
 
 const auditBodyLimit = 10 << 20
 
-func New(h *handlers.Handlers, logger *log.Logger, mountAdmin func(chi.Router)) http.Handler {
+func New(h *handlers.Handlers, logger *log.Logger, authToken func() string, mountAdmin func(chi.Router)) http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestID, auditLog(logger), chimw.Recoverer)
 
@@ -29,6 +32,8 @@ func New(h *handlers.Handlers, logger *log.Logger, mountAdmin func(chi.Router)) 
 	})
 
 	r.Route("/v1", func(r chi.Router) {
+		r.Use(requireBearer(authToken))
+
 		r.Get("/models", h.Models)
 		r.Post("/chat/completions", h.ChatCompletions)
 		r.Post("/messages", h.Messages)
@@ -42,6 +47,58 @@ func New(h *handlers.Handlers, logger *log.Logger, mountAdmin func(chi.Router)) 
 	}
 
 	return r
+}
+
+func requireBearer(authToken func() string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw := ""
+			if authToken != nil {
+				raw = authToken()
+			}
+			tokens := validTokens(raw)
+			if len(tokens) == 0 || r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			supplied := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+			if !matchesAny(supplied, tokens) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="routerllm"`)
+				util.WriteError(w, http.StatusUnauthorized, "invalid_api_key", "missing or invalid bearer token")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func validTokens(raw string) []string {
+	parts := strings.Split(raw, ",")
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			tokens = append(tokens, part)
+		}
+	}
+
+	return tokens
+}
+
+func matchesAny(supplied string, tokens []string) bool {
+	if supplied == "" {
+		return false
+	}
+
+	sum := sha256.Sum256([]byte(supplied))
+	match := 0
+	for _, token := range tokens {
+		candidate := sha256.Sum256([]byte(token))
+		match |= subtle.ConstantTimeCompare(sum[:], candidate[:])
+	}
+
+	return match == 1
 }
 
 type auditResponseWriter struct {

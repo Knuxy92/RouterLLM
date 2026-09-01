@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -85,17 +87,63 @@ func main() {
 	adminDeps := admin.Deps{
 		Registry:  proxy.Registry,
 		Editor:    admin.NewEditor(configPath),
+		Sessions:  admin.NewSessionStore(func() string { return os.Getenv("ROUTERLLM_ADMIN_TOKEN") }),
 		Logs:      logBuffer,
 		Reloads:   reloadTracker,
 		StartedAt: time.Now(),
 		Reload:    reloader.Reload,
 	}
 
-	mountAdmin := func(r chi.Router) {
-		admin.Mount(r, adminDeps)
-		admin.MountUI(r)
+	// When the TLS admin port is set, the console exists only on that HTTPS
+	// listener — serving it over plain HTTP on the main port would undo the
+	// encryption. Default: console on the main port as before.
+	var mountAdmin func(chi.Router)
+	var adminTLS *http.Server
+	if port := os.Getenv("ROUTERLLM_ADMIN_TLS_PORT"); port != "" {
+		certPath := os.Getenv("ROUTERLLM_ADMIN_TLS_CERT")
+		keyPath := os.Getenv("ROUTERLLM_ADMIN_TLS_KEY")
+		if certPath == "" || keyPath == "" {
+			dir := filepath.Dir(configPath)
+			if certPath == "" {
+				certPath = filepath.Join(dir, "admin-tls.crt")
+			}
+			if keyPath == "" {
+				keyPath = filepath.Join(dir, "admin-tls.key")
+			}
+		}
+		cert, err := admin.EnsureCertificate(certPath, keyPath)
+		if err != nil {
+			overviewLogger.Fatalf("admin TLS certificate: %v", err)
+		}
+
+		adminMux := chi.NewRouter()
+		admin.Mount(adminMux, adminDeps)
+		admin.MountUI(adminMux)
+		adminTLS = &http.Server{
+			Addr:              ":" + port,
+			Handler:           adminMux,
+			TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+		go func() {
+			overviewLogger.Printf("admin console (TLS) on :%s — cert %s, key %s", port, certPath, keyPath)
+			if err := adminTLS.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				overviewLogger.Fatal(err)
+			}
+		}()
+	} else {
+		mountAdmin = func(r chi.Router) {
+			admin.Mount(r, adminDeps)
+			admin.MountUI(r)
+		}
 	}
-	handler := routers.New(h, auditLogger, mountAdmin)
+
+	if os.Getenv("AUTHTOKEN") == "" {
+		overviewLogger.Printf("v1 auth is disabled (AUTHTOKEN unset) — /v1 write endpoints accept anyone")
+	}
+
+	handler := routers.New(h, auditLogger, func() string { return os.Getenv("AUTHTOKEN") }, mountAdmin)
 
 	watchCtx, stopWatcher := context.WithCancel(context.Background())
 	defer stopWatcher()
@@ -124,6 +172,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		overviewLogger.Fatal("server forced to shutdown:", err)
+	}
+	if adminTLS != nil {
+		if err := adminTLS.Shutdown(ctx); err != nil {
+			overviewLogger.Fatal("admin TLS server forced to shutdown:", err)
+		}
 	}
 	overviewLogger.Println("server stopped")
 }

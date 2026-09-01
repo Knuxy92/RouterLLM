@@ -78,6 +78,77 @@ func (e *Editor) MoveRoute(modelID string, index int, up bool) error {
 	})
 }
 
+// AddRoute appends a fallback leg {provider, model} to the model's chain.
+// A non-empty reasoningEffort adds a defaults.reasoning_effort entry;
+// disabled=true marks the new leg parked from birth.
+func (e *Editor) AddRoute(modelID, provider, model, reasoningEffort string, disabled bool) error {
+	if provider == "" || model == "" {
+		return fmt.Errorf("provider and model are required to add a route to %q", modelID)
+	}
+	if reasoningEffort != "" && !validReasoningEffort[reasoningEffort] {
+		return fmt.Errorf("invalid reasoning_effort %q", reasoningEffort)
+	}
+
+	return e.mutate(func(root *yaml.Node) error {
+		entries, err := routeEntries(root, modelID, e.path)
+		if err != nil {
+			return err
+		}
+
+		leg := &yaml.Node{
+			Kind: yaml.MappingNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "provider"},
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: provider},
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "model"},
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: model},
+			},
+		}
+		if reasoningEffort != "" {
+			leg.Content = append(leg.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "defaults"},
+				&yaml.Node{
+					Kind: yaml.MappingNode,
+					Content: []*yaml.Node{
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "reasoning_effort"},
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: reasoningEffort},
+					},
+				},
+			)
+		}
+		if disabled {
+			setBoolField(leg, "disabled", true)
+		}
+
+		entries.Content = append(entries.Content, leg)
+
+		return nil
+	})
+}
+
+// RemoveRoute deletes the leg at index. The chain must keep at least one leg —
+// a model with an empty routes list would 404 and vanish from /v1/models.
+func (e *Editor) RemoveRoute(modelID string, index int) error {
+	return e.mutate(func(root *yaml.Node) error {
+		entries, err := routeEntries(root, modelID, e.path)
+		if err != nil {
+			return err
+		}
+		if index < 0 || index >= len(entries.Content) {
+			return fmt.Errorf("route index %d out of range for model %q", index, modelID)
+		}
+		if len(entries.Content) == 1 {
+			return fmt.Errorf("cannot remove the last leg of %q — disable it or delete the model instead", modelID)
+		}
+
+		entries.Content = append(entries.Content[:index], entries.Content[index+1:]...)
+
+		return nil
+	})
+}
+
+var validReasoningEffort = map[string]bool{"low": true, "medium": true, "high": true, "max": true}
+
 func (e *Editor) mutate(edit func(*yaml.Node) error) error {
 	original, err := os.ReadFile(e.path)
 	if err != nil {

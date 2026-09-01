@@ -71,6 +71,10 @@ func (r *Reloader) Reload() error {
 		return nil
 	}
 
+	return r.applyLocked(data, next)
+}
+
+func (r *Reloader) applyLocked(data []byte, next [32]byte) error {
 	cfg, err := ParseBytes(data)
 	if err != nil {
 		r.current = next

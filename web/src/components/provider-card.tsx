@@ -69,15 +69,23 @@ export function ProviderCard({ provider, pending, controlsDisabled, onToggle }: 
   )
 }
 
+// Dots are capped so a provider with a dozen keys can't flood the card.
+// Dead/cooling keys are shown first — they're the reason you'd look.
+const KEY_DOT_CAP = 4
+
 function KeyStrip({ provider }: { provider: ProviderStatus }) {
   if (provider.keys_total === 0) {
     return <p className="text-[11px] text-ink-faint">no keys configured</p>
   }
 
+  const sorted = [...provider.keys].sort((a, b) => Number(a.alive) - Number(b.alive))
+  const visible = sorted.slice(0, KEY_DOT_CAP)
+  const hidden = sorted.length - visible.length
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex flex-wrap items-center gap-0.5">
-        {provider.keys.map((key) => (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-0.5">
+        {visible.map((key) => (
           <Tooltip key={key.masked}>
             <TooltipTrigger asChild>
               <button
@@ -103,8 +111,31 @@ function KeyStrip({ provider }: { provider: ProviderStatus }) {
             </TooltipContent>
           </Tooltip>
         ))}
+        {hidden > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${hidden} more keys hidden`}
+                className="ident inline-flex h-6 items-center rounded px-1 text-[10px] text-ink-dim focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              >
+                +{hidden}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-64">
+              <ul className="space-y-0.5">
+                {sorted.slice(KEY_DOT_CAP).map((key) => (
+                  <li key={key.masked}>
+                    <span className="ident">{key.masked}</span>
+                    {key.alive ? " — alive" : ` — dead, ${key.cooldown_left_seconds}s left`}
+                  </li>
+                ))}
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        )}
         {provider.keys.length === 0 &&
-          Array.from({ length: provider.keys_total }).map((_, index) => (
+          Array.from({ length: Math.min(provider.keys_total, KEY_DOT_CAP) }).map((_, index) => (
             <span key={index} className="inline-flex size-6 items-center justify-center" aria-hidden>
               <span className="size-2 rounded-full bg-parked/50" />
             </span>
