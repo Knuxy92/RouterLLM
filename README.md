@@ -102,6 +102,15 @@ location with `CLINE_ACCOUNTS_FILE`. Access tokens are refreshed automatically a
 memory only. Run the command again to add more accounts — RouterLLM rotates them and fails
 over when one is rejected.
 
+The example config ships the cline provider **commented out**: an enabled `style: cline`
+provider refuses to start until at least one account is logged in, so uncomment the provider
+and its route only after `--cline-login` has created the accounts file.
+
+In Docker, run `--cline-login` on the host first, then uncomment the
+`cline-accounts.json` mount in `docker-compose.yml` — the host file must exist before the
+container starts, because Docker silently auto-creates a missing bind-mount path as a
+directory, which then breaks both the login and the account loader.
+
 ```yaml
 providers:
   - name: cline
@@ -243,7 +252,21 @@ docker compose logs -f routerllm
 docker compose down
 ```
 
-Mounts `routerllm.yaml` and `system_prompt.txt` as read-only volumes. Reads secrets from `.env`.
+Mounts `routerllm.yaml` (read-write, so the admin console can persist toggles) and
+`system_prompt.txt` as volumes. Reads secrets from `.env`.
+
+### Docker + hot reload
+
+The config is hot-reloaded (3s content poll), but **on Docker Desktop a single-file bind
+mount does not propagate host-side edits into the container** — hand-editing
+`routerllm.yaml` on the host goes unnoticed no matter how long you wait. Two reliable
+options:
+
+- Edit through the admin console at `/admin/` — writes happen inside the container, reload
+  immediately, and sync back to the host file.
+- `docker compose restart routerllm` after hand edits.
+
+On a plain host install (binary / `go run`) hand-edit hot reload works as documented.
 
 ## Testing with `requests.http`
 
@@ -290,7 +313,7 @@ go vet ./...                                  # static analysis
 
 ## Operational Notes
 
-- **No hot-reload:** config is read at startup. Restart the server to apply changes.
+- **Hot-reload:** config is polled every 3s and swapped atomically on change; invalid edits are rejected and the previous config keeps serving. Caveat: on Docker Desktop, host-side hand edits don't propagate through the single-file bind mount — use the admin console or restart (see "Docker + hot reload" above).
 - **Streaming is forced:** all outbound requests to upstreams have `stream=true`. Non-streaming clients receive a buffered response.
 - **Request body limit:** 10 MB.
 - **`/v1/responses`** only works with `openai`-style providers; `anthropic` providers are filtered out.

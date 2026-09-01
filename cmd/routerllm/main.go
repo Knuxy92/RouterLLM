@@ -53,7 +53,10 @@ func main() {
 	cfg := config.Load()
 
 	if cfg == nil {
-		overviewLogger.Fatal("failed to load routerllm.yaml — see log file for details")
+		if logFile != nil {
+			overviewLogger.Fatal("failed to load routerllm.yaml — see log file for details")
+		}
+		overviewLogger.Fatal("failed to load routerllm.yaml — see the `config error` line above")
 	}
 
 	if len(cfg.Providers) == 0 {
