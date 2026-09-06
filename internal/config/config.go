@@ -12,15 +12,16 @@ import (
 )
 
 type ProviderConfig struct {
-	Name      string
-	BaseURL   string
-	Style     string
-	Keys      []string
-	Headers   map[string]string
-	ShareKeys string
-	AuthMode  string
-	Query     string
-	Disabled  bool
+	Name           string
+	BaseURL        string
+	Style          string
+	Keys           []string
+	Headers        map[string]string
+	ShareKeys      string
+	AuthMode       string
+	Query          string
+	ReasoningStyle string
+	Disabled       bool
 }
 
 type Config struct {

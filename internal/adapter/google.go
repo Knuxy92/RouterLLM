@@ -416,30 +416,23 @@ func applyGoogleResponseFormat(rf map[string]any, gen map[string]any) {
 	}
 }
 
-// applyGoogleThinking consumes the RouterLLM defaults fields injected by
-// applyDefaults (reasoning_effort, thinking, enable_thinking) into the Gemini
-// thinkingConfig shape.
+// applyGoogleThinking maps the canonical reasoning keys (reasoning_effort,
+// thinking_budget) onto the Gemini thinkingConfig shape.
 func applyGoogleThinking(body map[string]any, gen map[string]any) {
 	thinking := make(map[string]any)
 
-	if t, ok := body["thinking"].(map[string]any); ok {
-		if budget := intValue(t["budget_tokens"], 0); budget > 0 {
-			thinking["thinkingBudget"] = budget
-		}
-		if t["type"] == "disabled" {
-			thinking["thinkingBudget"] = 0
-		}
-	}
-	if body["enable_thinking"] == false {
+	effort, _ := body["reasoning_effort"].(string)
+	budget := intValue(body["thinking_budget"], 0)
+
+	switch {
+	case budget > 0:
+		thinking["thinkingBudget"] = budget
+	case effort == "none":
 		thinking["thinkingBudget"] = 0
-	}
-	if effort, _ := body["reasoning_effort"].(string); effort != "" && thinking["thinkingBudget"] == nil {
-		switch effort {
-		case "low", "medium", "high":
-			thinking["thinkingLevel"] = effort
-		case "max", "xhigh", "ultra":
-			thinking["thinkingLevel"] = "high"
-		}
+	case effort == "low" || effort == "medium" || effort == "high":
+		thinking["thinkingLevel"] = effort
+	case effort == "xhigh" || effort == "max":
+		thinking["thinkingLevel"] = "high"
 	}
 
 	if len(thinking) > 0 {

@@ -162,18 +162,42 @@ routes:
       - provider: forge           # must match a provider name above
         model: gpt-4              # upstream model name
         defaults:
-          reasoning_effort: high  # low | medium | high | max
-          enable_thinking: true   # OpenAI-style, required to turn on thinking
-          thinking_budget: 32000  # Anthropic-style thinking tokens
+          reasoning_effort: high  # none|minimal|low|medium|high|xhigh|max
+          thinking_budget: 32000  # max reasoning tokens (dialect-translated)
 ```
+
+### Reasoning dialects
+
+Reasoning settings arrive in several dialects. RouterLLM folds all of them — client-sent and route defaults alike — into two canonical keys and re-emits whichever dialect the target provider speaks.
+
+| System           | Parameter shape                                                                                             |
+|------------------|--------------------------------------------------------------------------------------------------------------|
+| OpenAI           | `reasoning_effort`: `none` `minimal` `low` `medium` `high` `xhigh` `max` (`ultra` → `max`) |
+| OpenRouter       | `reasoning` map `{enabled, effort, max_tokens, exclude}`                        |
+| Qwen / DashScope | top-level `enable_thinking: bool` + `thinking_budget: int`                      |
+| Anthropic        | `thinking: {type: enabled, budget_tokens}`                                      |
+| Gemini           | `thinkingConfig` (google style)                                                 |
+| Cline gateway    | `reasoning_effort` string                                                       |
+
+Precedence: client `reasoning` map > client `reasoning_effort`/`enable_thinking` > route defaults.
+
+openai-style providers pick their outbound dialect with `reasoning_style`:
+
+```yaml
+reasoning_style: openai   # openai | openrouter | qwen | raw (default openai)
+```
+
+Client dialect keys are consumed and stripped — they are no longer forwarded raw to openai-style upstreams. `anthropic`/`google`/`cline` styles have fixed dialects and ignore `reasoning_style`.
 
 ### Defaults reference
 
-| Field             | Values                       | Provider style | Notes                                                |
-|-------------------|------------------------------|----------------|------------------------------------------------------|
-| `enable_thinking` | `true` / `false`             | openai/anthropic/google | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. `false` maps to `thinkingBudget: 0` on google. |
-| `reasoning_effort`| `low` / `medium` / `high` / `max` | openai, google | Only sets the `reasoning_effort` body field on OpenAI. On google it maps to `thinkingConfig.thinkingLevel` (`max` → `high`). Does **not** enable thinking by itself on openai — you must also set `enable_thinking: true`. |
-| `thinking_budget` | integer (tokens)             | anthropic, google | Maps to Anthropic `thinking.budget_tokens` / Gemini `thinkingConfig.thinkingBudget`. When set positively, creates a `thinking` block automatically (Anthropic). |
+Route defaults stay canonical (`reasoning_effort`, `enable_thinking`, `thinking_budget`) and are dialect-translated per provider.
+
+| Field             | Values                                                          | Notes                                                |
+|-------------------|------------------------------------------------------------------|------------------------------------------------------|
+| `reasoning_effort`| `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` | Canonical effort key; `ultra` is normalized to `max`. Re-emitted in the target provider's dialect. |
+| `enable_thinking` | `true` / `false`                                                | `false` maps to effort `none`.                       |
+| `thinking_budget` | integer (tokens)                                                | Canonical budget key; dialect-translated (Anthropic `thinking.budget_tokens`, Gemini `thinkingConfig.thinkingBudget`). |
 
 ### Examples
 
@@ -194,8 +218,7 @@ routes:
     - provider: forge
       model: gpt-5.5
       defaults:
-        reasoning_effort: max
-        enable_thinking: true    # required — reasoning_effort alone does not enable thinking
+        reasoning_effort: max     # re-emitted as reasoning_effort for openai style
 ```
 
 ## Routing and Failover

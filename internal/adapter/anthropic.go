@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -58,25 +57,19 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 		maxTokens = intValue(mt, maxTokens)
 		explicitMaxTokens = true
 	}
-	if thinking, ok := body["thinking"].(map[string]any); ok {
-		_, hasBudget := thinking["budget_tokens"]
-		budget := intValue(thinking["budget_tokens"], 0)
-		if budget > 0 && maxTokens <= budget {
-			if explicitMaxTokens {
-				budget = maxTokens - 1
-			} else {
-				maxTokens = budget + 1024
+	if effort, _ := body["reasoning_effort"].(string); effort != "" && effort != "none" {
+		thinking := map[string]any{"type": "enabled"}
+		if budget := intValue(body["thinking_budget"], 0); budget > 0 {
+			if maxTokens <= budget {
+				if explicitMaxTokens {
+					budget = maxTokens - 1
+				} else {
+					maxTokens = budget + 1024
+				}
 			}
+			thinking["budget_tokens"] = budget
 		}
-		if budget > 0 {
-			clampedThinking := make(map[string]any, len(thinking))
-			maps.Copy(clampedThinking, thinking)
-
-			clampedThinking["budget_tokens"] = budget
-			req["thinking"] = clampedThinking
-		} else if !hasBudget {
-			req["thinking"] = thinking
-		}
+		req["thinking"] = thinking
 	}
 	req["max_tokens"] = maxTokens
 

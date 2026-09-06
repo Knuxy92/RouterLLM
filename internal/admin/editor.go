@@ -147,7 +147,10 @@ func (e *Editor) RemoveRoute(modelID string, index int) error {
 	})
 }
 
-var validReasoningEffort = map[string]bool{"low": true, "medium": true, "high": true, "max": true}
+var validReasoningEffort = map[string]bool{
+	"none": true, "minimal": true, "low": true, "medium": true,
+	"high": true, "xhigh": true, "max": true,
+}
 
 func (e *Editor) mutate(edit func(*yaml.Node) error) error {
 	original, err := os.ReadFile(e.path)

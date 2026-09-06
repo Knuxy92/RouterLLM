@@ -239,7 +239,7 @@ function AddLegDialog({
                 >
                   (not set)
                 </SelectItem>
-                {["low", "medium", "high", "xhigh", "max", "ultra"].map(
+                {["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(
                   (level) => (
                     <SelectItem
                       key={level}

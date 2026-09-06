@@ -238,21 +238,36 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	for _, route := range routes {
 		pv := route.Provider
 		routeBody := cloneBody(body)
-		applyDefaults(routeBody, route.Defaults)
 
 		var reqBody []byte
 		var reqPath string
 		var sessionID string
 		var err error
 
-		if pv.Style == "anthropic" {
+		switch {
+		case pv.Style == "anthropic":
+			applyCanonicalDefaults(routeBody, route.Defaults)
 			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
-		} else if pv.Style == "google" {
+		case pv.Style == "google":
+			applyCanonicalDefaults(routeBody, route.Defaults)
 			reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
-		} else {
+		case pv.Style == "cline":
+			applyCanonicalDefaults(routeBody, route.Defaults)
+			delete(routeBody, "thinking_budget")
+			delete(routeBody, "reasoning_exclude")
 			routeBody["model"] = route.ModelName
-			if pv.Style == "cline" {
-				sessionID = cline.PrepareBody(routeBody)
+			sessionID = cline.PrepareBody(routeBody)
+			reqBody, err = json.Marshal(routeBody)
+			reqPath = path
+		default:
+			routeBody["model"] = route.ModelName
+			if pv.ReasoningStyle == "raw" || path != "/v1/chat/completions" {
+				applyLegacyDefaults(routeBody, route.Defaults)
+			} else {
+				if notice := canonicalizeReasoning(routeBody, route.Defaults); notice != "" {
+					p.log.Printf("route %s/%s: %s — ignored", route.ModelName, pv.Name, notice)
+				}
+				applyReasoningDialect(routeBody, pv.ReasoningStyle)
 			}
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
@@ -394,7 +409,11 @@ func cloneBody(body map[string]any) map[string]any {
 	return clone
 }
 
-func applyDefaults(body map[string]any, defaults model.RequestDefaults) {
+// applyLegacyDefaults is the pre-normalization injection used by raw-mode
+// openai-style providers and the /v1/responses passthrough: it writes the
+// request defaults verbatim (including the Anthropic-shaped thinking block)
+// without folding client dialects.
+func applyLegacyDefaults(body map[string]any, defaults model.RequestDefaults) {
 	if defaults.ReasoningEffort != "" {
 		if _, ok := body["reasoning_effort"]; !ok {
 			body["reasoning_effort"] = defaults.ReasoningEffort

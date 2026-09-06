@@ -176,19 +176,20 @@ func TestTranslateGoogleRequestThinking(t *testing.T) {
 		t.Fatalf("max not mapped to high: %s", data)
 	}
 
-	body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": 4096}
+	body["reasoning_effort"] = "none"
+	data, _, _ = TranslateGoogleRequest(body, "gemini-3.8-flash")
+	if !strings.Contains(string(data), `"thinkingBudget":0`) {
+		t.Fatalf("none not mapped to budget 0: %s", data)
+	}
+
+	body["reasoning_effort"] = "high"
+	body["thinking_budget"] = 4096
 	data, _, _ = TranslateGoogleRequest(body, "gemini-3.8-flash")
 	if !strings.Contains(string(data), `"thinkingBudget":4096`) {
 		t.Fatalf("thinkingBudget missing: %s", data)
 	}
 	if strings.Contains(string(data), "thinkingLevel") {
 		t.Fatalf("budget must suppress level: %s", data)
-	}
-
-	body["enable_thinking"] = false
-	data, _, _ = TranslateGoogleRequest(body, "gemini-3.8-flash")
-	if !strings.Contains(string(data), `"thinkingBudget":0`) {
-		t.Fatalf("disable not honored: %s", data)
 	}
 }
 

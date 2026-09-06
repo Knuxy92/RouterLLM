@@ -36,15 +36,16 @@ type yamlConfig struct {
 }
 
 type yamlProvider struct {
-	Name     string            `yaml:"name"`
-	Style    string            `yaml:"style,omitempty"`
-	BaseURL  string            `yaml:"base_url,omitempty"`
-	APIKey   stringOrList      `yaml:"api_key,omitempty"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
-	AuthMode string            `yaml:"auth_mode,omitempty"`
-	Share    string            `yaml:"share,omitempty"`
-	Query    string            `yaml:"query,omitempty"`
-	Disabled bool              `yaml:"disabled,omitempty"`
+	Name           string            `yaml:"name"`
+	Style          string            `yaml:"style,omitempty"`
+	BaseURL        string            `yaml:"base_url,omitempty"`
+	APIKey         stringOrList      `yaml:"api_key,omitempty"`
+	Headers        map[string]string `yaml:"headers,omitempty"`
+	AuthMode       string            `yaml:"auth_mode,omitempty"`
+	Share          string            `yaml:"share,omitempty"`
+	Query          string            `yaml:"query,omitempty"`
+	ReasoningStyle string            `yaml:"reasoning_style,omitempty"`
+	Disabled       bool              `yaml:"disabled,omitempty"`
 }
 
 func LoadFile(path string) (*Config, error) {
@@ -127,6 +128,14 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 			return nil, fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
 		}
 
+		switch yp.ReasoningStyle {
+		case "openai", "openrouter", "qwen", "raw":
+		case "":
+			yp.ReasoningStyle = "openai"
+		default:
+			return nil, fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
+		}
+
 		if len(yp.APIKey) == 0 && yp.Style != "cline" && !yp.Disabled {
 			return nil, fmt.Errorf("provider %q: api_key is required", yp.Name)
 		}
@@ -152,15 +161,16 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		}
 
 		p := ProviderConfig{
-			Name:      yp.Name,
-			BaseURL:   strings.TrimRight(yp.BaseURL, "/"),
-			Style:     yp.Style,
-			AuthMode:  yp.AuthMode,
-			ShareKeys: yp.Share,
-			Query:     yp.Query,
-			Headers:   yp.Headers,
-			Keys:      keys,
-			Disabled:  yp.Disabled,
+			Name:           yp.Name,
+			BaseURL:        strings.TrimRight(yp.BaseURL, "/"),
+			Style:          yp.Style,
+			AuthMode:       yp.AuthMode,
+			ShareKeys:      yp.Share,
+			Query:          yp.Query,
+			ReasoningStyle: yp.ReasoningStyle,
+			Headers:        yp.Headers,
+			Keys:           keys,
+			Disabled:       yp.Disabled,
 		}
 
 		if p.Headers == nil {

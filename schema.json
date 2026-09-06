@@ -142,6 +142,12 @@
           "default": "bearer",
           "description": "Authentication mode."
         },
+        "reasoning_style": {
+          "type": "string",
+          "enum": ["openai", "openrouter", "qwen", "raw"],
+          "default": "openai",
+          "description": "Reasoning dialect for openai-style providers: openai (reasoning_effort only), openrouter (reasoning map), qwen (enable_thinking/thinking_budget), raw (legacy passthrough)."
+        },
         "share": {
           "type": "string",
           "description": "Shared key group: providers with the same share value share keys and cooldown state."
@@ -163,11 +169,11 @@
       "properties": {
         "reasoning_effort": {
           "type": "string",
-          "description": "Reasoning effort passed through verbatim to the provider (e.g. low, medium, high, max; some providers accept minimal or ultra). Only applied when the request doesn't already set reasoning_effort."
+          "description": "Canonical reasoning effort: none, minimal, low, medium, high, xhigh, or max (ultra normalizes to max). Re-emitted in the target provider's reasoning dialect. Only applied when the request doesn't already set a reasoning preference."
         },
         "enable_thinking": {
           "type": "boolean",
-          "description": "Enable thinking for models that support it."
+          "description": "false maps the route to effort \"none\" (thinking off); true defers to any explicit reasoning_effort."
         },
         "thinking_budget": {
           "type": "integer",

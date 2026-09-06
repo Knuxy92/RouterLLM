@@ -12,14 +12,15 @@ import (
 )
 
 type Provider struct {
-	Name     string
-	BaseURL  string
-	Style    string
-	Keys     *keys.Manager
-	Headers  map[string]string
-	AuthMode string
-	Query    string
-	stats    *Stats
+	Name           string
+	BaseURL        string
+	Style          string
+	Keys           *keys.Manager
+	Headers        map[string]string
+	AuthMode       string
+	Query          string
+	ReasoningStyle string
+	stats          *Stats
 }
 
 type Stats struct {
@@ -94,14 +95,15 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 		km.Restore(previous.cooldownState(pc.Name))
 
 		providers[pc.Name] = &Provider{
-			Name:     pc.Name,
-			BaseURL:  pc.BaseURL,
-			Style:    pc.Style,
-			Keys:     km,
-			Headers:  pc.Headers,
-			AuthMode: pc.AuthMode,
-			Query:    pc.Query,
-			stats:    previous.statsFor(pc.Name),
+			Name:           pc.Name,
+			BaseURL:        pc.BaseURL,
+			Style:          pc.Style,
+			Keys:           km,
+			Headers:        pc.Headers,
+			AuthMode:       pc.AuthMode,
+			Query:          pc.Query,
+			ReasoningStyle: pc.ReasoningStyle,
+			stats:          previous.statsFor(pc.Name),
 		}
 	}
 
