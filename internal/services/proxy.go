@@ -315,7 +315,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			lastResp.Body.Close()
 		}
 		if p.debug {
-			p.log.Printf("serving %s via provider=%s upstream_model=%s: %s request_id=%s", path, pv.Name, route.ModelName, respSummary(resp), requestID(r))
+			p.log.Printf("serving %s via provider=%s upstream_model=%s dialect=%s reasoning=[%s]: %s request_id=%s", path, pv.Name, route.ModelName, reasoningDialectLabel(pv), reasoningSummary(routeBody), respSummary(resp), requestID(r))
 		}
 		return resp, &route, nil
 	}
