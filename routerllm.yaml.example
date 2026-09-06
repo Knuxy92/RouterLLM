@@ -101,6 +101,18 @@ providers:
       Content-Type: application/json
     auth_mode: bearer
 
+  # --- Google Gemini ---
+  # style: google translates OpenAI chat bodies to Gemini generateContent
+  # (:streamGenerateContent?alt=sse) and translates the SSE back. Auth always
+  # uses x-goog-api-key — auth_mode/query are ignored for this style.
+  # reasoning_effort maps to generationConfig.thinkingConfig.thinkingLevel,
+  # thinking_budget to thinkingConfig.thinkingBudget.
+
+  - name: google
+    api_key: ${GEMINI_API_KEY}             # key from Google AI Studio
+    style: google
+    base_url: https://generativelanguage.googleapis.com
+
   # --- Parked provider ---
   # `disabled: true` skips the provider at startup and on every reload, and
   # relaxes its validation: no api_key needed (and a disabled `style: cline`
@@ -212,6 +224,15 @@ routes:
         defaults:
           enable_thinking: true
 
+  # Google Gemini
+  - model_id: gemini-3.8-flash
+    routes:
+      - provider: google
+        model: gemini-3.8-flash
+        defaults:
+          reasoning_effort: high            # → thinkingLevel: low | medium | high
+      # thinking_budget: 8192              # → thinkingConfig.thinkingBudget
+
   # Free model, single provider
   - model_id: deepseek-v4-flash-free
     routes:
@@ -251,4 +272,4 @@ routes:
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # "low" | "medium" | "high" | "max"
 #         enable_thinking: bool             # true | false (Qwen-style)
-#         thinking_budget: int              # max thinking tokens (Anthropic-style)
+#         thinking_budget: int              # max thinking tokens (Anthropic/Google-style)

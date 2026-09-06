@@ -88,6 +88,52 @@ func TestMessagesPassesThroughAnthropicRoute(t *testing.T) {
 	}
 }
 
+func TestMessagesTranslatesGoogleUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/upstream-model:streamGenerateContent" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("alt") != "sse" {
+			t.Errorf("query = %q", r.URL.RawQuery)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "gkey" {
+			t.Errorf("x-goog-api-key = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}],\"role\":\"model\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\"},\"finishReason\":\"STOP\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name: "test", BaseURL: upstream.URL, Style: "google", Keys: []string{"gkey"},
+	}}, []model.Rule{{
+		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
+	}}, time.Minute)
+	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, true, nil, "")
+	h := New(proxy)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
+		`{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`,
+	))
+	w := httptest.NewRecorder()
+
+	h.Messages(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "event: message_start") {
+		t.Fatalf("message_start missing:\n%s", body)
+	}
+	if !strings.Contains(body, `"text":"hello","type":"text_delta"`) {
+		t.Fatalf("translated text delta missing:\n%s", body)
+	}
+	if !strings.Contains(body, "event: message_stop") {
+		t.Fatalf("message_stop missing:\n%s", body)
+	}
+}
+
 func TestChatCompletionsRejectsJSONNull(t *testing.T) {
 	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "")
 	h := New(proxy)

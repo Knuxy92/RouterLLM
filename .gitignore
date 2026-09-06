@@ -35,3 +35,6 @@ admin-tls.key
 
 # Project memory
 memory-bank/
+
+# ZCode session metadata
+.zcode/

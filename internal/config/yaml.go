@@ -112,11 +112,11 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		}
 
 		switch yp.Style {
-		case "openai", "anthropic", "cline":
+		case "openai", "anthropic", "cline", "google":
 		case "":
-			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, or cline)", yp.Name)
+			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, cline, or google)", yp.Name)
 		default:
-			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, or cline)", yp.Name, yp.Style)
+			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, or google)", yp.Name, yp.Style)
 		}
 
 		switch yp.AuthMode {

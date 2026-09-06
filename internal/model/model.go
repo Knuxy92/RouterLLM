@@ -31,9 +31,22 @@ type StreamChoice struct {
 }
 
 type Delta struct {
-	Role             string `json:"role,omitempty"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+}
+
+type ToolCall struct {
+	Index    int              `json:"index,omitempty"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type ChatCompletionResponse struct {
@@ -53,9 +66,10 @@ type Choice struct {
 }
 
 type Message struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type RequestDefaults struct {

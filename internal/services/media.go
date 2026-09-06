@@ -26,16 +26,21 @@ func (p *Proxy) mediaResolver(pv *provider.Provider) adapter.MediaResolver {
 	}
 }
 
-func (p *Proxy) fetchMedia(pv *provider.Provider, rawURL string) ([]byte, string, error) {
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, "", fmt.Errorf("media URL must use http or https")
+// mediaResolverNoAuth is like mediaResolver but only accepts absolute public
+// http(s) URLs and never attaches provider credentials — used for google-style
+// providers so the API key is never sent to third-party media hosts.
+func (p *Proxy) mediaResolverNoAuth(pv *provider.Provider) adapter.MediaResolver {
+	return func(reference string) ([]byte, string, error) {
+		parsed, err := url.Parse(reference)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, "", fmt.Errorf("unsupported media reference")
+		}
+		return p.fetchMediaNoAuth(parsed.String())
 	}
-	if parsed.Hostname() == "" || !isPublicHost(parsed.Hostname()) {
-		return nil, "", fmt.Errorf("media URL target is not public")
-	}
+}
 
-	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
+func (p *Proxy) fetchMedia(pv *provider.Provider, rawURL string) ([]byte, string, error) {
+	req, err := newMediaRequest(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
@@ -53,11 +58,26 @@ func (p *Proxy) fetchMedia(pv *provider.Provider, rawURL string) ([]byte, string
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 
+	return p.doMedia(req)
+}
+
+// fetchMediaNoAuth fetches a public URL without provider credentials.
+func (p *Proxy) fetchMediaNoAuth(rawURL string) ([]byte, string, error) {
+	req, err := newMediaRequest(rawURL)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return p.doMedia(req)
+}
+
+func (p *Proxy) doMedia(req *http.Request) ([]byte, string, error) {
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch media: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("fetch media returned status %d", resp.StatusCode)
 	}
@@ -77,6 +97,18 @@ func (p *Proxy) fetchMedia(pv *provider.Provider, rawURL string) ([]byte, string
 		mediaType = http.DetectContentType(data)
 	}
 	return data, mediaType, nil
+}
+
+func newMediaRequest(rawURL string) (*http.Request, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, fmt.Errorf("media URL must use http or https")
+	}
+	if parsed.Hostname() == "" || !isPublicHost(parsed.Hostname()) {
+		return nil, fmt.Errorf("media URL target is not public")
+	}
+
+	return http.NewRequest(http.MethodGet, parsed.String(), nil)
 }
 
 func isPublicHost(host string) bool {

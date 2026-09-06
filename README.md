@@ -75,8 +75,8 @@ providers:
   - name: forge                   # unique name, referenced in routes
     api_key: ${FORGE_API_KEY}     # env var or list: [key1, key2]
     base_url: https://forge-gateway-api.fly.dev
-    style: openai                 # openai | anthropic | cline
-    auth_mode: bearer             # bearer | x-api-key | both
+    style: openai                 # openai | anthropic | cline | google
+    auth_mode: bearer             # bearer | x-api-key | both (ignored for google)
     headers:                      # optional extra headers
       Content-Type: application/json
     share: mygroup                # optional key-sharing group name
@@ -124,6 +124,33 @@ routes:
         model: cline-free/glm-5.2
 ```
 
+### Google Gemini
+
+`style: google` speaks the native Gemini API (generativelanguage.googleapis.com): requests are
+translated to `:streamGenerateContent?alt=sse` and the SSE back to OpenAI shape. The key is sent
+as `x-goog-api-key` (multi-key failover works); `auth_mode`/`query` are ignored for this style.
+System prompts, tool calls, base64 images and `stop` are translated both ways.
+
+```yaml
+providers:
+  - name: google
+    api_key: ${GEMINI_API_KEY}
+    style: google
+    base_url: https://generativelanguage.googleapis.com
+
+routes:
+  - model_id: gemini-3.8-flash
+    routes:
+      - provider: google
+        model: gemini-3.8-flash
+        defaults:
+          reasoning_effort: high    # → generationConfig.thinkingConfig.thinkingLevel
+          # thinking_budget: 8192   # → generationConfig.thinkingConfig.thinkingBudget
+```
+
+`/v1/responses` and `/v1/files` are OpenAI-only — google-style providers are filtered out there,
+same as anthropic ones.
+
 ### Routes
 
 Map client-facing model names to upstream provider+model pairs. Routes are tried in order until one succeeds.
@@ -144,9 +171,9 @@ routes:
 
 | Field             | Values                       | Provider style | Notes                                                |
 |-------------------|------------------------------|----------------|------------------------------------------------------|
-| `enable_thinking` | `true` / `false`             | openai/anthropic | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. |
-| `reasoning_effort`| `low` / `medium` / `high` / `max` | openai    | Only sets the `reasoning_effort` body field. Does **not** enable thinking by itself — you must also set `enable_thinking: true`. |
-| `thinking_budget` | integer (tokens)             |     anthropic      | Maps to Anthropic `thinking.budget_tokens`. When set positively, creates a `thinking` block automatically. |
+| `enable_thinking` | `true` / `false`             | openai/anthropic/google | **Off by default.** Must set `true` explicitly. Sets both `enable_thinking` (OpenAI) and `thinking` (Anthropic) body fields. `false` maps to `thinkingBudget: 0` on google. |
+| `reasoning_effort`| `low` / `medium` / `high` / `max` | openai, google | Only sets the `reasoning_effort` body field on OpenAI. On google it maps to `thinkingConfig.thinkingLevel` (`max` → `high`). Does **not** enable thinking by itself on openai — you must also set `enable_thinking: true`. |
+| `thinking_budget` | integer (tokens)             | anthropic, google | Maps to Anthropic `thinking.budget_tokens` / Gemini `thinkingConfig.thinkingBudget`. When set positively, creates a `thinking` block automatically (Anthropic). |
 
 ### Examples
 
@@ -316,8 +343,8 @@ go vet ./...                                  # static analysis
 - **Hot-reload:** config is polled every 3s and swapped atomically on change; invalid edits are rejected and the previous config keeps serving. Caveat: on Docker Desktop, host-side hand edits don't propagate through the single-file bind mount — use the admin console or restart (see "Docker + hot reload" above).
 - **Streaming is forced:** all outbound requests to upstreams have `stream=true`. Non-streaming clients receive a buffered response.
 - **Request body limit:** 10 MB.
-- **`/v1/responses`** only works with `openai`-style providers; `anthropic` providers are filtered out.
-- **`/v1/messages`** accepts Anthropic-format requests, translates them to OpenAI, and translates the response back to Anthropic SSE.
+- **`/v1/responses`** only works with `openai`-style providers; `anthropic` and `google` providers are filtered out.
+- **`/v1/messages`** accepts Anthropic-format requests, translates them to OpenAI, and translates the response back to Anthropic SSE — including for `google` upstreams (Gemini → OpenAI chunks → Anthropic SSE).
 
 ## Security
 

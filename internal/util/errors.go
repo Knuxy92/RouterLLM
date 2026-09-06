@@ -61,6 +61,18 @@ func WriteUpstreamError(w http.ResponseWriter, status int, body []byte) {
 		return
 	}
 
+	var googleResponse struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &googleResponse); err == nil && googleResponse.Error.Message != "" {
+		WriteError(w, status, "upstream_error", googleResponse.Error.Message)
+		return
+	}
+
 	message := strings.TrimSpace(string(body))
 	WriteError(w, status, "upstream_error", message)
 }

@@ -125,8 +125,8 @@
         },
         "style": {
           "type": "string",
-          "enum": ["openai", "anthropic", "cline"],
-          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth)."
+          "enum": ["openai", "anthropic", "cline", "google"],
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent)."
         },
         "base_url": {
           "type": "string",

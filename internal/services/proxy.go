@@ -247,6 +247,8 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 
 		if pv.Style == "anthropic" {
 			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
+		} else if pv.Style == "google" {
+			reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
 		} else {
 			routeBody["model"] = route.ModelName
 			if pv.Style == "cline" {
@@ -348,6 +350,8 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 
 		if route.Provider.Style == "anthropic" {
 			p.serveAnthropic(resp, clientStream, route.ModelName, w)
+		} else if route.Provider.Style == "google" {
+			p.serveGoogle(resp, clientStream, route.ModelName, w)
 		} else if path == "/v1/responses" {
 			serveResponses(resp, clientStream, w)
 		} else {
@@ -473,6 +477,8 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					break
 				}
 				cline.SetHeaders(req.Header, token, call.sessionID)
+			} else if pv.Style == "google" {
+				req.Header.Set("x-goog-api-key", key)
 			} else {
 				switch pv.AuthMode {
 				case "both":
@@ -661,6 +667,28 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 	w.Write(openaiBody)
 }
 
+func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+	defer resp.Body.Close()
+	if clientStream {
+		writeStreamHeaders(w)
+		w.WriteHeader(http.StatusOK)
+		if err := adapter.StreamGoogleToOpenAI(resp.Body, w, modelName); err != nil {
+			p.log.Printf("google stream error: %v", err)
+		}
+		return
+	}
+
+	openaiBody, err := adapter.BufferGoogleToOpenAI(resp.Body, modelName)
+	if err != nil {
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(openaiBody)
+}
+
 func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
@@ -756,6 +784,13 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, style string, w
 	if style == "anthropic" {
 		if err := util.StreamRawSSE(resp.Body, w); err != nil {
 			p.log.Printf("anthropic passthrough stream error: %v", err)
+		}
+		return
+	}
+
+	if style == "google" {
+		if err := adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName); err != nil {
+			p.log.Printf("google stream error: %v", err)
 		}
 		return
 	}

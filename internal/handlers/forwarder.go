@@ -71,6 +71,8 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 
 		if route.Provider.Style == "anthropic" {
 			_ = util.StreamRawSSE(resp.Body, w)
+		} else if route.Provider.Style == "google" {
+			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, extractModel(raw))
 		} else {
 			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, extractModel(raw))
 		}
