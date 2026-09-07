@@ -1,5 +1,5 @@
-import { LOGS, MODELS, STATUS_META } from "./data.js"
-import { getState } from "./state.js"
+import { STATUS_META, adaptLogs, esc } from "./data.js"
+import { getRequests, getState } from "./state.js"
 import { $, openProvider } from "./render.js"
 
 // Global ⌘K palette: pages, models, providers and log lines — usable from any page.
@@ -27,7 +27,7 @@ function collect(q) {
   ]
   pages.filter((p) => hit(p.title, p.sub)).forEach((p) => out.push({ group: "Pages", ...p }))
 
-  MODELS.filter((m) => hit(m.name, ...m.legs.map((l) => l.route))).forEach((m) =>
+  state.models.filter((m) => hit(m.name, ...m.legs.map((l) => l.route))).forEach((m) =>
     out.push({
       group: "Models",
       icon: "box",
@@ -50,7 +50,7 @@ function collect(q) {
   )
 
   if (needle) {
-    LOGS.filter((r) => hit(r.msg, r.provider, r.model, r.key, String(r.status ?? "")))
+    adaptLogs(getRequests()).filter((r) => hit(r.msg, r.provider, r.model, r.key, String(r.status ?? "")))
       .slice(0, 6)
       .forEach((r) =>
         out.push({ group: "Logs", icon: "file-text", title: r.msg, sub: `${r.time} · ${r.provider} · ${r.model}`, meta: r.status ?? "—", go: () => go("logs") })
@@ -101,8 +101,8 @@ function draw(q) {
       <button type="button" data-idx="${i}" class="cmdk-row${i === active ? " active" : ""}">
         <i data-lucide="${r.icon}"></i>
         <span class="flex min-w-0 flex-col">
-          <span class="cmdk-title truncate">${hi(r.title, q)}</span>
-          <span class="cmdk-sub">${hi(r.sub, q)}</span>
+          <span class="cmdk-title truncate">${hi(esc(r.title), q)}</span>
+          <span class="cmdk-sub">${hi(esc(r.sub), q)}</span>
         </span>
         <span class="cmdk-meta">${r.meta}</span>
       </button>`

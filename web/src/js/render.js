@@ -1,20 +1,23 @@
 import {
   KEY_TONE,
-  LOGS,
-  MODELS,
   NOTE_TONE,
-  PROVIDER_AGG,
-  PROVIDERS,
   STATUS_META,
-  TRAFFIC,
-  WEEK,
-  hashStr,
+  adaptLogs,
+  adaptTraffic,
+  esc,
+  fmtInt,
+  providerAgg,
   providerModelRows,
 } from "./data.js";
 import {
+  getMetrics,
+  getRequests,
   getState,
+  getStatus,
   moveLeg,
+  reloadConfig,
   removeLeg,
+  startPolling,
   subscribe,
   toggleKey,
   toggleLeg,
@@ -35,26 +38,26 @@ export function withTransition(fn) {
 // ----- providers grid --------------------------------------------------------
 
 function keyLine(p) {
-  if (!p.keyList) return p.keys;
+  if (!p.keyList?.length) return p.keys;
   const on = p.keyList.filter((k) => k.on).length;
   if (on === 0) return `0/${p.keyList.length} · all disabled`;
   const bad = p.keyList.filter((k) => k.on && k.status !== "healthy");
   return `${on}/${p.keyList.length} · ${bad.length ? bad.length + " " + bad[0].status : "all healthy"}`;
 }
 
-export function providerCard(p) {
+export function providerCard(p, agg) {
   const s = STATUS_META[p.status];
-  const agg = PROVIDER_AGG[p.name];
+  const p50 = agg[p.name];
   return `
-    <div data-provider="${p.name}" title="Click to see TTFT by model" class="cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md${p.on ? "" : " opacity-60"}">
+    <div data-provider="${esc(p.name)}" title="Click to see TTFT by model" class="cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md${p.on ? "" : " opacity-60"}">
       <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2"><span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${p.name}</p><span class="badge ${s.badge}">${s.label}</span></div>
-        <input type="checkbox" class="sw" data-action="provider-toggle" data-name="${p.name}" ${p.on ? "checked" : ""} />
+        <div class="flex items-center gap-2"><span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${esc(p.name)}</p><span class="badge ${s.badge}">${s.label}</span></div>
+        <input type="checkbox" class="sw" data-action="provider-toggle" data-name="${esc(p.name)}" ${p.on ? "checked" : ""} />
       </div>
       <dl class="mt-3 flex flex-col gap-1.5 text-xs">
         <div class="flex justify-between"><dt class="text-muted-foreground">Keys</dt><dd class="font-mono">${keyLine(p)}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Requests 24h</dt><dd class="font-mono">${p.req}</dd></div>
-        <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${agg ? agg + " ms" : "—"}</dd></div>
+        <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${p50 ? p50 + " ms" : "—"}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Errors 24h</dt><dd class="font-mono">${p.err}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="font-mono">${p.up}</dd></div>
       </dl>
@@ -69,66 +72,252 @@ export function modelBlock(m) {
       (leg, i) => `
       <li class="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 transition-opacity${leg.on === false ? " opacity-50" : ""}">
         <span class="badge tone-info font-mono">${i + 1}</span>
-        <span class="min-w-0 truncate font-mono text-xs">${leg.route}</span>
-        <span class="badge ${NOTE_TONE[leg.tone]}">${leg.note}</span>
-        ${leg.effort ? `<span class="badge tone-info font-mono">effort: ${leg.effort}</span>` : ""}
+        <span class="min-w-0 truncate font-mono text-xs">${esc(leg.route)}</span>
+        <span class="badge ${NOTE_TONE[leg.tone]}">${esc(leg.note)}</span>
+        ${leg.effort ? `<span class="badge tone-info font-mono">effort: ${esc(leg.effort)}</span>` : ""}
         <span class="ml-auto flex items-center gap-1.5">
-          <button data-action="move-up" data-model="${m.name}" data-index="${i}" ${i === 0 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-up" class="size-3"></i></button>
-          <button data-action="move-down" data-model="${m.name}" data-index="${i}" ${i === m.legs.length - 1 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-down" class="size-3"></i></button>
-          <input type="checkbox" class="sw" data-action="leg-toggle" data-model="${m.name}" data-index="${i}" ${leg.on === false ? "" : "checked"} />
+          <button data-action="move-up" data-model="${esc(m.name)}" data-index="${i}" ${i === 0 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-up" class="size-3"></i></button>
+          <button data-action="move-down" data-model="${esc(m.name)}" data-index="${i}" ${i === m.legs.length - 1 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-down" class="size-3"></i></button>
+          <input type="checkbox" class="sw" data-action="leg-toggle" data-model="${esc(m.name)}" data-index="${i}" ${leg.on === false ? "" : "checked"} />
         </span>
       </li>`,
     )
     .join("");
   return `
-    <div data-model-block="${m.name}" class="rounded-lg border bg-card shadow-sm transition-opacity${m.on ? "" : " opacity-60"}">
+    <div data-model-block="${esc(m.name)}" class="rounded-lg border bg-card shadow-sm transition-opacity${m.on ? "" : " opacity-60"}">
       <div class="flex flex-wrap items-center gap-3 border-b px-5 py-3">
-        <span class="font-mono text-sm font-medium">${m.name}</span>
+        <span class="font-mono text-sm font-medium">${esc(m.name)}</span>
         <span class="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
           <span>req <span class="font-mono text-foreground">${m.req}</span></span>
           <span>success <span class="font-mono text-foreground">${m.ok}</span></span>
           <span>ttft <span class="font-mono text-foreground">${m.ttft} ms</span></span>
-          <input type="checkbox" class="sw" data-action="model-toggle" data-model="${m.name}" ${m.on ? "checked" : ""} />
+          <input type="checkbox" class="sw" data-action="model-toggle" data-model="${esc(m.name)}" ${m.on ? "checked" : ""} />
         </span>
       </div>
       <ul class="divide-y px-5 py-1 text-sm">${legs}
         <li class="py-2.5">
-          <button data-action="add-leg" data-model="${m.name}" class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-accent"><i data-lucide="plus" class="size-3"></i>Add failover leg</button>
+          <button data-action="add-leg" data-model="${esc(m.name)}" class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-accent"><i data-lucide="plus" class="size-3"></i>Add failover leg</button>
         </li>
       </ul>
     </div>`;
 }
 
 export function renderProviders() {
-  $("#provider-grid").innerHTML = getState()
-    .providers.map(providerCard)
-    .join("");
+  const agg = providerAgg(getMetrics());
+  const providers = getState().providers;
+  $("#provider-grid").innerHTML = providers.length
+    ? providers.map((p) => providerCard(p, agg)).join("")
+    : `<p class="col-span-full rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">No providers configured.</p>`;
 }
 
 export function renderModels() {
-  $("#model-list").innerHTML = getState().models.map(modelBlock).join("");
+  const models = getState().models;
+  $("#model-list").innerHTML = models.length
+    ? models.map(modelBlock).join("")
+    : `<p class="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">No models configured.</p>`;
 }
 
 export function renderTtftList() {
   const models = getState().models;
-  const maxTtft = Math.max(...models.map((m) => m.ttft));
-  const topModels = [...models]
-    .sort((a, b) => parseFloat(b.req) - parseFloat(a.req))
-    .slice(0, 10);
+  const topModels = [...models].sort((a, b) => b.reqNum - a.reqNum).slice(0, 10);
+  const caption = $("#ttft-caption");
+  if (caption)
+    caption.textContent = `Time to first token · p50 · 24h · top ${topModels.length} of ${models.length} models, by requests`;
+  if (!topModels.length) {
+    $("#ttft-list").innerHTML = `<p class="text-xs text-muted-foreground">No traffic recorded yet.</p>`;
+    return;
+  }
+  const maxTtft = Math.max(...topModels.map((m) => m.ttft), 1);
   $("#ttft-list").innerHTML = topModels
     .map(
       (m) => `
     <div>
-      <div class="mb-1 flex justify-between"><span class="font-mono">${m.name}</span><span class="font-mono text-muted-foreground">${m.ttft} ms</span></div>
+      <div class="mb-1 flex justify-between"><span class="font-mono">${esc(m.name)}</span><span class="font-mono text-muted-foreground">${m.ttft} ms</span></div>
       <div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary" style="width:${Math.round((m.ttft / maxTtft) * 100)}%"></div></div>
     </div>`,
     )
     .join("");
 }
 
+// ----- dashboard ----------------------------------------------------------------
+
+function fmtUptime(sec) {
+  if (sec == null) return "—";
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `up ${d}d ${h}h`;
+  if (h > 0) return `up ${h}h ${m}m`;
+  return `up ${m}m`;
+}
+
+function renderSidebarStatus() {
+  const status = getStatus();
+  const health = $("#router-health");
+  const uptime = $("#router-uptime");
+  const dot = $("#router-dot");
+  if (!health || !status) return;
+  const ok = status.last_reload?.ok !== false;
+  health.textContent = ok ? "healthy" : "reload failed";
+  health.className = ok ? "text-foreground" : "text-destructive";
+  if (dot) dot.className = "dot " + (ok ? "dot-live" : "dot-warn");
+  if (uptime) uptime.textContent = fmtUptime(status.uptime_seconds);
+  const cfg = $("#sidebar-config");
+  if (cfg && status.config_path)
+    cfg.textContent = status.config_path.split(/[\\/]/).pop();
+}
+
+let chartRange = "24h";
+
+function renderTrafficChart() {
+  const wrap = $("#chart-traffic");
+  if (!wrap) return;
+  const series = adaptTraffic(getMetrics(), chartRange);
+  const sub = $("#traffic-sub");
+  if (sub)
+    sub.textContent =
+      chartRange === "7d"
+        ? "Requests vs upstream errors · daily buckets"
+        : "Requests vs upstream errors · 2-hour buckets";
+
+  if (series.length < 2) {
+    wrap.innerHTML = `<p class="flex h-56 items-center justify-center text-xs text-muted-foreground">No traffic recorded yet.</p>`;
+    return;
+  }
+
+  wrap.innerHTML = chartSvg(
+    [
+      { values: series.map((s) => s.req), color: "hsl(var(--primary))" },
+      { values: series.map((s) => s.err), color: "hsl(var(--destructive))", dash: true },
+    ],
+    220,
+  );
+  attachChart(
+    "chart-traffic",
+    series.map((s) => `<b>${s.label}</b><br>${s.tip}`),
+  );
+}
+
+function renderKpis() {
+  const g = getMetrics()?.global;
+  const set = (id, html) => {
+    const el = $("#" + id);
+    if (el) el.innerHTML = html;
+  };
+  const errPct = g && g.req > 0 ? ((g.err / g.req) * 100).toFixed(2) : null;
+  set("kpi-req", fmtInt(g?.req ?? 0));
+  set("kpi-req-sub", `${getStatus()?.models_serving ?? 0} models serving`);
+  set("kpi-success", g && g.req > 0 ? `${g.success_pct}<span class="text-sm">%</span>` : "—");
+  set("kpi-success-sub", g && g.req > 0 ? `${fmtInt(g.req - g.err)} ok` : "no traffic yet");
+  set("kpi-ttft", g?.ttft_p50_ms ? `${fmtInt(g.ttft_p50_ms)}<span class="text-sm"> ms</span>` : "—");
+  set("kpi-ttft-sub", g?.ttft_p95_ms ? `p95 ${fmtInt(g.ttft_p95_ms)} ms` : "");
+  set("kpi-tok", g?.tok_per_sec ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>` : "—");
+  set("kpi-tok-sub", g?.tokens ? `${fmtInt(g.tokens)} tokens out` : "");
+  set("kpi-err", fmtInt(g?.err ?? 0));
+  set("kpi-err-sub", errPct != null ? `${errPct}% of requests` : "");
+}
+
+function renderTopModels() {
+  const box = $("#top-models");
+  if (!box) return;
+  const models = Object.entries(getMetrics()?.models || {});
+  const total = models.reduce((s, [, m]) => s + m.req, 0);
+  const top = models.sort((a, b) => b[1].req - a[1].req).slice(0, 5);
+  if (!top.length || total === 0) {
+    box.innerHTML = `<p class="text-xs text-muted-foreground">No traffic recorded yet.</p>`;
+    return;
+  }
+  box.innerHTML = top
+    .map(([name, m]) => {
+      const pct = Math.max(1, Math.round((m.req / total) * 100));
+      return `<div><div class="mb-1 flex items-center justify-between"><span class="font-mono">${esc(name)}</span><span class="text-muted-foreground">${fmtInt(m.req)} · ${pct}%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:${pct}%"></div></div></div>`;
+    })
+    .join("");
+}
+
+function renderRecentFailures() {
+  const ul = $("#recent-failures");
+  if (!ul) return;
+  const rows = adaptLogs(getRequests())
+    .filter((r) => r.level !== "info")
+    .slice(0, 5);
+  if (!rows.length) {
+    ul.innerHTML = `<li class="px-5 py-6 text-center text-xs text-muted-foreground">No failures in the retained window.</li>`;
+    return;
+  }
+  ul.innerHTML = rows
+    .map(
+      (r) => `
+    <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50${r.level === "error" ? " log-error-row" : ""}" data-open-trace data-seq="${r.seq}">
+      <span class="font-mono text-xs text-muted-foreground">${r.time}</span>
+      <span class="badge ${r.level === "error" ? "tone-error" : "tone-warn"}">${r.level}</span>
+      <span class="min-w-0 flex-1 truncate">${esc(r.msg)}</span>
+      <span class="hidden font-mono text-xs text-muted-foreground sm:inline">${r.status ?? "—"}</span>
+      <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+    </li>`,
+    )
+    .join("");
+}
+
+// ----- request trace drawer -------------------------------------------------------
+
+export function openTraceBySeq(seq) {
+  const e = getRequests().find((x) => x.seq === seq);
+  if (!e) return;
+  const r = adaptLogs([e])[0];
+  const d = new Date(e.time);
+
+  $("#trace-id").textContent = e.request_id || "req #" + e.seq;
+  $("#trace-status").innerHTML = e.status
+    ? `<span class="badge font-mono ${e.status < 400 ? "tone-ok" : "tone-error"}">${e.status}</span>`
+    : `<span class="badge tone-error">no response</span>`;
+  $("#trace-started").textContent = d.toLocaleString();
+  $("#trace-duration").textContent = fmtInt(e.duration_ms) + " ms";
+  $("#trace-model").textContent =
+    e.upstream_model && e.upstream_model !== e.model
+      ? `${e.model} → ${e.upstream_model}`
+      : e.model;
+  $("#trace-provider").textContent = `${e.provider || "—"} · ${e.key || "—"}`;
+  $("#trace-ttft").textContent = e.ttft_ms ? fmtInt(e.ttft_ms) + " ms" : "—";
+  $("#trace-tokens").textContent = e.tokens_out ? fmtInt(e.tokens_out) : "—";
+
+  const what = $("#trace-what");
+  if (e.err) {
+    what.className = "mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs";
+    what.innerHTML = `<p class="mb-1 flex items-center gap-2 font-semibold text-destructive"><i data-lucide="alert-triangle" class="size-3.5"></i>What happened</p><p class="leading-relaxed text-foreground">${esc(e.err)}</p>`;
+  } else {
+    what.className = "mb-4 rounded-md border bg-muted/30 p-3.5 text-xs";
+    what.innerHTML = `<p class="mb-1 font-semibold">Outcome</p><p class="leading-relaxed text-foreground">${esc(r.msg)}</p>`;
+  }
+
+  const attempts = e.attempts?.length
+    ? e.attempts
+    : [{ provider: e.provider || "—", model: e.upstream_model || e.model, key: e.key, status: e.status, latency_ms: e.duration_ms }];
+  $("#trace-timeline").innerHTML = attempts
+    .map(
+      (a, i) => `
+    <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full ${a.status && a.status < 400 ? "bg-primary" : "bg-amber-500"}"></span><p class="font-mono">attempt ${i + 1}/${attempts.length} → ${esc(a.provider)}${a.model ? "/" + esc(a.model) : ""}${a.key ? " · key " + esc(a.key) : ""} · <span class="${a.status && a.status < 400 ? "" : "text-destructive font-semibold"}">${a.status || "—"}</span> · ${fmtInt(a.latency_ms)} ms${a.note ? " · " + esc(a.note) : ""}</p></li>`,
+    )
+    .join("");
+
+  $("#trace-raw").textContent = JSON.stringify(e, null, 2);
+
+  $("#drawer").classList.add("open");
+  $("#drawer-scrim").classList.add("open");
+  window.lucide.createIcons();
+}
+
 function refreshAll() {
   renderProviders();
   renderModels();
+  renderTtftList();
+  renderKpis();
+  renderSidebarStatus();
+  renderTopModels();
+  renderRecentFailures();
+  renderTrafficChart();
+  buildLogDropdowns();
+  if (!logFilter.paused) renderLogs();
   window.lucide.createIcons();
 }
 
@@ -222,54 +411,25 @@ function chartSvg(seriesList, h = 130) {
   return `<svg viewBox="0 0 640 ${h}" class="w-full" style="height:${h}px" preserveAspectRatio="none">${grid}${lines}</svg>`;
 }
 
-function providerSeries(name) {
-  const agg = PROVIDER_AGG[name] ?? 350;
-  const h = hashStr(name);
-  const degraded =
-    getState().providers.find((p) => p.name === name)?.status === "degraded";
-  const base = degraded ? 96.2 : 98.8;
-  const success = WEEK.map((_, i) => +(base + ((h >> i) % 8) / 10).toFixed(1));
-  const p50 = WEEK.map((_, i) =>
-    Math.round(agg * (0.88 + ((h >> (i * 2)) % 25) / 100)),
-  );
-  const p95 = p50.map((v) => Math.round(v * (2.4 + (h % 5) * 0.12)));
-  const p99 = p50.map((v) => Math.round(v * (4.6 + (h % 3) * 0.3)));
-  return { labels: WEEK, success, p50, p95, p99 };
-}
-
 function buildAnalytics(name) {
-  const series = providerSeries(name);
-  const { success, p50, p95, p99 } = series;
-  const successSvg = chartSvg([{ values: success, color: "hsl(142 71% 45%)" }]);
-  const ttftSvg = chartSvg([
-    { values: p50, color: "#059669" },
-    { values: p95, color: "#f59e0b" },
-    { values: p99, color: "hsl(var(--destructive))" },
-  ]);
-  const avg = (success.reduce((a, b) => a + b, 0) / success.length).toFixed(1);
-  const html = `
-    <div class="flex flex-col gap-3">
-      <div class="rounded-lg border bg-card p-4">
-        <div class="mb-2 flex items-center justify-between">
-          <p class="text-sm font-medium">Success rate · 7d</p>
-          <span class="badge tone-ok font-mono">avg ${avg}%</span>
-        </div>
-        <div class="chart-wrap" id="pd-chart-success">${successSvg}</div>
-      </div>
-      <div class="rounded-lg border bg-card p-4">
-        <div class="mb-2 flex items-center justify-between">
-          <p class="text-sm font-medium">TTFT percentiles · 7d</p>
-          <span class="flex items-center gap-3 text-xs text-muted-foreground">
-            <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded" style="background:#059669"></span>p50</span>
-            <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded" style="background:#f59e0b"></span>p95</span>
-            <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded" style="background:hsl(var(--destructive))"></span>p99</span>
-          </span>
-        </div>
-        <div class="chart-wrap" id="pd-chart-ttft">${ttftSvg}</div>
-      </div>
-      <p class="text-[11px] text-muted-foreground">Mock series derived from this provider's aggregate metrics — real history comes with the backend.</p>
+  const s = getMetrics()?.providers?.[name];
+  if (!s || s.req === 0)
+    return `<p class="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">No metrics recorded for this provider in the last 24 hours.</p>`;
+
+  const cell = (label, value) =>
+    `<div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">${label}</dt><dd class="mt-1 font-mono text-lg font-semibold">${value}</dd></div>`;
+  return `
+    <div class="rounded-lg border bg-card p-4">
+      <p class="mb-2 text-sm font-medium">Last 24 hours</p>
+      <dl class="grid grid-cols-3 gap-2.5 text-xs">
+        ${cell("Requests", fmtInt(s.req))}
+        ${cell("Errors", fmtInt(s.err))}
+        ${cell("Success", s.req > 0 ? s.success_pct + "%" : "—")}
+        ${cell("TTFT p50", s.ttft_p50_ms ? fmtInt(s.ttft_p50_ms) + " ms" : "—")}
+        ${cell("TTFT p95", s.ttft_p95_ms ? fmtInt(s.ttft_p95_ms) + " ms" : "—")}
+        ${cell("Tok/s", s.tok_per_sec || "—")}
+      </dl>
     </div>`;
-  return { html, series };
 }
 
 // ----- provider detail drawer --------------------------------------------------
@@ -279,15 +439,16 @@ let currentProvider = null;
 export function openProvider(name, onOpened) {
   currentProvider = name;
   const p = getState().providers.find((x) => x.name === name);
+  if (!p) return;
   const s = STATUS_META[p.status];
-  const rows = providerModelRows(name);
-  const agg = PROVIDER_AGG[name];
+  const rows = providerModelRows(name, getMetrics(), getStatus());
+  const agg = providerAgg(getMetrics())[name];
   const totalReq = rows.reduce((sum, r) => sum + r.req, 0);
   const maxP50 = Math.max(...rows.map((r) => r.p50), 1);
   const slowestP50 = Math.max(...rows.map((r) => r.p50), 0);
 
   $("#pd-title").innerHTML =
-    `<span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${p.name}</p><span class="badge ${s.badge}">${s.label}</span>`;
+    `<span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${esc(p.name)}</p><span class="badge ${s.badge}">${s.label}</span>`;
 
   const summary = `
     <dl class="mb-4 grid grid-cols-3 gap-2.5 text-xs">
@@ -296,7 +457,7 @@ export function openProvider(name, onOpened) {
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Errors 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.err}</dd></div>
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Keys</dt><dd class="mt-1 font-mono">${keyLine(p)}</dd></div>
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="mt-1 font-mono">${p.up}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Models served</dt><dd class="mt-1 font-mono text-lg font-semibold">${rows.length}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Models served</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.model_count ?? rows.length}</dd></div>
     </dl>`;
 
   const table =
@@ -317,16 +478,16 @@ export function openProvider(name, onOpened) {
         <tbody class="divide-y">
           ${rows
             .map((r) => {
-              const slowest = r.p50 === slowestP50;
+              const slowest = rows.length > 1 && r.p50 === slowestP50;
               return `
             <tr>
-              <td class="px-3 py-2 font-mono">${r.modelId}
+              <td class="px-3 py-2 font-mono">${esc(r.modelId)}
                 <div class="mt-1.5 h-1.5 w-28 rounded-full bg-muted"><div class="h-1.5 rounded-full ${slowest ? "bg-amber-500" : "bg-primary"}" style="width:${Math.round((r.p50 / maxP50) * 100)}%"></div></div>
               </td>
-              <td class="px-3 py-2 text-right font-mono">${r.req.toLocaleString("en-US")}<span class="block text-[10px] text-muted-foreground">${Math.round((r.req / totalReq) * 100)}% share</span></td>
-              <td class="px-3 py-2 font-mono">${r.p50} ms${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
-              <td class="px-3 py-2 text-right font-mono">${r.p95} ms</td>
-              <td class="px-3 py-2 text-right font-mono">${r.tps}</td>
+              <td class="px-3 py-2 text-right font-mono">${fmtInt(r.req)}<span class="block text-[10px] text-muted-foreground">${totalReq ? Math.round((r.req / totalReq) * 100) : 0}% share</span></td>
+              <td class="px-3 py-2 font-mono">${r.p50 ? r.p50 + " ms" : "—"}${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
+              <td class="px-3 py-2 text-right font-mono">${r.p95 ? r.p95 + " ms" : "—"}</td>
+              <td class="px-3 py-2 text-right font-mono">${r.tps || "—"}</td>
             </tr>`;
             })
             .join("")}
@@ -342,15 +503,15 @@ export function openProvider(name, onOpened) {
         .map(
           (k, i) => `
         <div class="flex items-center gap-3 px-3 py-2.5 text-xs${i > 0 ? " border-t" : ""}${k.on ? "" : " opacity-50"}">
-          <span class="font-mono">${k.masked}</span>
+          <span class="font-mono">${esc(k.masked)}</span>
           <span class="badge ${KEY_TONE[k.status]}">${k.status}</span>
-          <span class="ml-auto text-muted-foreground">err 24h <span class="font-mono text-foreground">${k.err}</span></span>
-          <input type="checkbox" class="sw" data-action="key-toggle" data-provider="${p.name}" data-index="${i}" ${k.on ? "checked" : ""} />
+          <span class="ml-auto text-muted-foreground">${k.status === "cooldown" ? `cooldown <span class="font-mono text-foreground">${k.cooldown}s</span>` : k.status === "disabled" ? "manually disabled" : ""}</span>
+          <input type="checkbox" class="sw" data-action="key-toggle" data-provider="${esc(p.name)}" data-index="${i}" ${k.on ? "checked" : ""} />
         </div>`,
         )
         .join("")}
     </div>
-    <p class="mt-1.5 text-[11px] text-muted-foreground">Keys arrive masked from the backend. Disabling a provider's last key disables the provider.</p>`;
+    <p class="mt-1.5 text-[11px] text-muted-foreground">Keys arrive masked from the backend. The manual toggle is runtime-only — a process restart re-enables disabled keys.</p>`;
 
   const analyticsBar = `
     <div class="mt-4 flex items-center justify-between border-t pt-3">
@@ -373,23 +534,7 @@ export function openProvider(name, onOpened) {
     $("#pd-analytics-btn").innerHTML = showing
       ? `<i data-lucide="bar-chart-3" class="size-3"></i>View analytics`
       : `<i data-lucide="chevron-up" class="size-3"></i>Hide analytics`;
-    if (!showing) {
-      const { html, series } = buildAnalytics(name);
-      box.innerHTML = html;
-      attachChart(
-        "pd-chart-success",
-        series.labels.map(
-          (d, i) => `<b>${d}</b><br>success ${series.success[i]}%`,
-        ),
-      );
-      attachChart(
-        "pd-chart-ttft",
-        series.labels.map(
-          (d, i) =>
-            `<b>${d}</b><br>p50 ${series.p50[i]} · p95 ${series.p95[i]} · p99 ${series.p99[i]} ms`,
-        ),
-      );
-    }
+    if (!showing) box.innerHTML = buildAnalytics(name);
     window.lucide.createIcons();
   });
 
@@ -416,8 +561,8 @@ export function openLegDialog(modelName) {
   );
   buildDD(
     "leg-dialog-effort",
-    ["low", "medium", "high", "xhigh", "max"],
-    "medium",
+    ["(none)", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "(none)",
   );
   $("#leg-dialog-upstream").value = "";
   $("#leg-dialog-confirm").disabled = candidates.length === 0;
@@ -447,7 +592,7 @@ const logFilter = {
 function filteredLogs(skip) {
   const q = logQuery.trim().toLowerCase();
   const maxAge = RANGE_HOURS[logFilter.range] ?? 720;
-  return LOGS.filter((r) => {
+  return adaptLogs(getRequests()).filter((r) => {
     if (r.ageH > maxAge) return false;
     if (
       logFilter.provider !== "All providers" &&
@@ -487,18 +632,18 @@ export function renderLogs() {
     error: "tone-error",
   };
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-10 text-center text-sm text-muted-foreground">No requests match “${logQuery.trim().replace(/[<>&]/g, "")}”.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-10 text-center text-sm text-muted-foreground">No requests match the current filters.</td></tr>`;
   } else {
     tbody.innerHTML = rows
       .map(
         (r) => `
-    <tr class="${r.status && r.status !== 200 ? "log-error-row" : ""} cursor-pointer hover:bg-muted/50" data-open-trace>
+    <tr class="${r.status && r.status !== 200 ? "log-error-row" : ""} cursor-pointer hover:bg-muted/50" data-open-trace data-seq="${r.seq}">
       <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">${r.time}</td>
       <td class="px-3 py-2.5"><span class="badge ${levelBadge[r.level]}">${r.level}</span></td>
-      <td class="max-w-[340px] truncate px-3 py-2.5">${r.msg}</td>
-      <td class="px-3 py-2.5 font-mono text-xs">${r.provider}</td>
-      <td class="px-3 py-2.5 font-mono text-xs">${r.model}</td>
-      <td class="px-3 py-2.5 font-mono text-xs">${r.key}</td>
+      <td class="max-w-[340px] truncate px-3 py-2.5">${esc(r.msg)}</td>
+      <td class="px-3 py-2.5 font-mono text-xs">${esc(r.provider)}</td>
+      <td class="px-3 py-2.5 font-mono text-xs">${esc(r.model)}</td>
+      <td class="px-3 py-2.5 font-mono text-xs">${esc(r.key)}</td>
       <td class="px-3 py-2.5 text-right font-mono text-xs">${r.ttft}</td>
       <td class="px-3 py-2.5 text-right font-mono text-xs${r.tps == null ? " text-muted-foreground" : ""}">${r.tps ?? "—"}</td>
       <td class="px-3 py-2.5 text-right">${r.status == null ? '<span class="text-muted-foreground">—</span>' : `<span class="badge font-mono ${r.status === 200 ? "tone-ok" : "tone-error"}">${r.status}</span>`}</td>
@@ -508,8 +653,9 @@ export function renderLogs() {
       .join("");
   }
 
-  $("#log-rows-label").innerHTML =
-    `Rows <span class="font-mono text-foreground">${start + 1}–${start + rows.length}</span> of <span class="font-mono text-foreground">${logs.length}</span>`;
+  $("#log-rows-label").innerHTML = logs.length
+    ? `Rows <span class="font-mono text-foreground">${start + 1}–${start + rows.length}</span> of <span class="font-mono text-foreground">${logs.length}</span>`
+    : `Rows <span class="font-mono text-foreground">0</span> of <span class="font-mono text-foreground">0</span>`;
   $("#log-error-count").textContent = filteredLogs("level").filter(
     (r) => r.level === "error",
   ).length;
@@ -536,17 +682,26 @@ function goToLogPage(page) {
   withTransition(renderLogs);
 }
 
-// ----- init ---------------------------------------------------------------------
+// Rebuilt only when the provider/model name set actually changes, so an open
+// dropdown is not yanked away mid-interaction by the 3s poll.
+let ddSig = "";
 
-export function initDynamic() {
-  refreshAll();
-  renderTtftList();
-  renderLogs();
+function buildLogDropdowns() {
+  const { providers, models } = getState();
+  const sig =
+    providers.map((p) => p.name).join(",") + "|" + models.map((m) => m.name).join(",");
+  if (sig === ddSig) return;
+  ddSig = sig;
+
+  if (!providers.some((p) => p.name === logFilter.provider))
+    logFilter.provider = "All providers";
+  if (!models.some((m) => m.name === logFilter.model))
+    logFilter.model = "All models";
 
   buildDD(
     "dd-provider",
-    ["All providers", ...PROVIDERS.map((p) => p.name)],
-    "All providers",
+    ["All providers", ...providers.map((p) => p.name)],
+    logFilter.provider,
     (v) => {
       logFilter.provider = v;
       logPage = 1;
@@ -555,14 +710,27 @@ export function initDynamic() {
   );
   buildDD(
     "dd-model",
-    ["All models", ...MODELS.map((m) => m.name)],
-    "All models",
+    ["All models", ...models.map((m) => m.name)],
+    logFilter.model,
     (v) => {
       logFilter.model = v;
       logPage = 1;
       renderLogs();
     },
   );
+}
+
+// ----- init ---------------------------------------------------------------------
+
+let wired = false;
+
+export function initDynamic() {
+  startPolling();
+  refreshAll();
+
+  if (wired) return;
+  wired = true;
+
   buildDD(
     "dd-range",
     ["Last 1h", "Last 24h", "Last 7d", "Last 30d"],
@@ -574,10 +742,22 @@ export function initDynamic() {
     },
   );
 
-  attachChart(
-    "chart-traffic",
-    TRAFFIC.map(([t, v]) => `<b>${t}</b><br>${v}`),
-  );
+  // dashboard: chart range + config reload
+  $("#chart-range-seg")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-range]");
+    if (!btn) return;
+    chartRange = btn.dataset.range;
+    renderTrafficChart();
+  });
+  $("#reload-btn")?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    await reloadConfig();
+    e.currentTarget.disabled = false;
+  });
+  $("#recent-failures")?.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-open-trace]");
+    if (row) openTraceBySeq(Number(row.dataset.seq));
+  });
 
   // provider cards: click opens drawer, switch toggles state
   $("#provider-grid").addEventListener("click", (e) => {

@@ -1,5 +1,5 @@
 import { addLeg } from "./state.js"
-import { $, $$ } from "./render.js"
+import { $, $$, openTraceBySeq } from "./render.js"
 
 export function wireUi() {
   // mobile sidebar
@@ -20,10 +20,6 @@ export function wireUi() {
   })
 
   // request trace drawer — rows re-render per page, so delegate on the tbody
-  const openDrawer = () => {
-    $("#drawer").classList.add("open")
-    $("#drawer-scrim").classList.add("open")
-  }
   const closeDrawer = () => {
     $("#drawer").classList.remove("open")
     $("#drawer-scrim").classList.remove("open")
@@ -33,7 +29,8 @@ export function wireUi() {
     $("#pd-scrim").classList.remove("open")
   }
   $("#log-tbody").addEventListener("click", (e) => {
-    if (e.target.closest("[data-open-trace]")) openDrawer()
+    const row = e.target.closest("[data-open-trace]")
+    if (row) openTraceBySeq(Number(row.dataset.seq))
   })
   $("#drawer-close").addEventListener("click", closeDrawer)
   $("#drawer-scrim").addEventListener("click", closeDrawer)
@@ -54,7 +51,7 @@ export function wireUi() {
     const provider = $("#leg-dialog-provider .dd-label")?.textContent.trim()
     const effort = $("#leg-dialog-effort .dd-label")?.textContent.trim()
     const upstream = $("#leg-dialog-upstream").value.trim()
-    if (provider && !provider.startsWith("—")) addLeg(dialog.dataset.model, provider, { upstreamModel: upstream, effort })
+    if (provider && !provider.startsWith("—")) addLeg(dialog.dataset.model, provider, { upstreamModel: upstream, effort: effort === "(none)" ? null : effort })
     dialog.close()
   })
   dialog.addEventListener("click", (e) => {

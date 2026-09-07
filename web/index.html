@@ -30,28 +30,24 @@
     <div class="rounded-lg border bg-card p-6 shadow-sm">
       <form id="login-form" class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
-          <label for="token" class="text-sm font-medium">Admin token</label>
+          <label for="token" class="text-sm font-medium">Admin secret</label>
           <div class="relative">
             <i data-lucide="key-round" class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"></i>
-            <input id="token" name="token" type="password" value="demo-token" autocomplete="off"
+            <input id="token" name="token" type="password" autocomplete="off"
                    class="w-full rounded-md border bg-transparent py-2 pl-9 pr-3 text-sm shadow-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30" placeholder="Paste admin token" />
           </div>
-          <p class="text-xs text-muted-foreground">Same token as the current TokenGate (HMAC-signed session).</p>
+          <p class="text-xs text-muted-foreground">The secret never leaves this device — sign-in answers a server challenge with HMAC-SHA256.</p>
+          <p id="login-error" class="hidden text-xs font-medium text-destructive"></p>
         </div>
 
-        <label class="flex items-center gap-2 text-sm">
-          <input id="remember" name="remember" type="checkbox" checked class="size-4 rounded border-input accent-[hsl(var(--primary))]" />
-          Remember this device
-        </label>
-
-        <button type="submit" class="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+        <button type="submit" class="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50">
           Sign in
         </button>
       </form>
     </div>
 
     <p class="mt-4 text-center text-xs text-muted-foreground">
-      Wireframe behaviour: any token works · session persists on this device (auth once)
+      Sessions last 12 hours and survive page reloads on this device
     </p>
   </div>
 </div>
@@ -70,7 +66,7 @@
       </div>
       <div class="leading-tight">
         <p class="text-sm font-semibold">RouterLLM</p>
-        <p class="font-mono text-[10px] text-muted-foreground">routerllm.yaml · v0.4.2</p>
+        <p id="sidebar-config" class="font-mono text-[10px] text-muted-foreground">routerllm.yaml</p>
       </div>
     </div>
 
@@ -86,11 +82,10 @@
 
     <div class="border-t px-3 py-3">
       <div class="flex items-center gap-2 rounded-md px-2 py-1.5">
-        <span class="dot dot-live"></span>
-        <p class="text-xs text-muted-foreground">Router process <span class="text-foreground">healthy</span></p>
-        <span class="badge tone-info ml-auto font-mono">up 6d 4h</span>
+        <span id="router-dot" class="dot dot-muted"></span>
+        <p class="text-xs text-muted-foreground">Router process <span id="router-health" class="text-foreground">—</span></p>
+        <span id="router-uptime" class="badge tone-info ml-auto font-mono">—</span>
       </div>
-      <p class="px-2 pt-1 text-[10px] text-muted-foreground/70">MOCK DATA — native build, backend wiring next</p>
     </div>
   </aside>
 
@@ -147,36 +142,36 @@
             <p class="text-sm text-muted-foreground">Live overview of the router — last 24 hours.</p>
           </div>
           <div class="flex items-center gap-2">
-            <div class="seg"><button class="seg-btn active">24h</button><button class="seg-btn">7d</button><button class="seg-btn">30d</button></div>
-            <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent"><i data-lucide="refresh-cw" class="size-3.5"></i>Reload config</button>
+            <div class="seg" id="chart-range-seg"><button class="seg-btn active" data-range="24h">24h</button><button class="seg-btn" data-range="7d">7d</button></div>
+            <button id="reload-btn" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent disabled:opacity-50"><i data-lucide="refresh-cw" class="size-3.5"></i>Reload config</button>
           </div>
         </div>
 
         <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
           <div class="rounded-lg border bg-card p-4 shadow-sm">
             <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Requests 24h</p><i data-lucide="zap" class="size-3.5 text-muted-foreground"></i></div>
-            <p class="mt-1.5 font-mono text-xl font-semibold">1,284,392</p>
-            <span class="badge tone-ok mt-1.5">▲ 12.4% vs prev</span>
+            <p id="kpi-req" class="mt-1.5 font-mono text-xl font-semibold">—</p>
+            <span id="kpi-req-sub" class="badge tone-info mt-1.5">—</span>
           </div>
           <div class="rounded-lg border bg-card p-4 shadow-sm">
             <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Success rate</p><i data-lucide="gauge" class="size-3.5 text-muted-foreground"></i></div>
-            <p class="mt-1.5 font-mono text-xl font-semibold">98.72<span class="text-sm">%</span></p>
-            <span class="badge tone-ok mt-1.5">▲ 0.3 pt</span>
+            <p id="kpi-success" class="mt-1.5 font-mono text-xl font-semibold">—</p>
+            <span id="kpi-success-sub" class="badge tone-ok mt-1.5">—</span>
           </div>
           <div class="rounded-lg border bg-card p-4 shadow-sm">
             <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Median TTFT</p><i data-lucide="clock" class="size-3.5 text-muted-foreground"></i></div>
-            <p class="mt-1.5 font-mono text-xl font-semibold">412<span class="text-sm"> ms</span></p>
-            <span class="badge tone-ok mt-1.5">▼ 38 ms</span>
+            <p id="kpi-ttft" class="mt-1.5 font-mono text-xl font-semibold">—</p>
+            <span id="kpi-ttft-sub" class="badge tone-info mt-1.5">—</span>
           </div>
           <div class="rounded-lg border bg-card p-4 shadow-sm">
             <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Throughput</p><i data-lucide="trending-up" class="size-3.5 text-muted-foreground"></i></div>
-            <p class="mt-1.5 font-mono text-xl font-semibold">1,842<span class="text-sm"> tok/s</span></p>
-            <span class="badge tone-ok mt-1.5">▲ 6.1%</span>
+            <p id="kpi-tok" class="mt-1.5 font-mono text-xl font-semibold">—</p>
+            <span id="kpi-tok-sub" class="badge tone-info mt-1.5">—</span>
           </div>
           <div class="col-span-2 rounded-lg border bg-card p-4 shadow-sm lg:col-span-1">
             <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Errors 24h</p><i data-lucide="shield-alert" class="size-3.5 text-muted-foreground"></i></div>
-            <p class="mt-1.5 font-mono text-xl font-semibold">16,404</p>
-            <span class="badge tone-error mt-1.5">▼ 112 · 1.28%</span>
+            <p id="kpi-err" class="mt-1.5 font-mono text-xl font-semibold">—</p>
+            <span id="kpi-err-sub" class="badge tone-error mt-1.5">—</span>
           </div>
         </div>
 

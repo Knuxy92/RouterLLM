@@ -1,47 +1,41 @@
-import { MODELS, PROVIDERS } from "./data.js"
+import { api } from "./api.js"
+import { adaptModels, adaptProviders } from "./data.js"
 
-// Mutable mock state so toggles/reorders act like a real backend.
-// Persisted to localStorage so "เปลี่ยนได้จริง" survives a refresh.
-// Swap this module for api.js calls when the backend is wired.
+// Server-backed state. Nothing is persisted locally — /status, /metrics and
+// /requests are polled every 3s and every mutation goes through the admin API.
+// Toggles are optimistic: the local status copy is mutated immediately, then
+// the API result (which is itself a fresh Status) replaces it; on failure the
+// state is rolled back by re-fetching /status.
 
-const KEY = "routerllm.admin.mockstate.v2"
+const POLL_MS = 3000
+const RING_CAP = 2000
 
-function seed() {
-  const providers = structuredClone(PROVIDERS)
-  const models = structuredClone(MODELS)
-  models.forEach((m) =>
-    m.legs.forEach((leg) => {
-      leg.on = true
-      leg.baseNote = leg.note
-      leg.baseTone = leg.tone
-    })
-  )
-  return { providers, models }
-}
+let lastStatus = null
+let lastMetrics = null
+let requestEntries = []
+let lastReqSeq = 0
+let timer = null
+let polling = false
 
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      if (parsed?.providers?.length && parsed?.models?.length) return parsed
-    }
-  } catch {
-    // fall through to seed
-  }
-  return seed()
-}
-
-let state = load()
 const listeners = new Set()
 
-function commit() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)) } catch { /* storage full/blocked — keep in-memory */ }
-  listeners.forEach((fn) => fn(state))
+export function getStatus() {
+  return lastStatus
+}
+
+export function getMetrics() {
+  return lastMetrics
+}
+
+export function getRequests() {
+  return requestEntries
 }
 
 export function getState() {
-  return state
+  return {
+    providers: adaptProviders(lastStatus, lastMetrics),
+    models: adaptModels(lastStatus, lastMetrics),
+  }
 }
 
 export function subscribe(fn) {
@@ -49,72 +43,189 @@ export function subscribe(fn) {
   return () => listeners.delete(fn)
 }
 
+function notify() {
+  listeners.forEach((fn) => fn())
+}
+
+function mergeRequests(entries, latest) {
+  if (latest < lastReqSeq) {
+    // Server restarted (seq counter reset) — drop the stale tail and resync.
+    requestEntries = []
+    lastReqSeq = 0
+    return false
+  }
+  if (entries?.length) {
+    requestEntries = requestEntries.concat(entries).slice(-RING_CAP)
+  }
+  lastReqSeq = latest
+  return true
+}
+
+async function pollOnce() {
+  if (polling) return
+  polling = true
+
+  try {
+    const [status, metrics, reqs] = await Promise.all([
+      api.status(),
+      api.metrics(),
+      api.requests(lastReqSeq),
+    ])
+
+    lastStatus = status
+    lastMetrics = metrics
+    if (!mergeRequests(reqs.entries, reqs.latest) ) {
+      const fresh = await api.requests(0)
+      mergeRequests(fresh.entries, fresh.latest)
+    }
+
+    notify()
+  } catch {
+    // 401 is handled globally by api.js (unauthorized event); transient
+    // network/5xx failures just wait for the next tick with the old state.
+  } finally {
+    polling = false
+  }
+}
+
+export function startPolling() {
+  stopPolling()
+  pollOnce()
+  timer = setInterval(() => {
+    if (!document.hidden) pollOnce()
+  }, POLL_MS)
+}
+
+export function stopPolling() {
+  if (timer) clearInterval(timer)
+  timer = null
+}
+
+// ----- mutations -----------------------------------------------------------------
+
+async function mutate(optimistic, request) {
+  if (lastStatus) {
+    optimistic(lastStatus)
+    notify()
+  }
+
+  try {
+    lastStatus = await request()
+  } catch {
+    try {
+      lastStatus = await api.status()
+    } catch {
+      // keep the optimistic state if even the rollback fetch fails; the next
+      // poll tick will resync anyway
+    }
+  }
+
+  notify()
+}
+
+function findProvider(status, name) {
+  return status.providers?.find((p) => p.name === name)
+}
+
+function findModel(status, name) {
+  return status.models?.find((m) => m.model_id === name)
+}
+
 export function toggleProvider(name, on) {
-  const p = state.providers.find((x) => x.name === name)
-  if (!p) return
-  p.on = on
-  p.status = on ? "healthy" : "disabled"
-  p.up = on ? p.up ?? "99.0%" : "—"
-  commit()
+  mutate(
+    (s) => {
+      const p = findProvider(s, name)
+      if (p) p.disabled = !on
+    },
+    () => api.setProviderDisabled(name, !on),
+  )
 }
 
 export function toggleModel(name, on) {
-  const m = state.models.find((x) => x.name === name)
-  if (!m) return
-  m.on = on
-  commit()
+  mutate(
+    (s) => {
+      const m = findModel(s, name)
+      if (m) m.disabled = !on
+    },
+    () => api.setModelDisabled(name, !on),
+  )
 }
 
 export function toggleLeg(modelName, index, on) {
-  const m = state.models.find((x) => x.name === modelName)
-  const leg = m?.legs[index]
-  if (!leg) return
-  leg.on = on
-  leg.note = on ? leg.baseNote : "disabled"
-  leg.tone = on ? leg.baseTone : "info"
-  commit()
+  mutate(
+    (s) => {
+      const leg = findModel(s, modelName)?.chain?.[index]
+      if (leg) leg.disabled = !on
+    },
+    () => api.setRouteDisabled(modelName, index, !on),
+  )
 }
 
 export function moveLeg(modelName, index, direction) {
-  const m = state.models.find((x) => x.name === modelName)
-  if (!m) return
-  const target = direction === "up" ? index - 1 : index + 1
-  if (target < 0 || target >= m.legs.length) return
-  ;[m.legs[index], m.legs[target]] = [m.legs[target], m.legs[index]]
-  commit()
+  mutate(
+    (s) => {
+      const chain = findModel(s, modelName)?.chain
+      if (!chain) return
+      const target = direction === "up" ? index - 1 : index + 1
+      if (target < 0 || target >= chain.length) return
+      ;[chain[index], chain[target]] = [chain[target], chain[index]]
+    },
+    () => api.moveRoute(modelName, index, direction),
+  )
 }
 
 export function removeLeg(modelName, index) {
-  const m = state.models.find((x) => x.name === modelName)
-  if (!m || m.legs.length <= 1) return
-  m.legs.splice(index, 1)
-  commit()
+  const chain = findModel(lastStatus ?? {}, modelName)?.chain
+  if (!chain || chain.length <= 1) return
+  mutate(
+    (s) => {
+      s.models?.find((m) => m.model_id === modelName)?.chain?.splice(index, 1)
+    },
+    () => api.removeRouteLeg(modelName, index),
+  )
 }
 
 export function addLeg(modelName, provider, opts = {}) {
-  const m = state.models.find((x) => x.name === modelName)
-  if (!m) return
-  m.legs.push({
-    route: `${provider}/${opts.upstreamModel || m.name}`,
-    effort: opts.effort ?? null,
-    tone: "info",
-    note: "standby",
-    on: true,
-    baseNote: "standby",
-    baseTone: "info",
-  })
-  commit()
+  const upstream = opts.upstreamModel || modelName
+  mutate(
+    (s) => {
+      findModel(s, modelName)?.chain?.push({
+        provider,
+        model: upstream,
+        disabled: !!opts.disabled,
+        active: false,
+        provider_disabled: false,
+      })
+    },
+    () => api.addRouteLeg(modelName, {
+      provider,
+      model: upstream,
+      reasoning_effort: opts.effort || undefined,
+      disabled: !!opts.disabled,
+    }),
+  )
 }
 
 export function toggleKey(providerName, index, on) {
-  const p = state.providers.find((x) => x.name === providerName)
-  const key = p?.keyList?.[index]
-  if (!key) return
-  key.on = on
-  if (!p.keyList.some((k) => k.on) && p.on) {
-    p.on = false
-    p.status = "disabled"
-    p.up = "—"
+  mutate(
+    (s) => {
+      const key = findProvider(s, providerName)?.keys?.[index]
+      if (key) key.disabled = !on
+    },
+    () => api.setKeyDisabled(providerName, index, !on),
+  )
+}
+
+export async function reloadConfig() {
+  try {
+    lastStatus = await api.reload()
+  } catch {
+    try {
+      lastStatus = await api.status()
+    } catch {
+      // next poll tick resyncs
+    }
   }
-  commit()
+
+  notify()
 }
