@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <script src="/admin/vendor/lucide.min.js"></script>
-  <script type="module" crossorigin src="/admin/assets/index-8NUgl--E.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-vqzNjsvJ.js"></script>
   <link rel="stylesheet" crossorigin href="/admin/assets/index-Bu8o7lr7.css">
 </head>
 <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
@@ -179,25 +179,18 @@
         <div class="mb-5 grid gap-3 lg:grid-cols-3">
           <div class="min-w-0 rounded-lg border bg-card p-5 shadow-sm lg:col-span-2">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-y-1">
-              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p class="text-xs text-muted-foreground">Requests vs upstream errors · 5-min buckets</p></div>
+              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p id="traffic-sub" class="text-xs text-muted-foreground">Requests vs upstream errors · 2-hour buckets</p></div>
               <div class="flex items-center gap-3 text-xs text-muted-foreground">
                 <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-primary"></span>requests</span>
                 <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-destructive"></span>errors</span>
               </div>
             </div>
-            <div id="chart-traffic" class="chart-wrap"><svg viewBox="0 0 640 220" class="h-56 w-full" preserveAspectRatio="none">
-              <g stroke="hsl(var(--border))" stroke-width="1"><line x1="0" y1="40" x2="640" y2="40"/><line x1="0" y1="90" x2="640" y2="90"/><line x1="0" y1="140" x2="640" y2="140"/><line x1="0" y1="190" x2="640" y2="190"/></g>
-              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44 L640,220 L0,220 Z" fill="hsl(var(--primary))" opacity="0.07"/>
-              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44" fill="none" stroke="hsl(var(--primary))" stroke-width="2"/>
-              <path d="M0,196 C60,194 120,197 180,192 C240,187 300,193 360,190 C420,187 480,191 540,186 C580,183 620,188 640,184" fill="none" stroke="hsl(var(--destructive))" stroke-width="2" stroke-dasharray="4 3"/>
-              <circle cx="360" cy="190" r="4" fill="hsl(var(--destructive))"/>
-            </svg></div>
-            <p class="mt-2 text-xs text-muted-foreground">↑ Spike at 01:44 — google upstream 503 on <span class="font-mono">gemini-3.8-flash</span> (3 retries × 3 keys exhausted)</p>
+            <div id="chart-traffic" class="chart-wrap"></div>
           </div>
 
           <div class="min-w-0 rounded-lg border bg-card p-5 shadow-sm">
             <p class="text-sm font-medium">TTFT p50 by model</p>
-            <p class="mb-3 text-xs text-muted-foreground">Time to first token · 24h · top 10 of 15 models, by requests</p>
+            <p id="ttft-caption" class="mb-3 text-xs text-muted-foreground">Time to first token · 24h</p>
             <div id="ttft-list" class="flex max-h-64 flex-col gap-3.5 overflow-y-auto pr-1 text-xs"></div>
           </div>
         </div>
@@ -208,46 +201,13 @@
               <div><p class="text-sm font-medium">Recent failures</p><p class="text-xs text-muted-foreground">Click a row to open the full request trace</p></div>
               <a href="#/logs" class="text-xs text-muted-foreground underline-offset-2 hover:underline">View all logs</a>
             </div>
-            <ul class="divide-y text-sm">
-              <li class="log-error-row flex cursor-pointer items-center gap-3 px-5 py-3" data-open-trace>
-                <span class="font-mono text-xs text-muted-foreground">01:44:52</span>
-                <span class="badge tone-error">error</span>
-                <span class="min-w-0 flex-1 truncate">all keys exhausted for gemini-3.8-flash via google: status=503</span>
-                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">502</span>
-                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
-              </li>
-              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
-                <span class="font-mono text-xs text-muted-foreground">01:44:44</span>
-                <span class="badge tone-warn">warn</span>
-                <span class="min-w-0 flex-1 truncate">upstream google transient (retry 3/3): status=503 xrid=—</span>
-                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">503</span>
-                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
-              </li>
-              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
-                <span class="font-mono text-xs text-muted-foreground">01:44:31</span>
-                <span class="badge tone-warn">warn</span>
-                <span class="min-w-0 flex-1 truncate">upstream openai 429 rate_limited (retry 1/3) → backoff 800ms</span>
-                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">429</span>
-                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
-              </li>
-              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
-                <span class="font-mono text-xs text-muted-foreground">01:44:22</span>
-                <span class="badge tone-error">error</span>
-                <span class="min-w-0 flex-1 truncate">invalid api key for groq (key k#3): 401 unauthorized — key disabled 15m</span>
-                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">401</span>
-                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
-              </li>
-            </ul>
+            <ul id="recent-failures" class="divide-y text-sm"></ul>
           </div>
 
           <div class="rounded-lg border bg-card p-5 shadow-sm">
             <p class="text-sm font-medium">Top models · 24h</p>
             <p class="mb-4 text-xs text-muted-foreground">Share of requests</p>
-            <div class="flex flex-col gap-4 text-xs">
-              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gpt-5.2-mini</span><span class="text-muted-foreground">512.9k · 40%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:40%"></div></div></div>
-              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gemini-3.8-flash</span><span class="text-muted-foreground">486.2k · 38%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:38%"></div></div></div>
-              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">claude-sonnet-4.8</span><span class="text-muted-foreground">241.4k · 19%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:19%"></div></div></div>
-              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">llama-4-maverick</span><span class="text-muted-foreground">43.9k · 3%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:3%"></div></div></div>
+            <div id="top-models" class="flex flex-col gap-4 text-xs"></div></div>
             </div>
           </div>
         </div>
@@ -339,97 +299,31 @@
   <div class="flex h-14 items-center justify-between border-b px-4">
     <div class="flex items-center gap-2">
       <p class="text-sm font-semibold">Request trace</p>
-      <span class="badge tone-info font-mono">req_9f3a1c</span>
-      <button class="rounded p-1 text-muted-foreground hover:bg-accent" title="Copy id"><i data-lucide="copy" class="size-3.5"></i></button>
+      <span id="trace-status" class="font-mono"></span>
     </div>
     <button id="drawer-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
   </div>
 
   <div class="flex-1 overflow-y-auto px-4 py-4">
+    <p class="mb-1 text-xs text-muted-foreground">Request</p>
+    <p id="trace-id" class="mb-4 font-mono text-sm">—</p>
+
     <dl class="mb-4 grid grid-cols-2 gap-2.5 text-xs">
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Status</dt><dd class="mt-1"><span class="badge tone-error">502 Bad Gateway</span></dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Duration</dt><dd class="mt-1 font-mono">841 ms</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Model</dt><dd class="mt-1 font-mono">gemini-3.8-flash</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Provider / key</dt><dd class="mt-1 font-mono">google · g#2</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Started</dt><dd class="mt-1 font-mono">01:44:41.102</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Client</dt><dd class="mt-1 font-mono">10.0.0.14:52881 · SSE</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Model</dt><dd id="trace-model" class="mt-1 font-mono">—</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Provider / key</dt><dd id="trace-provider" class="mt-1 font-mono">—</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Started</dt><dd id="trace-started" class="mt-1 font-mono">—</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Duration</dt><dd id="trace-duration" class="mt-1 font-mono">—</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">TTFT</dt><dd id="trace-ttft" class="mt-1 font-mono">—</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Tokens out</dt><dd id="trace-tokens" class="mt-1 font-mono">—</dd></div>
     </dl>
 
-    <div class="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs">
-      <p class="mb-1 flex items-center gap-2 font-semibold text-destructive"><i data-lucide="alert-triangle" class="size-3.5"></i>What happened</p>
-      <p class="leading-relaxed text-foreground">Upstream <span class="font-mono font-semibold">503 Service Unavailable</span> — google returned 503 on 3 consecutive attempts and all 3 keys for <span class="font-mono">gemini-3.8-flash</span> entered cooldown. No failover leg was enabled, so the client received <span class="font-mono">502</span>.</p>
-      <p class="mt-2 leading-relaxed text-muted-foreground">Upstream did not return an <span class="font-mono">x-request-id</span> on any attempt (header absent) — nothing to correlate with google's side.</p>
-    </div>
+    <div id="trace-what" class="mb-4"></div>
 
-    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Retry timeline</p>
-    <ol class="mb-4 flex flex-col gap-0 border-l pl-4 text-xs">
-      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:41.102 · attempt 1/3 → <span class="text-destructive font-semibold">503</span> · 312 ms · ct=text/event-stream · xrid=<span class="text-muted-foreground">—</span></p></li>
-      <li class="relative py-1.5 text-muted-foreground"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-muted-foreground/40"></span><p class="font-mono">01:44:44 · backoff 200 ms → retry</p></li>
-      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:44.412 · attempt 2/3 → <span class="text-destructive font-semibold">503</span> · 3,204 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
-      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:52 · attempt 3/3 → <span class="text-destructive font-semibold">503</span> · 8,102 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
-      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-destructive"></span><p class="font-mono font-semibold text-destructive">01:44:52.931 · all keys exhausted → respond 502 to client</p></li>
-    </ol>
+    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Attempt timeline</p>
+    <ol id="trace-timeline" class="mb-4 flex flex-col gap-0 border-l pl-4 text-xs"></ol>
 
-    <div class="mb-4 border-b">
-      <div class="flex gap-1">
-        <button class="tab-btn active" data-tab="headers">Headers</button>
-        <button class="tab-btn" data-tab="reqbody">Request body</button>
-        <button class="tab-btn" data-tab="resbody">Response body</button>
-        <button class="tab-btn" data-tab="raw">Raw log</button>
-      </div>
-    </div>
-
-    <div data-pane="headers" class="grid gap-3 text-xs md:grid-cols-2">
-      <div class="rounded-md border bg-muted/30 p-3">
-        <p class="mb-2 font-medium">Request → upstream</p>
-        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">POST /v1beta/models/gemini-3.8-flash:streamGenerateContent
-authorization: Bearer g#2•••••
-content-type: application/json
-accept: text/event-stream
-x-forwarded-for: 10.0.0.14</pre>
-      </div>
-      <div class="rounded-md border bg-muted/30 p-3">
-        <p class="mb-2 font-medium">← Upstream response</p>
-        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">status: 503
-content-type: text/event-stream
-x-request-id: <span class="text-destructive">(absent)</span>
-retry-after: 0
-alt-svc: h3=":443"</pre>
-      </div>
-    </div>
-
-    <div data-pane="reqbody" class="hidden rounded-md border bg-muted/30 p-3">
-      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
-  "model": "gemini-3.8-flash",
-  "stream": true,
-  "messages": [{ "role": "user", "content": "…" }],
-  "max_tokens": 1024
-}</pre>
-    </div>
-
-    <div data-pane="resbody" class="hidden rounded-md border bg-muted/30 p-3">
-      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
-  "error": {
-    "code": 503,
-    "message": "The service is currently unavailable.",
-    "status": "UNAVAILABLE"
-  }
-}</pre>
-    </div>
-
-    <div data-pane="raw" class="hidden rounded-md border bg-muted/30 p-3">
-      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">01:44:41  warn  upstream google transient (retry 1/3): status=503 ct=text/event-stream xrid=
-01:44:44  warn  upstream google transient (retry 2/3): status=503 ct=text/event-stream xrid=
-01:44:52  warn  upstream google transient (retry 3/3): status=503 ct=text/event-stream xrid=
-01:44:52  error all keys exhausted for gemini-3.8-flash via google: status=503</pre>
-    </div>
-
-    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Suggested actions</p>
-    <div class="flex flex-wrap gap-2">
-      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="zap" class="size-3"></i>Enable failover → openrouter leg</button>
-      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="shield-alert" class="size-3"></i>Cooldown key g#2 · 5 min</button>
-      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="external-link" class="size-3"></i>Google status page</button>
-    </div>
+    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Raw event</p>
+    <pre id="trace-raw" class="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground"></pre>
   </div>
 </aside>
 

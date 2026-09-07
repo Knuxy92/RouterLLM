@@ -83,6 +83,7 @@ async function post(path, body) {
 }
 
 export const api = {
+  login,
   status: () => call("/status"),
   metrics: () => call("/metrics"),
   requests: (since = 0) => call("/requests?since=" + since),

@@ -157,7 +157,11 @@ function renderSidebarStatus() {
   const uptime = $("#router-uptime");
   const dot = $("#router-dot");
   if (!health || !status) return;
-  const ok = status.last_reload?.ok !== false;
+  // A fresh process has no reload yet (zero-epoch timestamp) — that is healthy,
+  // not a failure. Only an actual rejected reload turns the badge red.
+  const at = status.last_reload?.at ?? "";
+  const neverReloaded = !at || at.startsWith("0001-01-01");
+  const ok = neverReloaded || status.last_reload?.ok !== false;
   health.textContent = ok ? "healthy" : "reload failed";
   health.className = ok ? "text-foreground" : "text-destructive";
   if (dot) dot.className = "dot " + (ok ? "dot-live" : "dot-warn");
