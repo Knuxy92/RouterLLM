@@ -73,7 +73,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				note = err.Error()
 			}
-			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, note, respTokens(resp)))
+			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, note, respTokens(resp), telemetry.ClampBody(eb, telemetry.RespBodyCap)))
 			return
 		}
 
@@ -90,13 +90,13 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
 		}
 
-		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", respTokens(resp)))
+		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", respTokens(resp), ""))
 		return
 	}
 
 	if err != nil {
 		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
-		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0))
+		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, ""))
 		return
 	}
 }

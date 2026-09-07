@@ -303,7 +303,7 @@ With a session, the console gains two write paths on Signal paths:
 
 ### Telemetry & request logs
 
-Every proxied request records one **event** — metadata only, never prompt or response bodies, key always masked (`…abcd`):
+Every proxied request records one **event** — key always masked (`…abcd`), request bodies and successful response bodies are never stored. **Failed** requests capture the upstream's error response body (2 KB cap, per attempt) for debugging:
 
 ```json
 {"seq":1,"time":"…","model":"my-model","status":200,"provider":"google","upstream_model":"gemini-3.8-flash",

@@ -294,6 +294,39 @@ export function openTraceBySeq(seq) {
     what.innerHTML = `<p class="mb-1 font-semibold">Outcome</p><p class="leading-relaxed text-foreground">${esc(r.msg)}</p>`;
   }
 
+  // Captured upstream error bodies (2 KB cap per attempt) — this is the
+  // debugging payload when a request fails.
+  const bodies = [];
+  (e.attempts || []).forEach((a) => {
+    if (a.resp_body)
+      bodies.push({
+        label: `${a.provider || "?"}${a.model ? "/" + a.model : ""}${a.status ? " · " + a.status : ""}`,
+        body: a.resp_body,
+      });
+  });
+  if (e.resp_body && !bodies.some((b) => b.body === e.resp_body))
+    bodies.push({ label: `final → client${e.status ? " · " + e.status : ""}`, body: e.resp_body });
+  const respBox = $("#trace-responses");
+  if (respBox) {
+    if (bodies.length) {
+      respBox.className = "mb-4";
+      respBox.innerHTML =
+        `<p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Upstream response</p>` +
+        bodies
+          .map(
+            (b) => `
+        <div class="mb-2 rounded-md border bg-muted/30 p-3">
+          <p class="mb-1.5 font-mono text-[11px] font-medium text-muted-foreground">${esc(b.label)}</p>
+          <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-foreground">${esc(b.body)}</pre>
+        </div>`,
+          )
+          .join("");
+    } else {
+      respBox.className = "hidden";
+      respBox.innerHTML = "";
+    }
+  }
+
   const attempts = e.attempts?.length
     ? e.attempts
     : [{ provider: e.provider || "—", model: e.upstream_model || e.model, key: e.key, status: e.status, latency_ms: e.duration_ms }];

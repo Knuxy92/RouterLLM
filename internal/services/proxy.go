@@ -333,7 +333,11 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
 			lastErr = fmt.Errorf("all keys exhausted for %s via %s (status=%d)", modelName, pv.Name, status)
-			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted"})
+			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted", RespBody: telemetry.ClampBody(errBody, telemetry.RespBodyCap)}
+			if trace != nil && attempt.RespBody != "" {
+				trace.setLastBody(attempt.RespBody)
+			}
+			attempts = append(attempts, attempt)
 			continue
 		}
 
@@ -348,7 +352,11 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			lastRoute = &route
 			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
 			lastErr = fmt.Errorf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, briefBody(eb))
-			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200"})
+			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200", RespBody: telemetry.ClampBody(eb, telemetry.RespBodyCap)}
+			if trace != nil && attempt.RespBody != "" {
+				trace.setLastBody(attempt.RespBody)
+			}
+			attempts = append(attempts, attempt)
 			continue
 		}
 
@@ -429,13 +437,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
 			util.WriteUpstreamError(w, resp.StatusCode, eb)
-			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0))
+			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0, telemetry.ClampBody(eb, telemetry.RespBodyCap)))
 			return
 		}
 
 		if forceStream && path == "/v1/chat/completions" {
 			p.serveForceStream(resp, route.ModelName, route.Provider.Style, w)
-			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp)))
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
 			return
 		}
 
@@ -448,19 +456,19 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		} else {
 			serveOpenAI(resp, clientStream, w)
 		}
-		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp)))
+		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
 		return
 	}
 
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
-			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusNotFound, err.Error(), 0))
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusNotFound, err.Error(), 0, ""))
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
 		} else {
 			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
-			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0))
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, trace.LastBody()))
 		}
 		return
 	}

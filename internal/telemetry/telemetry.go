@@ -1,6 +1,8 @@
 // Package telemetry records per-request routing outcomes and aggregates them
-// into metrics. Events are metadata only — masked keys, no prompt or response
-// bodies ever — and are persisted as JSON lines so dashboards survive restarts.
+// into metrics. Events carry masked keys and routing metadata; failed requests
+// additionally capture the upstream error response body (truncated), never
+// request bodies or successful responses. Events persist as JSON lines so
+// dashboards survive restarts.
 package telemetry
 
 import (
@@ -29,6 +31,7 @@ type Attempt struct {
 	Status    int    `json:"status"`
 	LatencyMS int64  `json:"latency_ms"`
 	Note      string `json:"note,omitempty"`
+	RespBody  string `json:"resp_body,omitempty"`
 }
 
 type Event struct {
@@ -44,7 +47,27 @@ type Event struct {
 	DurationMS    int64     `json:"duration_ms"`
 	TokensOut     int       `json:"tokens_out"`
 	Err           string    `json:"err,omitempty"`
+	RespBody      string    `json:"resp_body,omitempty"`
 	Attempts      []Attempt `json:"attempts,omitempty"`
+}
+
+// RespBodyCap bounds a captured upstream error body per event/attempt.
+const RespBodyCap = 2 << 10
+
+// ClampBody truncates a captured upstream response body for storage. Error
+// bodies are the debugging payload of a failed request — the thing that says
+// WHY upstream refused — so they are kept (truncated); successful responses
+// are still never captured.
+func ClampBody(b []byte, limit int) string {
+	if len(b) == 0 {
+		return ""
+	}
+	s := string(b)
+	if len(s) > limit {
+		return s[:limit] + " …(truncated)"
+	}
+
+	return s
 }
 
 // Level derives the UI badge from the final status: a completed relay is

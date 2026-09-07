@@ -23,6 +23,7 @@ type RequestTrace struct {
 	provider string
 	upstream string
 	key      string
+	lastBody string
 }
 
 // WithRequestTrace starts a trace for one request and returns it alongside the
@@ -47,11 +48,32 @@ func (t *RequestTrace) setServed(provider, upstream, key string) {
 	t.key = key
 }
 
-// Event assembles the finished record. status is the outcome written to the
-// client; tokensOut comes from the usage sniff when one ran.
-func (t *RequestTrace) Event(model, requestID string, status int, err string, tokensOut int) telemetry.Event {
+// setLastBody remembers the most recent captured upstream error body so a
+// request that dies before any route answers can still show it.
+func (t *RequestTrace) setLastBody(body string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lastBody = body
+}
+
+// LastBody returns the most recent captured upstream error body, if any.
+func (t *RequestTrace) LastBody() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.lastBody
+}
+
+// Event assembles the finished record. status is the outcome written to the
+// client; tokensOut comes from the usage sniff when one ran. respBody is the
+// captured upstream error response (already clamped) for failed requests.
+func (t *RequestTrace) Event(model, requestID string, status int, err string, tokensOut int, respBody string) telemetry.Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if respBody == "" {
+		respBody = t.lastBody
+	}
 
 	e := telemetry.Event{
 		Time:          t.started,
@@ -65,6 +87,7 @@ func (t *RequestTrace) Event(model, requestID string, status int, err string, to
 		DurationMS:    time.Since(t.started).Milliseconds(),
 		TokensOut:     tokensOut,
 		Err:           err,
+		RespBody:      respBody,
 		Attempts:      t.attempts,
 	}
 
