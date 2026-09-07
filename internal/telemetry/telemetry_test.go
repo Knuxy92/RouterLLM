@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -200,5 +201,36 @@ func TestLegSeriesIsolated(t *testing.T) {
 	}
 	if s := m.Summary("g"); s.Req != 2 {
 		t.Fatalf("global series wrong: %+v", s)
+	}
+}
+
+func TestFileEventsCarrySeq(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "telemetry.jsonl")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.Record(testEvent("alpha", "up-a", 200, 10))
+	s.Record(testEvent("alpha", "up-a", 200, 11))
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	var got []uint64
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var e Event
+		if json.Unmarshal(scanner.Bytes(), &e) != nil {
+			t.Fatalf("invalid jsonl line: %s", scanner.Text())
+		}
+		got = append(got, e.Seq)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("file seqs = %v, want [1 2] — the ring and the jsonl must agree", got)
 	}
 }

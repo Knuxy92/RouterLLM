@@ -211,7 +211,7 @@ func (s *Store) rewrite(kept []Event) error {
 	return nil
 }
 
-func (s *Store) remember(e Event) {
+func (s *Store) remember(e Event) Event {
 	s.next++
 	e.Seq = s.next
 	s.ring = append(s.ring, e)
@@ -219,6 +219,8 @@ func (s *Store) remember(e Event) {
 		s.ring = s.ring[len(s.ring)-ringCapacity:]
 	}
 	s.metrics.Record(e)
+
+	return e
 }
 
 // Record stores one request outcome: ring, metrics and (if configured) disk.
@@ -226,7 +228,7 @@ func (s *Store) Record(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.remember(e)
+	e = s.remember(e)
 	if s.file == nil {
 		return
 	}
