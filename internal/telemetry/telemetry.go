@@ -32,19 +32,19 @@ type Attempt struct {
 }
 
 type Event struct {
-	Seq          uint64    `json:"seq"`
-	Time         time.Time `json:"time"`
-	Model        string    `json:"model"`
-	RequestID    string    `json:"request_id,omitempty"`
-	Status       int       `json:"status"`
-	Provider     string    `json:"provider,omitempty"`
-	UpstreamModel string   `json:"upstream_model,omitempty"`
-	Key          string    `json:"key,omitempty"`
-	TTFTMS       int64     `json:"ttft_ms"`
-	DurationMS   int64     `json:"duration_ms"`
-	TokensOut    int       `json:"tokens_out"`
-	Err          string    `json:"err,omitempty"`
-	Attempts     []Attempt `json:"attempts,omitempty"`
+	Seq           uint64    `json:"seq"`
+	Time          time.Time `json:"time"`
+	Model         string    `json:"model"`
+	RequestID     string    `json:"request_id,omitempty"`
+	Status        int       `json:"status"`
+	Provider      string    `json:"provider,omitempty"`
+	UpstreamModel string    `json:"upstream_model,omitempty"`
+	Key           string    `json:"key,omitempty"`
+	TTFTMS        int64     `json:"ttft_ms"`
+	DurationMS    int64     `json:"duration_ms"`
+	TokensOut     int       `json:"tokens_out"`
+	Err           string    `json:"err,omitempty"`
+	Attempts      []Attempt `json:"attempts,omitempty"`
 }
 
 // Level derives the UI badge from the final status: a completed relay is
@@ -289,4 +289,3 @@ func DefaultPath(configPath string) string {
 
 	return filepath.Join(filepath.Dir(configPath), "routerllm-telemetry.jsonl")
 }
-

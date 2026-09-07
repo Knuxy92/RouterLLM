@@ -82,10 +82,10 @@ func (m *Metrics) Record(e Event) {
 
 // Window is one contiguous slice of a series.
 type Window struct {
-	Start int64 `json:"start"` // unix seconds
-	Req   int   `json:"req"`
-	Err   int   `json:"err"`
-	Tokens int  `json:"tokens"`
+	Start   int64 `json:"start"` // unix seconds
+	Req     int   `json:"req"`
+	Err     int   `json:"err"`
+	Tokens  int   `json:"tokens"`
 	TTFTP50 int64 `json:"ttft_p50_ms,omitempty"`
 	TTFTP95 int64 `json:"ttft_p95_ms,omitempty"`
 }
@@ -120,7 +120,7 @@ func (m *Metrics) Windows(name string, width time.Duration, count int) []Window 
 	oldest := bucketStart(now.Add(-width * time.Duration(count-1)))
 
 	out := make([]Window, 0, count)
-	for start := oldest; start <= current; start += int64(width/time.Second) {
+	for start := oldest; start <= current; start += int64(width / time.Second) {
 		var acc bucketStats
 		for bStart, b := range src {
 			if bStart >= start && bStart < start+int64(width/time.Second) {
