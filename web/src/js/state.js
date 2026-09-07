@@ -19,7 +19,7 @@ let polling = false
 // server filters and slices. New events shift pages, so the current page is
 // re-fetched every poll tick while the other caches age until revisited.
 
-export const LOG_PER_PAGE = 50
+export const LOG_PER_PAGE = 20
 
 let logMeta = { page: 1, per_page: LOG_PER_PAGE, total: 0, total_pages: 1, error_total: 0, latest: 0 }
 let logPageCache = new Map() // page number → entries[]
