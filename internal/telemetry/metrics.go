@@ -111,41 +111,34 @@ func (m *Metrics) series(name string) map[int64]*bucketStats {
 	return out
 }
 
-// Windows merges the series into count contiguous windows of the given width
-// ending at the current bucket (oldest first), dropping empty windows.
+// Windows merges the series into exactly count contiguous windows of the
+// given width, ending at the current one (oldest first). Windows are anchored
+// to clock boundaries (top of the hour for hour-multiple widths) so labels
+// line up with wall-clock hours, and empty windows come back as zero rows —
+// the caller renders the full span, not just the busy parts.
 func (m *Metrics) Windows(name string, width time.Duration, count int) []Window {
 	src := m.series(name)
-	if src == nil {
-		return nil
-	}
 
 	now := time.Now()
-	current := bucketStart(now)
-	oldest := bucketStart(now.Add(-width * time.Duration(count-1)))
+	hourStart := now.Truncate(time.Hour)
+	secs := int64(width / time.Second)
 
 	out := make([]Window, 0, count)
-	for start := oldest; start <= current; start += int64(width / time.Second) {
-		var acc bucketStats
+	for i := count - 1; i >= 0; i-- {
+		start := hourStart.Unix() - int64(i)*secs
+		w := Window{Start: start}
+		var samples []int64
 		for bStart, b := range src {
-			if bStart >= start && bStart < start+int64(width/time.Second) {
-				acc.req += b.req
-				acc.err += b.err
-				acc.tokens += b.tokens
-				acc.duration += b.duration
-				acc.ttft = append(acc.ttft, b.ttft...)
+			if bStart >= start && bStart < start+secs {
+				w.Req += b.req
+				w.Err += b.err
+				w.Tokens += b.tokens
+				samples = append(samples, b.ttft...)
 			}
 		}
-		if acc.req == 0 {
-			continue
-		}
-		out = append(out, Window{
-			Start:   start,
-			Req:     acc.req,
-			Err:     acc.err,
-			Tokens:  acc.tokens,
-			TTFTP50: percentile(acc.ttft, 50),
-			TTFTP95: percentile(acc.ttft, 95),
-		})
+		w.TTFTP50 = percentile(samples, 50)
+		w.TTFTP95 = percentile(samples, 95)
+		out = append(out, w)
 	}
 
 	return out

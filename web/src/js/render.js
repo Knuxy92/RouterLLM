@@ -190,10 +190,10 @@ function renderTrafficChart() {
   if (sub)
     sub.textContent =
       chartRange === "7d"
-        ? "Requests vs upstream errors · daily buckets"
-        : "Requests vs upstream errors · 2-hour buckets";
+        ? "Requests vs upstream errors · daily buckets · last 7 days"
+        : "Requests vs upstream errors · 2-hour buckets · last 24h";
 
-  if (series.length < 2) {
+  if (!series.some((s) => s.req > 0)) {
     wrap.innerHTML = `<p class="flex h-56 items-center justify-center text-xs text-muted-foreground">No traffic recorded yet.</p>`;
     return;
   }

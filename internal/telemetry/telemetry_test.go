@@ -292,3 +292,52 @@ func TestQueryPagedAndFiltered(t *testing.T) {
 		t.Fatalf("page clamp = %d, want 3", clamped.Page)
 	}
 }
+
+func TestWindowsFullSpanAndHourAlignment(t *testing.T) {
+	m := NewMetrics()
+
+	// traffic in exactly two windows: 5h ago and now
+	e1 := testEvent("alpha", "up-a", 200, 100)
+	e1.Time = time.Now().Add(-5 * time.Hour)
+	m.Record(e1)
+
+	e2 := testEvent("alpha", "up-a", 200, 120)
+	e2.Time = time.Now()
+	m.Record(e2)
+
+	windows := m.Windows("g", 2*time.Hour, 12)
+
+	if len(windows) != 12 {
+		t.Fatalf("windows = %d, want 12 (empty ones included, full 24h span)", len(windows))
+	}
+
+	// every boundary sits on a clock hour
+	for _, w := range windows {
+		if w.Start%3600 != 0 {
+			t.Fatalf("window start %d not on a clock-hour boundary", w.Start)
+		}
+	}
+
+	// oldest starts 22h before the current hour; newest is the current hour
+	nowHour := time.Now().Truncate(time.Hour).Unix()
+	if windows[0].Start != nowHour-22*3600 {
+		t.Fatalf("oldest window start = %d, want %d", windows[0].Start, nowHour-22*3600)
+	}
+	if windows[len(windows)-1].Start != nowHour {
+		t.Fatalf("newest window start = %d, want %d", windows[len(windows)-1].Start, nowHour)
+	}
+
+	// the two busy windows carry the events; the rest are zero
+	busy := 0
+	for _, w := range windows {
+		if w.Req > 0 {
+			busy++
+		}
+	}
+	if busy != 2 {
+		t.Fatalf("busy windows = %d, want 2", busy)
+	}
+	if windows[len(windows)-1].Req != 1 {
+		t.Fatalf("current window req = %d, want 1", windows[len(windows)-1].Req)
+	}
+}
