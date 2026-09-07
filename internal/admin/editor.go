@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -49,6 +51,26 @@ func (e *Editor) SetRouteDisabled(modelID string, index int, disabled bool) erro
 		}
 
 		setBoolField(entries.Content[index], "disabled", disabled)
+
+		return nil
+	})
+}
+
+// SetModelDisabled parks the whole chain: the model disappears from /v1/models
+// and requests for it 404, while its yaml block (and every leg) stays intact.
+func (e *Editor) SetModelDisabled(modelID string, disabled bool) error {
+	return e.mutate(func(root *yaml.Node) error {
+		routes, err := sequenceField(root, "routes")
+		if err != nil {
+			return err
+		}
+
+		rule := findByScalarField(routes, "model_id", modelID)
+		if rule == nil {
+			return fmt.Errorf("model %q not found in %s", modelID, e.path)
+		}
+
+		setBoolField(rule, "disabled", disabled)
 
 		return nil
 	})
@@ -150,6 +172,16 @@ func (e *Editor) RemoveRoute(modelID string, index int) error {
 var validReasoningEffort = map[string]bool{
 	"none": true, "minimal": true, "low": true, "medium": true,
 	"high": true, "xhigh": true, "max": true,
+}
+
+func effortWhitelist() string {
+	quoted := make([]string, 0, len(validReasoningEffort))
+	for effort := range validReasoningEffort {
+		quoted = append(quoted, fmt.Sprintf("%q", effort))
+	}
+	sort.Strings(quoted)
+
+	return strings.Join(quoted, ", ")
 }
 
 func (e *Editor) mutate(edit func(*yaml.Node) error) error {

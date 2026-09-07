@@ -37,9 +37,10 @@ type RouteLeg struct {
 }
 
 type ModelStatus struct {
-	ModelID string     `json:"model_id"`
-	Serving bool       `json:"serving"`
-	Chain   []RouteLeg `json:"chain"`
+	ModelID  string     `json:"model_id"`
+	Disabled bool       `json:"disabled"`
+	Serving  bool       `json:"serving"`
+	Chain    []RouteLeg `json:"chain"`
 }
 
 type Status struct {
@@ -133,8 +134,14 @@ func buildModels(reg *provider.Registry) []ModelStatus {
 	out := make([]ModelStatus, 0, len(rules))
 
 	for _, rule := range rules {
-		model := ModelStatus{ModelID: rule.ModelID, Chain: make([]RouteLeg, 0, len(rule.Routes))}
+		model := ModelStatus{ModelID: rule.ModelID, Disabled: rule.Disabled, Chain: make([]RouteLeg, 0, len(rule.Routes))}
 		activeAssigned := false
+
+		if rule.Disabled {
+			model.Serving = false
+			out = append(out, model)
+			continue
+		}
 
 		for _, spec := range rule.Routes {
 			_, providerLive := reg.Provider(spec.Provider)

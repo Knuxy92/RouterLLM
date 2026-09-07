@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -119,5 +120,25 @@ func TestRebuildDoesNotReviveDeadKeyAcrossGenerations(t *testing.T) {
 
 	if got := gen3.providers["alpha"].Keys.AliveCount(); got != 1 {
 		t.Fatalf("gen3 AliveCount() = %d, want 1", got)
+	}
+}
+
+func TestNewRegistrySkipsDisabledModel(t *testing.T) {
+	rules := append(testRules(), model.Rule{
+		ModelID:  "model-parked",
+		Disabled: true,
+		Routes:   []model.Spec{{Provider: "alpha", Model: "upstream-p"}},
+	})
+
+	reg := NewRegistry(testConfigs(false), rules, time.Minute)
+
+	if models := reg.AllModels(); len(models) != 2 || models[0] != "model-a" || models[1] != "model-b" {
+		t.Fatalf("AllModels() = %v, want [model-a model-b]", models)
+	}
+	if routes := reg.Routes("model-parked"); routes != nil {
+		t.Fatalf("Routes(model-parked) = %v, want nil", routes)
+	}
+	if skipped := reg.SkippedRoutes(); len(skipped) != 1 || !strings.Contains(skipped[0], "model disabled") {
+		t.Fatalf("SkippedRoutes() = %v, want 1 model-disabled entry", skipped)
 	}
 }

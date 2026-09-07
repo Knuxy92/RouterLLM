@@ -44,6 +44,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Post("/routes/{model}/move", deps.handleRouteMove)
 			authed.Post("/routes/{model}/add", deps.handleRouteAdd)
 			authed.Post("/routes/{model}/remove", deps.handleRouteRemove)
+			authed.Post("/routes/{model}", deps.handleModelToggle)
 			authed.Post("/routes/{model}/{index}", deps.handleRouteToggle)
 		})
 	})
@@ -159,6 +160,23 @@ func (d Deps) handleRouteToggle(w http.ResponseWriter, r *http.Request) {
 	d.applyNow(w)
 }
 
+func (d Deps) handleModelToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Disabled bool `json:"disabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := d.Editor.SetModelDisabled(chi.URLParam(r, "model"), body.Disabled); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	d.applyNow(w)
+}
+
 func (d Deps) handleRouteMove(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Index     int    `json:"index"`
@@ -193,10 +211,10 @@ func (d Deps) handleRouteAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch body.ReasoningEffort {
-	case "", "low", "medium", "high", "max":
+	switch {
+	case body.ReasoningEffort == "", validReasoningEffort[body.ReasoningEffort]:
 	default:
-		writeError(w, http.StatusBadRequest, `reasoning_effort must be one of "low", "medium", "high", "max" or omitted`)
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("reasoning_effort must be one of %s or omitted", effortWhitelist()))
 		return
 	}
 

@@ -112,6 +112,11 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 	var skipped []string
 
 	for _, rule := range rules {
+		if rule.Disabled {
+			skipped = append(skipped, fmt.Sprintf("%s (model disabled)", rule.ModelID))
+			continue
+		}
+
 		var rts []Route
 		for _, spec := range rule.Routes {
 			if spec.Disabled {

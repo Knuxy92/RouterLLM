@@ -225,3 +225,38 @@ func providerBlock(config, name string) string {
 
 	return rest
 }
+
+func TestSetModelDisabled(t *testing.T) {
+	editor, path := newTestEditor(t)
+
+	if err := editor.SetModelDisabled("opus-5", true); err != nil {
+		t.Fatalf("SetModelDisabled() error = %v", err)
+	}
+
+	out := readFile(t, path)
+	rule := strings.Index(out, "model_id: opus-5")
+	inserted := strings.LastIndex(out, "disabled: true")
+	if rule < 0 || inserted < strings.Index(out, "provider: opencode") {
+		t.Fatalf("disabled not inserted on the rule node:\n%s", out)
+	}
+
+	if err := editor.SetModelDisabled("opus-5", false); err != nil {
+		t.Fatalf("revert error = %v", err)
+	}
+	if !strings.Contains(readFile(t, path), "disabled: false") {
+		t.Fatal("disabled not reverted")
+	}
+}
+
+func TestSetModelDisabledUnknownModel(t *testing.T) {
+	editor, path := newTestEditor(t)
+	before := readFile(t, path)
+
+	err := editor.SetModelDisabled("ghost", true)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %v, want not found", err)
+	}
+	if readFile(t, path) != before {
+		t.Fatal("file was modified despite the error")
+	}
+}
