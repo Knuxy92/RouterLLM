@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -8,6 +9,7 @@ import (
 type entry struct {
 	value     string
 	deadUntil time.Time
+	manual    bool
 }
 
 type Manager struct {
@@ -53,10 +55,33 @@ func (m *Manager) MarkDead(value string) {
 	deadUntil := time.Now().Add(m.cooldown)
 
 	for i := range m.entries {
-		if m.entries[i].value == value {
+		if m.entries[i].value == value && !m.entries[i].manual {
 			m.entries[i].deadUntil = deadUntil
 		}
 	}
+}
+
+// Manual disables survive only for the process lifetime (keys come from env
+// placeholders and cannot be persisted to yaml). They are far-future deadUntil
+// values under the hood, so hot-reload carries them across registry rebuilds
+// via Snapshot/Restore like ordinary cooldowns — but a restart brings the key
+// back.
+func (m *Manager) SetDisabledByIndex(index int, disabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index < 0 || index >= len(m.entries) {
+		return fmt.Errorf("key index %d out of range", index)
+	}
+
+	if disabled {
+		m.entries[index].deadUntil = time.Now().AddDate(100, 0, 0)
+		m.entries[index].manual = true
+	} else {
+		m.entries[index].deadUntil = time.Time{}
+		m.entries[index].manual = false
+	}
+
+	return nil
 }
 
 func (m *Manager) LiveKey() string {
@@ -103,6 +128,7 @@ type State struct {
 	Masked    string
 	Alive     bool
 	DeadUntil time.Time
+	Manual    bool
 }
 
 func (m *Manager) States() []State {
@@ -116,6 +142,7 @@ func (m *Manager) States() []State {
 			Masked:    Mask(e.value),
 			Alive:     !e.deadUntil.After(now),
 			DeadUntil: e.deadUntil,
+			Manual:    e.manual,
 		})
 	}
 
@@ -144,10 +171,12 @@ func (m *Manager) Restore(state map[string]time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
+	manualHorizon := now.AddDate(50, 0, 0)
 
 	for i := range m.entries {
 		if deadUntil, ok := state[m.entries[i].value]; ok && deadUntil.After(now) {
 			m.entries[i].deadUntil = deadUntil
+			m.entries[i].manual = deadUntil.After(manualHorizon)
 		}
 	}
 }

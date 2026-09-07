@@ -41,6 +41,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Get("/logs", deps.handleLogs)
 			authed.Post("/reload", deps.handleReload)
 			authed.Post("/providers/{name}", deps.handleProviderToggle)
+			authed.Post("/providers/{name}/keys/{index}", deps.handleKeyToggle)
 			authed.Post("/routes/{model}/move", deps.handleRouteMove)
 			authed.Post("/routes/{model}/add", deps.handleRouteAdd)
 			authed.Post("/routes/{model}/remove", deps.handleRouteRemove)
@@ -175,6 +176,38 @@ func (d Deps) handleModelToggle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.applyNow(w)
+}
+
+// handleKeyToggle flips a key's runtime-only manual disable. It deliberately
+// does not touch the config file: keys arrive as ${ENV} placeholders, so there
+// is nothing durable to write — the toggle lives in the key manager until the
+// process restarts.
+func (d Deps) handleKeyToggle(w http.ResponseWriter, r *http.Request) {
+	index, err := strconv.Atoi(chi.URLParam(r, "index"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "index must be an integer")
+		return
+	}
+
+	var body struct {
+		Disabled bool `json:"disabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	live, ok := d.Registry().Provider(chi.URLParam(r, "name"))
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("provider %q is not active", chi.URLParam(r, "name")))
+		return
+	}
+	if err := live.Keys.SetDisabledByIndex(index, body.Disabled); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, d.buildStatus())
 }
 
 func (d Deps) handleRouteMove(w http.ResponseWriter, r *http.Request) {

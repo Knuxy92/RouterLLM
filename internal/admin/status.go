@@ -10,6 +10,7 @@ type KeyState struct {
 	Masked       string `json:"masked"`
 	Alive        bool   `json:"alive"`
 	CooldownLeft int    `json:"cooldown_left_seconds"`
+	Disabled     bool   `json:"disabled"`
 }
 
 type ProviderStatus struct {
@@ -118,6 +119,10 @@ func keyStates(p *provider.Provider) []KeyState {
 	for _, s := range states {
 		left := 0
 		if !s.Alive {
+			if s.Manual {
+				out = append(out, KeyState{Masked: s.Masked, Alive: false, CooldownLeft: 0, Disabled: true})
+				continue
+			}
 			left = int(time.Until(s.DeadUntil).Seconds()) + 1
 			if left < 0 {
 				left = 0
