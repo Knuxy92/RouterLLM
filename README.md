@@ -243,6 +243,8 @@ Route defaults stay canonical (`reasoning_effort`, `enable_thinking`, `thinking_
 | `ROUTERLLM_DEBUG`        | `false`          | Per-request routing trace (model, chosen provider). Failures — dead keys, retries, exhausted providers — are always logged. |
 | `ROUTERLLM_DEBUG_ADVANCED` | `false`        | Log client/system headers and bodies to the log file |
 | `ROUTERLLM_LOG_FILE`     | —                | Also write operational logs to file   |
+| `ROUTERLLM_TELEMETRY_FILE` | beside config  | Request-event jsonl path (default `routerllm-telemetry.jsonl` next to the config) |
+| `ROUTERLLM_TELEMETRY_USAGE` | `on`          | `off` disables the `stream_options.include_usage` injection used for tok/s |
 | `AUTHTOKEN`              | —                | Bearer token(s) for `/v1` write endpoints (comma-separated); unset = open |
 | `ROUTERLLM_ADMIN_TLS_PORT` | —              | Serve the admin console over HTTPS on this port; main port drops `/admin` |
 | `ROUTERLLM_ADMIN_TLS_CERT` / `_KEY` | auto  | TLS cert/key paths; self-signed pair generated beside the config when missing |
@@ -293,6 +295,27 @@ With a session, the console gains two write paths on Signal paths:
 
 - **`+`** opens a dialog (Provider, Upstream model, Reasoning Effort, Disabled) that appends a fallback leg to `routerllm.yaml` — same surgery as a hand edit, comments and `${VAR}` placeholders survive — and reloads.
 - **`✕`** on a leg removes it. The last leg of a model cannot be removed (disable it or delete the model instead).
+
+### Model & key toggles
+
+- **Model toggle** (the switch on a model card) persists to `routerllm.yaml` as `disabled: true` on the route rule: the model disappears from `/v1/models` and requests for it 404, while the whole chain stays in the file. Endpoint: `POST /admin/api/routes/{model} {"disabled":bool}`.
+- **Key toggle** (in a provider's detail drawer) is **runtime-only**: it flips a manual disable inside the key manager that survives hot-reload but not a process restart. Keys arrive as `${ENV}` placeholders so there is nothing durable to write — to retire a key for good, remove it from the env var. Endpoint: `POST /admin/api/providers/{name}/keys/{index} {"disabled":bool}`.
+
+### Telemetry & request logs
+
+Every proxied request records one **event** — metadata only, never prompt or response bodies, key always masked (`…abcd`):
+
+```json
+{"seq":1,"time":"…","model":"my-model","status":200,"provider":"google","upstream_model":"gemini-3.8-flash",
+ "key":"…abcd","ttft_ms":388,"duration_ms":4120,"tokens_out":612,"request_id":"…",
+ "attempts":[{"provider":"google","model":"gemini-3.8-flash","key":"…abcd","status":503,"latency_ms":312,"note":"non-200"}]}
+```
+
+- **`GET /admin/api/requests?since=<seq>`** returns the buffered events (ring of 2000) plus `latest` — the console's request-log table and trace drawer are built from this.
+- **`GET /admin/api/metrics`** returns rolled-up views: per-provider/per-leg/per-model 24h summaries (requests, errors, success %, TTFT p50/p95, uptime %, tok/s), 12×2h hourly windows and 7×24h weekly windows for the dashboard charts.
+- **Persistence**: events append to `routerllm-telemetry.jsonl` beside the config (override with `ROUTERLLM_TELEMETRY_FILE`) and are replayed on start, so dashboards survive restarts. The file rotates at ~10 MB and events older than 7 days are dropped.
+- **tok/s**: usage is sniffed from the upstream stream (`completion_tokens`/`output_tokens`/`candidatesTokenCount`); for OpenAI-style relays `stream_options.include_usage` is injected on `/v1/chat/completions` so streams carry a usage chunk. Set `ROUTERLLM_TELEMETRY_USAGE=off` to disable the injection.
+- `stream_options` injection can be turned off with `ROUTERLLM_TELEMETRY_USAGE=off` if a relay rejects the field.
 
 ## Docker
 

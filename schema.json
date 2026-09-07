@@ -89,7 +89,11 @@
     "provider": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "style", "base_url"],
+      "required": [
+        "name",
+        "style",
+        "base_url"
+      ],
       "if": {
         "anyOf": [
           {
@@ -98,7 +102,9 @@
                 "const": "cline"
               }
             },
-            "required": ["style"]
+            "required": [
+              "style"
+            ]
           },
           {
             "properties": {
@@ -106,13 +112,17 @@
                 "const": true
               }
             },
-            "required": ["disabled"]
+            "required": [
+              "disabled"
+            ]
           }
         ]
       },
       "then": {},
       "else": {
-        "required": ["api_key"]
+        "required": [
+          "api_key"
+        ]
       },
       "properties": {
         "name": {
@@ -125,7 +135,12 @@
         },
         "style": {
           "type": "string",
-          "enum": ["openai", "anthropic", "cline", "google"],
+          "enum": [
+            "openai",
+            "anthropic",
+            "cline",
+            "google"
+          ],
           "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent)."
         },
         "base_url": {
@@ -138,13 +153,22 @@
         },
         "auth_mode": {
           "type": "string",
-          "enum": ["bearer", "x-api-key", "both"],
+          "enum": [
+            "bearer",
+            "x-api-key",
+            "both"
+          ],
           "default": "bearer",
           "description": "Authentication mode."
         },
         "reasoning_style": {
           "type": "string",
-          "enum": ["openai", "openrouter", "qwen", "raw"],
+          "enum": [
+            "openai",
+            "openrouter",
+            "qwen",
+            "raw"
+          ],
           "default": "openai",
           "description": "Reasoning dialect for openai-style providers: openai (reasoning_effort only), openrouter (reasoning map), qwen (enable_thinking/thinking_budget), raw (legacy passthrough)."
         },
@@ -159,7 +183,7 @@
         "disabled": {
           "type": "boolean",
           "default": false,
-          "description": "When true, this provider is skipped entirely and its api_key/credential validation is relaxed \u2014 use it to park a provider without deleting it."
+          "description": "When true, this provider is skipped entirely and its api_key/credential validation is relaxed — use it to park a provider without deleting it."
         }
       }
     },
@@ -185,7 +209,10 @@
     "upstreamRoute": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "model"],
+      "required": [
+        "provider",
+        "model"
+      ],
       "properties": {
         "provider": {
           "type": "string",
@@ -210,12 +237,20 @@
     "modelRoute": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model_id", "routes"],
+      "required": [
+        "model_id",
+        "routes"
+      ],
       "properties": {
         "model_id": {
           "type": "string",
           "minLength": 1,
           "description": "Model ID exposed to clients."
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Park the whole chain: the model disappears from /v1/models and requests 404, while its yaml block (and every leg) stays intact."
         },
         "routes": {
           "type": "array",
