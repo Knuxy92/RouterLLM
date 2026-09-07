@@ -1,32 +1,29 @@
-# React + TypeScript + Vite
+# web/ — RouterLLM admin console
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Vanilla JS + Tailwind 4 + Vite. No React, no shadcn — one `index.html`,
+small ES modules in `src/js/`, vendored lucide icons in `public/vendor/`.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+pnpm install          # once
+pnpm dev              # Vite on :5173, proxies /admin/api + /v1 to 127.0.0.1:17701
+pnpm build            # emits ../internal/admin/dist (embedded by go:embed)
+pnpm lint             # oxlint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Rebuild the frontend before `go build` whenever `web/` changes — the Go
+binary serves the committed `internal/admin/dist`, not the live source.
+
+## Layout
+
+- `index.html` — full markup: login gate, dashboard / logs / providers pages, drawers, add-leg dialog
+- `src/main.js` — entrypoint; wires all modules
+- `src/js/auth.js` — challenge–response login against `/admin/api/auth/*`
+- `src/js/api.js` — fetch wrapper + session token storage
+- `src/js/state.js` — server-backed state (3s poll, optimistic toggles)
+- `src/js/data.js` — adapters: backend shapes → render shapes
+- `src/js/render.js` — innerHTML rendering for providers/models/logs/drawers
+- `src/js/router.js` — hash routing (`#/dashboard`, `#/logs`, `#/providers`)
+- `src/js/search.js` — cmd+k palette
+- `src/js/hmac.js` — pure-JS HMAC-SHA256 (used on plain `http://<lan-ip>` where `crypto.subtle` is unavailable), pinned by RFC 4231 vectors
+- `wireframe/index.html` — the original static design mock, kept as design reference
+- `scripts/port-html.mjs` / `patch-html.mjs` — one-time scripts that generated `index.html` from the wireframe
