@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RouterLLM — Admin Wireframe v0.3</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="../public/vendor/lucide.min.js"></script>
+
+<script>
+tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+      },
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
+        secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
+        destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+        muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
+        accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+        card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+      },
+      borderRadius: { lg: "var(--radius)", md: "calc(var(--radius) - 2px)", sm: "calc(var(--radius) - 4px)" },
+    },
+  },
+}
+</script>
+
+<style>
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 240 6% 7.5%;
+    --foreground: 240 5% 86%;
+    --card: 240 6% 10%;
+    --card-foreground: 240 5% 86%;
+    --primary: 240 5% 84%;
+    --primary-foreground: 240 6% 12%;
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 240 5% 86%;
+    --muted: 240 5% 13.5%;
+    --muted-foreground: 240 4% 57%;
+    --accent: 240 5% 16%;
+    --accent-foreground: 240 5% 90%;
+    --destructive: 0 60% 56%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5% 14.5%;
+    --input: 240 5% 16%;
+    --ring: 240 4% 45%;
+  }
+  body { font-feature-settings: "cv11", "ss01"; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .25); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .nav-item { display: flex; align-items: center; gap: .625rem; border-radius: .375rem; padding: .4rem .625rem; font-size: .8125rem; color: hsl(var(--muted-foreground)); transition: background .15s, color .15s; cursor: pointer; }
+  .nav-item:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+  .nav-item.active { background: hsl(var(--secondary)); color: hsl(var(--foreground)); font-weight: 500; }
+  .nav-item svg { width: 1rem; height: 1rem; flex: none; }
+
+  .tone-error { background: hsl(var(--destructive) / .12); color: hsl(var(--destructive)); }
+  .tone-warn  { background: hsl(38 92% 50% / .15); color: hsl(30 84% 38%); }
+  .dark .tone-warn { color: hsl(43 96% 62%); }
+  .tone-info  { background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); }
+  .tone-ok    { background: hsl(142 71% 45% / .15); color: hsl(142 72% 26%); }
+  .dark .tone-ok { color: hsl(142 70% 55%); }
+  .badge { display: inline-flex; align-items: center; gap: .3rem; border-radius: 9999px; padding: .0625rem .5rem; font-size: .6875rem; font-weight: 500; white-space: nowrap; }
+  .dot { width: .375rem; height: .375rem; border-radius: 9999px; flex: none; }
+  .dot-live  { background: hsl(142 71% 45%); }
+  .dot-warn  { background: hsl(38 92% 50%); }
+  .dot-dead  { background: hsl(var(--destructive)); }
+  .dot-muted { background: hsl(var(--muted-foreground) / .5); }
+
+  .drawer { transform: translateX(100%); transition: transform .25s ease; }
+  .drawer.open { transform: translateX(0); }
+  .scrim { opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+
+  .seg { display: inline-flex; align-items: center; border-radius: .375rem; background: hsl(var(--muted)); padding: .125rem; }
+  .seg-btn { border-radius: .25rem; padding: .25rem .625rem; font-size: .75rem; color: hsl(var(--muted-foreground)); cursor: pointer; white-space: nowrap; }
+  .seg-btn:hover { color: hsl(var(--foreground)); }
+  .seg-btn.active { background: hsl(var(--background)); color: hsl(var(--foreground)); font-weight: 500; box-shadow: 0 1px 2px hsl(240 10% 4% / .1); }
+
+  .tab-btn { padding: .375rem .75rem; font-size: .75rem; color: hsl(var(--muted-foreground)); border-bottom: 2px solid transparent; cursor: pointer; }
+  .tab-btn:hover { color: hsl(var(--foreground)); }
+  .tab-btn.active { color: hsl(var(--foreground)); font-weight: 500; border-color: hsl(var(--foreground)); }
+
+  .sw { appearance: none; width: 2rem; height: 1.125rem; border-radius: 9999px; background: hsl(var(--input)); border: 1px solid hsl(var(--border)); position: relative; cursor: pointer; flex: none; transition: background .2s; }
+  .sw::after { content: ""; position: absolute; top: 50%; left: 1px; width: .75rem; height: .75rem; border-radius: 9999px; background: hsl(0 0% 100%); box-shadow: 0 1px 2px hsl(240 10% 4% / .25); transform: translate(0, -50%); transition: transform .2s; }
+  .sw:checked { background: hsl(var(--primary)); border-color: hsl(var(--primary)); }
+  .sw:checked::after { transform: translate(.875rem, -50%); }
+
+  .dd { position: relative; }
+  .dd-btn { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid hsl(var(--border)); border-radius: .375rem; padding: .375rem .625rem; font-size: .8125rem; color: hsl(var(--foreground)); background: transparent; cursor: pointer; white-space: nowrap; }
+  .dd-btn:hover { background: hsl(var(--accent)); }
+  .dd-btn svg { width: .875rem; height: .875rem; flex: none; color: hsl(var(--muted-foreground)); }
+  .dd-menu { display: none; position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%; max-height: 288px; overflow-y: auto; border-radius: .375rem; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); padding: .25rem; box-shadow: 0 4px 12px hsl(240 10% 4% / .12); }
+  .dd.open .dd-menu { display: block; }
+  .dd-item { display: block; width: 100%; border: 0; background: none; text-align: left; padding: .3rem .5rem; border-radius: .25rem; font-size: .8125rem; color: hsl(var(--foreground)); cursor: pointer; white-space: nowrap; }
+  .dd-item:hover { background: hsl(var(--accent)); }
+  .dd-item.active { background: hsl(var(--secondary)); font-weight: 500; }
+
+  .chart-wrap { position: relative; }
+  .chart-cols { position: absolute; inset: 0; display: flex; }
+  .chart-col { flex: 1 1 0; cursor: crosshair; }
+  .chart-col:hover { background: hsl(var(--muted-foreground) / .06); }
+  .chart-guide { display: none; position: absolute; top: 0; bottom: 0; width: 1px; background: hsl(var(--muted-foreground) / .45); pointer-events: none; }
+  .chart-tip { display: none; position: absolute; z-index: 20; top: 4px; transform: translateX(-50%); pointer-events: none; border-radius: .375rem; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); padding: .375rem .5rem; font-size: 11px; line-height: 1.5; white-space: nowrap; box-shadow: 0 4px 12px hsl(240 10% 4% / .25); }
+  .chart-tip.show, .chart-guide.show { display: block; }
+
+  .log-error-row { background: hsl(var(--destructive) / .04); }
+  .log-error-row:hover { background: hsl(var(--destructive) / .08); }
+  .dark .log-error-row { background: hsl(var(--destructive) / .08); }
+  .dark .log-error-row:hover { background: hsl(var(--destructive) / .12); }
+  .dark .tone-error { background: hsl(var(--destructive) / .15); }
+  .dark .tone-warn { background: hsl(38 92% 50% / .12); }
+  .dark .tone-ok { background: hsl(142 71% 45% / .12); }
+  .dark ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .2); }
+
+  .kbd { border: 1px solid hsl(var(--border)); border-radius: .25rem; padding: 0 .3rem; font-size: .65rem; color: hsl(var(--muted-foreground)); font-family: "JetBrains Mono", monospace; }
+</style>
+</head>
+
+<body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+
+<!-- ============================================================= -->
+<!-- 1 · LOGIN (auth gate — once per device)                        -->
+<!-- ============================================================= -->
+<div id="page-login" class="flex min-h-dvh items-center justify-center bg-muted/40 px-4">
+  <div class="w-full max-w-sm">
+    <div class="mb-6 flex flex-col items-center gap-2">
+      <div class="flex size-11 items-center justify-center rounded-lg border bg-background shadow-sm">
+        <i data-lucide="waypoints" class="size-5"></i>
+      </div>
+      <h1 class="text-lg font-semibold tracking-tight">RouterLLM</h1>
+      <p class="text-sm text-muted-foreground">Sign in to the admin console</p>
+    </div>
+
+    <div class="rounded-lg border bg-card p-6 shadow-sm">
+      <form id="login-form" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+          <label for="token" class="text-sm font-medium">Admin token</label>
+          <div class="relative">
+            <i data-lucide="key-round" class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"></i>
+            <input id="token" type="password" value="demo-token" autocomplete="off"
+                   class="w-full rounded-md border bg-transparent py-2 pl-9 pr-3 text-sm shadow-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30" placeholder="Paste admin token" />
+          </div>
+          <p class="text-xs text-muted-foreground">Same token as the current TokenGate (HMAC-signed session).</p>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked class="size-4 rounded border-input accent-[hsl(var(--primary))]" />
+          Remember this device
+        </label>
+
+        <button type="submit" class="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+          Sign in
+        </button>
+      </form>
+    </div>
+
+    <p class="mt-4 text-center text-xs text-muted-foreground">
+      Wireframe behaviour: any token works · session persists on this device (auth once)
+    </p>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- APP SHELL                                                      -->
+<!-- ============================================================= -->
+<div id="app" class="hidden min-h-dvh">
+
+  <!-- sidebar -->
+  <div id="sidebar-scrim" class="scrim fixed inset-0 z-30 bg-black/50 md:hidden"></div>
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r bg-card transition-transform duration-200 md:translate-x-0">
+    <div class="flex h-14 items-center gap-2.5 border-b px-4">
+      <div class="flex size-7 items-center justify-center rounded-md border bg-background">
+        <i data-lucide="waypoints" class="size-4"></i>
+      </div>
+      <div class="leading-tight">
+        <p class="text-sm font-semibold">RouterLLM</p>
+        <p class="font-mono text-[10px] text-muted-foreground">routerllm.yaml · v0.4.2</p>
+      </div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-3 py-3">
+      <p class="px-2.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Platform</p>
+      <a class="nav-item" data-nav="dashboard" href="#/dashboard"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a class="nav-item" data-nav="logs" href="#/logs"><i data-lucide="scroll-text"></i>Request logs</a>
+      <a class="nav-item" data-nav="analytics" href="#/analytics"><i data-lucide="activity"></i>Analytics</a>
+
+      <p class="px-2.5 pb-1.5 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Management</p>
+      <a class="nav-item" data-nav="providers" href="#/providers"><i data-lucide="server"></i>Providers &amp; Models</a>
+      <a class="nav-item cursor-not-allowed opacity-50" title="Planned"><i data-lucide="settings"></i>Settings <span class="badge tone-info ml-auto">soon</span></a>
+    </nav>
+
+    <div class="border-t px-3 py-3">
+      <div class="flex items-center gap-2 rounded-md px-2 py-1.5">
+        <span class="dot dot-live"></span>
+        <p class="text-xs text-muted-foreground">Router process <span class="text-foreground">healthy</span></p>
+        <span class="badge tone-info ml-auto font-mono">up 6d 4h</span>
+      </div>
+      <p class="px-2 pt-1 text-[10px] text-muted-foreground/70">WIREFRAME v0.3 — static mock, no backend</p>
+    </div>
+  </aside>
+
+  <!-- main column -->
+  <div class="md:pl-64">
+    <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur">
+      <button id="menu-btn" class="rounded-md border p-1.5 md:hidden"><i data-lucide="menu" class="size-4"></i></button>
+
+      <div class="flex items-center gap-1.5 text-sm">
+        <span class="font-medium">RouterLLM</span>
+        <i data-lucide="chevron-right" class="size-3.5 text-muted-foreground"></i>
+        <span id="page-title" class="text-muted-foreground">Dashboard</span>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <div class="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground sm:flex">
+          <i data-lucide="search" class="size-3.5"></i>
+          <span class="text-xs">Search requests, models…</span>
+          <span class="kbd ml-6">⌘K</span>
+        </div>
+        <button class="relative rounded-md border p-1.5">
+          <i data-lucide="bell" class="size-4"></i>
+          <span class="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-destructive"></span>
+        </button>
+        <button id="theme-btn" class="rounded-md border p-1.5">
+          <i data-lucide="sun" class="hidden size-4 dark:block"></i>
+          <i data-lucide="moon" class="size-4 dark:hidden"></i>
+        </button>
+        <div class="relative">
+          <button id="avatar-btn" class="flex size-8 items-center justify-center rounded-full border bg-secondary text-xs font-semibold">PA</button>
+          <div id="avatar-menu" class="hidden absolute right-0 top-10 z-30 w-44 rounded-md border bg-card p-1 shadow-md">
+            <div class="px-2.5 py-2">
+              <p class="text-sm font-medium">pavar</p>
+              <p class="text-xs text-muted-foreground">admin · local</p>
+            </div>
+            <div class="my-1 h-px bg-border"></div>
+            <button id="signout-btn" class="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-destructive hover:bg-accent">
+              <i data-lucide="log-out" class="size-4"></i>Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+
+      <!-- ======================================================= -->
+      <!-- 2 · DASHBOARD                                            -->
+      <!-- ======================================================= -->
+      <section id="page-dashboard" class="page">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <p class="text-sm text-muted-foreground">Live overview of the router — last 24 hours.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="seg"><button class="seg-btn active">24h</button><button class="seg-btn">7d</button><button class="seg-btn">30d</button></div>
+            <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent"><i data-lucide="refresh-cw" class="size-3.5"></i>Reload config</button>
+          </div>
+        </div>
+
+        <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Requests 24h</p><i data-lucide="zap" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">1,284,392</p>
+            <span class="badge tone-ok mt-1.5">▲ 12.4% vs prev</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Success rate</p><i data-lucide="gauge" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">98.72<span class="text-sm">%</span></p>
+            <span class="badge tone-ok mt-1.5">▲ 0.3 pt</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Median TTFT</p><i data-lucide="clock" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">412<span class="text-sm"> ms</span></p>
+            <span class="badge tone-ok mt-1.5">▼ 38 ms</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Throughput</p><i data-lucide="trending-up" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">1,842<span class="text-sm"> tok/s</span></p>
+            <span class="badge tone-ok mt-1.5">▲ 6.1%</span>
+          </div>
+          <div class="col-span-2 rounded-lg border bg-card p-4 shadow-sm lg:col-span-1">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Errors 24h</p><i data-lucide="shield-alert" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">16,404</p>
+            <span class="badge tone-error mt-1.5">▼ 112 · 1.28%</span>
+          </div>
+        </div>
+
+        <div class="mb-5 grid gap-3 lg:grid-cols-3">
+          <div class="rounded-lg border bg-card p-5 shadow-sm lg:col-span-2">
+            <div class="mb-3 flex items-center justify-between">
+              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p class="text-xs text-muted-foreground">Requests vs upstream errors · 5-min buckets</p></div>
+              <div class="flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-primary"></span>requests</span>
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-destructive"></span>errors</span>
+              </div>
+            </div>
+            <div id="chart-traffic" class="chart-wrap"><svg viewBox="0 0 640 220" class="h-56 w-full" preserveAspectRatio="none">
+              <g stroke="hsl(var(--border))" stroke-width="1"><line x1="0" y1="40" x2="640" y2="40"/><line x1="0" y1="90" x2="640" y2="90"/><line x1="0" y1="140" x2="640" y2="140"/><line x1="0" y1="190" x2="640" y2="190"/></g>
+              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44 L640,220 L0,220 Z" fill="hsl(var(--primary))" opacity="0.07"/>
+              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44" fill="none" stroke="hsl(var(--primary))" stroke-width="2"/>
+              <path d="M0,196 C60,194 120,197 180,192 C240,187 300,193 360,190 C420,187 480,191 540,186 C580,183 620,188 640,184" fill="none" stroke="hsl(var(--destructive))" stroke-width="2" stroke-dasharray="4 3"/>
+              <circle cx="360" cy="190" r="4" fill="hsl(var(--destructive))"/>
+            </svg></div>
+            <p class="mt-2 text-xs text-muted-foreground">↑ Spike at 01:44 — google upstream 503 on <span class="font-mono">gemini-3.8-flash</span> (3 retries × 3 keys exhausted)</p>
+          </div>
+
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <p class="text-sm font-medium">TTFT p50 by model</p>
+            <p class="mb-3 text-xs text-muted-foreground">Time to first token · 24h · top 10 of 15 models, by requests</p>
+            <div id="ttft-list" class="flex max-h-64 flex-col gap-3.5 overflow-y-auto pr-1 text-xs"></div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 lg:grid-cols-3">
+          <div class="rounded-lg border bg-card shadow-sm lg:col-span-2">
+            <div class="flex items-center justify-between border-b px-5 py-3.5">
+              <div><p class="text-sm font-medium">Recent failures</p><p class="text-xs text-muted-foreground">Click a row to open the full request trace</p></div>
+              <a href="#/logs" class="text-xs text-muted-foreground underline-offset-2 hover:underline">View all logs</a>
+            </div>
+            <ul class="divide-y text-sm">
+              <li class="log-error-row flex cursor-pointer items-center gap-3 px-5 py-3" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:52</span>
+                <span class="badge tone-error">error</span>
+                <span class="min-w-0 flex-1 truncate">all keys exhausted for gemini-3.8-flash via google: status=503</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">502</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:44</span>
+                <span class="badge tone-warn">warn</span>
+                <span class="min-w-0 flex-1 truncate">upstream google transient (retry 3/3): status=503 xrid=—</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">503</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:31</span>
+                <span class="badge tone-warn">warn</span>
+                <span class="min-w-0 flex-1 truncate">upstream openai 429 rate_limited (retry 1/3) → backoff 800ms</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">429</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:22</span>
+                <span class="badge tone-error">error</span>
+                <span class="min-w-0 flex-1 truncate">invalid api key for groq (key k#3): 401 unauthorized — key disabled 15m</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">401</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+            </ul>
+          </div>
+
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <p class="text-sm font-medium">Top models · 24h</p>
+            <p class="mb-4 text-xs text-muted-foreground">Share of requests</p>
+            <div class="flex flex-col gap-4 text-xs">
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gpt-5.2-mini</span><span class="text-muted-foreground">512.9k · 40%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:40%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gemini-3.8-flash</span><span class="text-muted-foreground">486.2k · 38%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:38%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">claude-sonnet-4.8</span><span class="text-muted-foreground">241.4k · 19%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:19%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">llama-4-maverick</span><span class="text-muted-foreground">43.9k · 3%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:3%"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================= -->
+      <!-- 3 · LOGS                                                 -->
+      <!-- ======================================================= -->
+      <section id="page-logs" class="page hidden">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Request logs</h1>
+            <p class="text-sm text-muted-foreground">Every routed request with full trace. Click a row to inspect.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="badge tone-ok"><span class="dot dot-live"></span>LIVE · auto-refresh 3s</span>
+            <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent"><i data-lucide="download" class="size-3.5"></i>Export CSV</button>
+          </div>
+        </div>
+
+        <div class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-sm">
+          <div class="relative min-w-[220px] flex-1">
+            <i data-lucide="search" class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+            <input placeholder="Search message, x-request-id, key…" class="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30" />
+          </div>
+          <div class="dd" id="dd-provider"></div>
+          <div class="dd" id="dd-model"></div>
+          <div class="seg">
+            <button class="seg-btn active">All</button>
+            <button class="seg-btn">Info</button>
+            <button class="seg-btn">Warn</button>
+            <button class="seg-btn">Error <span class="ml-1 rounded-full bg-destructive/15 px-1.5 text-[10px] font-semibold text-destructive">2</span></button>
+          </div>
+          <div class="dd" id="dd-range"></div>
+          <button class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent"><i data-lucide="pause" class="size-3.5"></i>Pause</button>
+        </div>
+
+        <div class="overflow-hidden rounded-lg border bg-card shadow-sm">
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[980px] text-left text-sm">
+              <thead>
+                <tr class="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                  <th class="px-4 py-2.5 font-medium">Time</th><th class="px-3 py-2.5 font-medium">Level</th>
+                  <th class="px-3 py-2.5 font-medium">Message</th><th class="px-3 py-2.5 font-medium">Provider</th>
+                  <th class="px-3 py-2.5 font-medium">Model</th><th class="px-3 py-2.5 font-medium">Key</th>
+                  <th class="px-3 py-2.5 text-right font-medium">TTFT</th><th class="px-3 py-2.5 text-right font-medium">Tok/s</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Status</th><th class="px-3 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y">
+                <tr class="log-error-row cursor-pointer" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:52</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-error">error</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">all keys exhausted for gemini-3.8-flash via google: status=503</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">google</td><td class="px-3 py-2.5 font-mono text-xs">gemini-3.8-flash</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">g#2</td><td class="px-3 py-2.5 text-right font-mono text-xs">841 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">502</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="log-error-row cursor-pointer" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:44</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-warn">warn</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">upstream google transient (retry 3/3): status=503 ct=text/event-stream xrid=—</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">google</td><td class="px-3 py-2.5 font-mono text-xs">gemini-3.8-flash</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">g#2</td><td class="px-3 py-2.5 text-right font-mono text-xs">8,102 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">503</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="log-error-row cursor-pointer" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:44</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-warn">warn</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">upstream google transient (retry 2/3): status=503 ct=text/event-stream xrid=—</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">google</td><td class="px-3 py-2.5 font-mono text-xs">gemini-3.8-flash</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">g#2</td><td class="px-3 py-2.5 text-right font-mono text-xs">3,204 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">503</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="log-error-row cursor-pointer" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:41</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-warn">warn</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">upstream google transient (retry 1/3): status=503 ct=text/event-stream xrid=—</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">google</td><td class="px-3 py-2.5 font-mono text-xs">gemini-3.8-flash</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">g#2</td><td class="px-3 py-2.5 text-right font-mono text-xs">312 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">503</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="cursor-pointer hover:bg-muted/50" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:39</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-info">info</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">routed gpt-5.2-mini → openai (key o#1) · stream ok · first token 512 ms</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">openai</td><td class="px-3 py-2.5 font-mono text-xs">gpt-5.2-mini</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">o#1</td><td class="px-3 py-2.5 text-right font-mono text-xs">512 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs">61.4</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-ok font-mono">200</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="cursor-pointer hover:bg-muted/50" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:37</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-info">info</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">routed gemini-3.8-flash → google (key g#1) · stream ok · first token 388 ms</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">google</td><td class="px-3 py-2.5 font-mono text-xs">gemini-3.8-flash</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">g#1</td><td class="px-3 py-2.5 text-right font-mono text-xs">388 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs">54.1</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-ok font-mono">200</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="cursor-pointer hover:bg-muted/50" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:31</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-warn">warn</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">upstream openai 429 rate_limited (retry 1/3) → backoff 800ms</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">openai</td><td class="px-3 py-2.5 font-mono text-xs">gpt-5.2-mini</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">o#1</td><td class="px-3 py-2.5 text-right font-mono text-xs">221 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">429</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="cursor-pointer hover:bg-muted/50" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:30</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-info">info</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">routed claude-sonnet-4.8 → anthropic (key a#1) · stream ok · first token 843 ms</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">anthropic</td><td class="px-3 py-2.5 font-mono text-xs">claude-sonnet-4.8</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">a#1</td><td class="px-3 py-2.5 text-right font-mono text-xs">843 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs">38.2</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-ok font-mono">200</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="log-error-row cursor-pointer" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:22</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-error">error</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">invalid api key for groq (key k#3): 401 unauthorized — key disabled 15m</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">groq</td><td class="px-3 py-2.5 font-mono text-xs">llama-4-maverick</td>
+                  <td class="px-3 py-2.5 font-mono text-xs">k#3</td><td class="px-3 py-2.5 text-right font-mono text-xs">89 ms</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><span class="badge tone-error font-mono">401</span></td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+                <tr class="cursor-pointer hover:bg-muted/50" data-open-trace>
+                  <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">01:44:19</td>
+                  <td class="px-3 py-2.5"><span class="badge tone-info">info</span></td>
+                  <td class="max-w-[340px] truncate px-3 py-2.5">config reloaded (routerllm.yaml) · 15 providers · 15 models · no errors</td>
+                  <td class="px-3 py-2.5 font-mono text-xs text-muted-foreground">—</td><td class="px-3 py-2.5 font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 font-mono text-xs text-muted-foreground">—</td><td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">—</td>
+                  <td class="px-3 py-2.5 text-right"><i data-lucide="chevron-right" class="ml-auto size-4 text-muted-foreground"></i></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
+            <span>Rows <span class="font-mono text-foreground">1–10</span> of <span class="font-mono text-foreground">16,404</span></span>
+            <div class="flex items-center gap-1">
+              <button class="rounded border px-2 py-1 hover:bg-accent">Prev</button>
+              <button class="rounded border bg-primary px-2.5 py-1 font-medium text-primary-foreground">1</button>
+              <button class="rounded border px-2.5 py-1 hover:bg-accent">2</button>
+              <button class="rounded border px-2.5 py-1 hover:bg-accent">3</button>
+              <span class="px-1">…</span>
+              <button class="rounded border px-2 py-1 hover:bg-accent">Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================= -->
+      <!-- 4 · ANALYTICS                                            -->
+      <!-- ======================================================= -->
+      <section id="page-analytics" class="page hidden">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
+            <p class="text-sm text-muted-foreground">Latency, throughput and reliability trends per model.</p>
+          </div>
+          <div class="seg"><button class="seg-btn">24h</button><button class="seg-btn active">7d</button><button class="seg-btn">30d</button></div>
+        </div>
+
+        <div class="mb-5 grid gap-3 lg:grid-cols-2">
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <div class="mb-3 flex items-center justify-between">
+              <div><p class="text-sm font-medium">Success rate</p><p class="text-xs text-muted-foreground">% of requests returning 2xx · 7d</p></div>
+              <span class="badge tone-ok">avg 98.7%</span>
+            </div>
+            <div id="chart-success" class="chart-wrap"><svg viewBox="0 0 640 180" class="h-44 w-full" preserveAspectRatio="none">
+              <g stroke="hsl(var(--border))" stroke-width="1"><line x1="0" y1="30" x2="640" y2="30"/><line x1="0" y1="75" x2="640" y2="75"/><line x1="0" y1="120" x2="640" y2="120"/><line x1="0" y1="165" x2="640" y2="165"/></g>
+              <path d="M0,40 C80,38 160,42 240,40 C320,38 400,44 440,70 C470,96 500,52 540,46 C580,42 610,44 640,40" fill="none" stroke="hsl(142 71% 45%)" stroke-width="2"/>
+              <circle cx="440" cy="70" r="4.5" fill="hsl(var(--destructive))"/>
+              <text x="440" y="112" text-anchor="middle" font-size="11" fill="hsl(var(--muted-foreground))" font-family="JetBrains Mono">97.1% · google 503</text>
+            </svg></div>
+          </div>
+
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <div class="mb-3 flex items-center justify-between">
+              <div><p class="text-sm font-medium">TTFT percentiles</p><p class="text-xs text-muted-foreground">Time to first token · all models</p></div>
+              <div class="flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-emerald-600"></span>p50</span>
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-amber-500"></span>p95</span>
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-destructive"></span>p99</span>
+              </div>
+            </div>
+            <div id="chart-ttft" class="chart-wrap"><svg viewBox="0 0 640 200" class="h-44 w-full" preserveAspectRatio="none">
+              <g stroke="hsl(var(--border))" stroke-width="1"><line x1="0" y1="35" x2="640" y2="35"/><line x1="0" y1="80" x2="640" y2="80"/><line x1="0" y1="125" x2="640" y2="125"/><line x1="0" y1="170" x2="640" y2="170"/></g>
+              <path d="M0,120 C80,118 160,122 240,116 C320,110 400,118 480,112 C560,106 600,112 640,108" fill="none" stroke="#059669" stroke-width="2"/>
+              <path d="M0,90 C80,86 160,96 240,84 C320,74 400,92 480,80 C560,70 600,82 640,76" fill="none" stroke="#f59e0b" stroke-width="2"/>
+              <path d="M0,60 C80,70 160,50 240,64 C320,76 400,48 480,62 C560,74 600,52 640,58" fill="none" stroke="hsl(var(--destructive))" stroke-width="2"/>
+            </svg></div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 lg:grid-cols-3">
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <p class="text-sm font-medium">Errors by class · 7d</p>
+            <p class="mb-4 text-xs text-muted-foreground">Classified automatically from status + body</p>
+            <div class="flex items-center gap-5">
+              <svg viewBox="0 0 42 42" class="size-32">
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="hsl(var(--muted))" stroke-width="5"/>
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="hsl(var(--destructive))" stroke-width="5" stroke-dasharray="62 38" stroke-dashoffset="25"/>
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#f59e0b" stroke-width="5" stroke-dasharray="21 79" stroke-dashoffset="-37"/>
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="hsl(var(--primary))" stroke-width="5" stroke-dasharray="12 88" stroke-dashoffset="-58"/>
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="hsl(var(--muted-foreground))" stroke-width="5" stroke-dasharray="5 95" stroke-dashoffset="-70"/>
+                <text x="21" y="23.5" text-anchor="middle" font-size="7" font-weight="600" fill="currentColor" font-family="JetBrains Mono">10.2k</text>
+              </svg>
+              <ul class="flex flex-1 flex-col gap-2 text-xs">
+                <li class="flex items-center gap-2"><span class="dot dot-dead"></span><span class="font-mono">503 upstream</span><span class="ml-auto font-mono text-muted-foreground">62% · 6.3k</span></li>
+                <li class="flex items-center gap-2"><span class="dot dot-warn"></span><span class="font-mono">429 rate limit</span><span class="ml-auto font-mono text-muted-foreground">21% · 2.1k</span></li>
+                <li class="flex items-center gap-2"><span class="dot" style="background:hsl(var(--primary))"></span><span class="font-mono">timeout</span><span class="ml-auto font-mono text-muted-foreground">12% · 1.2k</span></li>
+                <li class="flex items-center gap-2"><span class="dot dot-muted"></span><span class="font-mono">401 auth</span><span class="ml-auto font-mono text-muted-foreground">5% · 0.5k</span></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="overflow-hidden rounded-lg border bg-card shadow-sm lg:col-span-2">
+            <div class="border-b px-5 py-3.5"><p class="text-sm font-medium">Per model · 7d</p><p class="text-xs text-muted-foreground">Reliability &amp; speed leaderboard</p></div>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr class="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                    <th class="px-4 py-2.5 font-medium">Model</th><th class="px-3 py-2.5 text-right font-medium">Requests</th>
+                    <th class="px-3 py-2.5 font-medium">Success</th><th class="px-3 py-2.5 text-right font-medium">TTFT p50</th>
+                    <th class="px-3 py-2.5 text-right font-medium">TTFT p95</th><th class="px-3 py-2.5 text-right font-medium">Tok/s</th>
+                    <th class="px-3 py-2.5 font-medium">Top error</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y">
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs font-medium">gemini-3.8-flash</td><td class="px-3 py-2.5 text-right font-mono text-xs">486,210</td>
+                    <td class="px-3 py-2.5"><div class="flex items-center gap-2"><div class="h-1.5 w-16 rounded-full bg-muted"><div class="h-1.5 rounded-full bg-emerald-600" style="width:99%"></div></div><span class="font-mono text-xs">99.1%</span></div></td>
+                    <td class="px-3 py-2.5 text-right font-mono text-xs">388 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">1,240 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">54.1</td>
+                    <td class="px-3 py-2.5"><span class="badge tone-error">503 upstream</span></td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs font-medium">gpt-5.2-mini</td><td class="px-3 py-2.5 text-right font-mono text-xs">512,877</td>
+                    <td class="px-3 py-2.5"><div class="flex items-center gap-2"><div class="h-1.5 w-16 rounded-full bg-muted"><div class="h-1.5 rounded-full bg-emerald-600" style="width:98%"></div></div><span class="font-mono text-xs">98.8%</span></div></td>
+                    <td class="px-3 py-2.5 text-right font-mono text-xs">512 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">1,410 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">61.4</td>
+                    <td class="px-3 py-2.5"><span class="badge tone-warn">429 rate limit</span></td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs font-medium">claude-sonnet-4.8</td><td class="px-3 py-2.5 text-right font-mono text-xs">241,356</td>
+                    <td class="px-3 py-2.5"><div class="flex items-center gap-2"><div class="h-1.5 w-16 rounded-full bg-muted"><div class="h-1.5 rounded-full bg-emerald-600" style="width:100%"></div></div><span class="font-mono text-xs">99.6%</span></div></td>
+                    <td class="px-3 py-2.5 text-right font-mono text-xs">843 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">2,050 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">38.2</td>
+                    <td class="px-3 py-2.5"><span class="badge tone-info">timeout</span></td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs font-medium">llama-4-maverick</td><td class="px-3 py-2.5 text-right font-mono text-xs">43,949</td>
+                    <td class="px-3 py-2.5"><div class="flex items-center gap-2"><div class="h-1.5 w-16 rounded-full bg-muted"><div class="h-1.5 rounded-full bg-amber-500" style="width:92%"></div></div><span class="font-mono text-xs">92.4%</span></div></td>
+                    <td class="px-3 py-2.5 text-right font-mono text-xs">297 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">980 ms</td><td class="px-3 py-2.5 text-right font-mono text-xs">88.9</td>
+                    <td class="px-3 py-2.5"><span class="badge tone-error">401 auth</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================= -->
+      <!-- 5 · PROVIDERS & MODELS                                   -->
+      <!-- ======================================================= -->
+      <section id="page-providers" class="page hidden">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Providers &amp; Models</h1>
+            <p class="text-sm text-muted-foreground">Toggle providers, manage key pools and edit fallback chains per model. Click a provider card to see TTFT broken down by model.</p>
+          </div>
+          <button class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="plus" class="size-3.5"></i>Add provider</button>
+        </div>
+
+        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Providers</p>
+        <div id="provider-grid" class="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
+
+        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Models &amp; fallback chains</p>
+        <div id="model-list" class="flex flex-col gap-3"></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- REQUEST TRACE DRAWER                                           -->
+<!-- ============================================================= -->
+<div id="drawer-scrim" class="scrim fixed inset-0 z-40 bg-black/50"></div>
+<aside id="drawer" class="drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-card shadow-xl">
+  <div class="flex h-14 items-center justify-between border-b px-4">
+    <div class="flex items-center gap-2">
+      <p class="text-sm font-semibold">Request trace</p>
+      <span class="badge tone-info font-mono">req_9f3a1c</span>
+      <button class="rounded p-1 text-muted-foreground hover:bg-accent" title="Copy id"><i data-lucide="copy" class="size-3.5"></i></button>
+    </div>
+    <button id="drawer-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto px-4 py-4">
+    <dl class="mb-4 grid grid-cols-2 gap-2.5 text-xs">
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Status</dt><dd class="mt-1"><span class="badge tone-error">502 Bad Gateway</span></dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Duration</dt><dd class="mt-1 font-mono">841 ms</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Model</dt><dd class="mt-1 font-mono">gemini-3.8-flash</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Provider / key</dt><dd class="mt-1 font-mono">google · g#2</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Started</dt><dd class="mt-1 font-mono">01:44:41.102</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Client</dt><dd class="mt-1 font-mono">10.0.0.14:52881 · SSE</dd></div>
+    </dl>
+
+    <div class="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs">
+      <p class="mb-1 flex items-center gap-2 font-semibold text-destructive"><i data-lucide="alert-triangle" class="size-3.5"></i>What happened</p>
+      <p class="leading-relaxed text-foreground">Upstream <span class="font-mono font-semibold">503 Service Unavailable</span> — google returned 503 on 3 consecutive attempts and all 3 keys for <span class="font-mono">gemini-3.8-flash</span> entered cooldown. No failover leg was enabled, so the client received <span class="font-mono">502</span>.</p>
+      <p class="mt-2 leading-relaxed text-muted-foreground">Upstream did not return an <span class="font-mono">x-request-id</span> on any attempt (header absent) — nothing to correlate with google's side.</p>
+    </div>
+
+    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Retry timeline</p>
+    <ol class="mb-4 flex flex-col gap-0 border-l pl-4 text-xs">
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:41.102 · attempt 1/3 → <span class="text-destructive font-semibold">503</span> · 312 ms · ct=text/event-stream · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5 text-muted-foreground"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-muted-foreground/40"></span><p class="font-mono">01:44:44 · backoff 200 ms → retry</p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:44.412 · attempt 2/3 → <span class="text-destructive font-semibold">503</span> · 3,204 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:52 · attempt 3/3 → <span class="text-destructive font-semibold">503</span> · 8,102 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-destructive"></span><p class="font-mono font-semibold text-destructive">01:44:52.931 · all keys exhausted → respond 502 to client</p></li>
+    </ol>
+
+    <div class="mb-4 border-b">
+      <div class="flex gap-1">
+        <button class="tab-btn active" data-tab="headers">Headers</button>
+        <button class="tab-btn" data-tab="reqbody">Request body</button>
+        <button class="tab-btn" data-tab="resbody">Response body</button>
+        <button class="tab-btn" data-tab="raw">Raw log</button>
+      </div>
+    </div>
+
+    <div data-pane="headers" class="grid gap-3 text-xs md:grid-cols-2">
+      <div class="rounded-md border bg-muted/30 p-3">
+        <p class="mb-2 font-medium">Request → upstream</p>
+        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">POST /v1beta/models/gemini-3.8-flash:streamGenerateContent
+authorization: Bearer g#2•••••
+content-type: application/json
+accept: text/event-stream
+x-forwarded-for: 10.0.0.14</pre>
+      </div>
+      <div class="rounded-md border bg-muted/30 p-3">
+        <p class="mb-2 font-medium">← Upstream response</p>
+        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">status: 503
+content-type: text/event-stream
+x-request-id: <span class="text-destructive">(absent)</span>
+retry-after: 0
+alt-svc: h3=":443"</pre>
+      </div>
+    </div>
+
+    <div data-pane="reqbody" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
+  "model": "gemini-3.8-flash",
+  "stream": true,
+  "messages": [{ "role": "user", "content": "…" }],
+  "max_tokens": 1024
+}</pre>
+    </div>
+
+    <div data-pane="resbody" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
+  "error": {
+    "code": 503,
+    "message": "The service is currently unavailable.",
+    "status": "UNAVAILABLE"
+  }
+}</pre>
+    </div>
+
+    <div data-pane="raw" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">01:44:41  warn  upstream google transient (retry 1/3): status=503 ct=text/event-stream xrid=
+01:44:44  warn  upstream google transient (retry 2/3): status=503 ct=text/event-stream xrid=
+01:44:52  warn  upstream google transient (retry 3/3): status=503 ct=text/event-stream xrid=
+01:44:52  error all keys exhausted for gemini-3.8-flash via google: status=503</pre>
+    </div>
+
+    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Suggested actions</p>
+    <div class="flex flex-wrap gap-2">
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="zap" class="size-3"></i>Enable failover → openrouter leg</button>
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="shield-alert" class="size-3"></i>Cooldown key g#2 · 5 min</button>
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="external-link" class="size-3"></i>Google status page</button>
+    </div>
+  </div>
+</aside>
+
+<!-- provider detail drawer -->
+<div id="pd-scrim" class="scrim fixed inset-0 z-40 bg-black/50"></div>
+<aside id="provider-drawer" class="drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-card shadow-xl">
+  <div class="flex h-14 items-center justify-between border-b px-4">
+    <div id="pd-title" class="flex items-center gap-2"></div>
+    <button id="pd-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
+  </div>
+  <div id="pd-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
+</aside>
+
+<script>
+  const $ = (s) => document.querySelector(s)
+  const $$ = (s) => document.querySelectorAll(s)
+
+  // ----- auth (once per device) -----
+  const isAuthed = () => localStorage.getItem("wf_auth") === "1"
+  function applyAuth() {
+    $("#page-login").classList.toggle("hidden", isAuthed())
+    $("#app").classList.toggle("hidden", !isAuthed())
+    if (isAuthed()) route()
+  }
+  $("#login-form").addEventListener("submit", (e) => {
+    e.preventDefault()
+    localStorage.setItem("wf_auth", "1")
+    applyAuth()
+  })
+  $("#signout-btn").addEventListener("click", () => {
+    localStorage.removeItem("wf_auth")
+    location.hash = "#/dashboard"
+    applyAuth()
+  })
+
+  // ----- sidebar routing -----
+  const PAGES = ["dashboard", "logs", "analytics", "providers"]
+  const TITLES = { dashboard: "Dashboard", logs: "Request logs", analytics: "Analytics", providers: "Providers & Models" }
+  function route() {
+    let page = location.hash.replace("#/", "") || "dashboard"
+    if (!PAGES.includes(page)) page = "dashboard"
+    PAGES.forEach((p) => $("#page-" + p).classList.toggle("hidden", p !== page))
+    $$("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === page))
+    $("#page-title").textContent = TITLES[page]
+    $("#sidebar").classList.add("-translate-x-full")
+    $("#sidebar-scrim").classList.remove("open")
+  }
+  window.addEventListener("hashchange", route)
+
+  // ----- mobile sidebar -----
+  $("#menu-btn").addEventListener("click", () => {
+    $("#sidebar").classList.remove("-translate-x-full")
+    $("#sidebar-scrim").classList.add("open")
+  })
+  $("#sidebar-scrim").addEventListener("click", () => {
+    $("#sidebar").classList.add("-translate-x-full")
+    $("#sidebar-scrim").classList.remove("open")
+  })
+
+  // ----- avatar dropdown -----
+  $("#avatar-btn").addEventListener("click", (e) => { e.stopPropagation(); $("#avatar-menu").classList.toggle("hidden") })
+  document.addEventListener("click", () => {
+    $("#avatar-menu").classList.add("hidden")
+    $$(".dd.open").forEach((d) => d.classList.remove("open"))
+  })
+
+  // ----- theme -----
+  if (localStorage.getItem("wf_theme") === "dark") document.documentElement.classList.add("dark")
+  $("#theme-btn").addEventListener("click", () => {
+    const dark = document.documentElement.classList.toggle("dark")
+    localStorage.setItem("wf_theme", dark ? "dark" : "light")
+  })
+
+  // ----- request trace drawer -----
+  function openDrawer() {
+    $("#drawer").classList.add("open")
+    $("#drawer-scrim").classList.add("open")
+  }
+  function closeDrawer() {
+    $("#drawer").classList.remove("open")
+    $("#drawer-scrim").classList.remove("open")
+  }
+  $$("[data-open-trace]").forEach((el) => el.addEventListener("click", openDrawer))
+  $("#drawer-close").addEventListener("click", closeDrawer)
+  $("#drawer-scrim").addEventListener("click", closeDrawer)
+
+  // ----- provider detail drawer -----
+  function openProviderDrawer() {
+    $("#provider-drawer").classList.add("open")
+    $("#pd-scrim").classList.add("open")
+  }
+  function closeProviderDrawer() {
+    $("#provider-drawer").classList.remove("open")
+    $("#pd-scrim").classList.remove("open")
+  }
+  $("#pd-close").addEventListener("click", closeProviderDrawer)
+  $("#pd-scrim").addEventListener("click", closeProviderDrawer)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeDrawer()
+      closeProviderDrawer()
+    }
+  })
+
+  function openProvider(name) {
+    const p = PROVIDERS.find((x) => x.name === name)
+    const s = STATUS_META[p.status]
+    const rows = providerModelRows(name)
+    const agg = PROVIDER_AGG[name]
+    const totalReq = rows.reduce((sum, r) => sum + r.req, 0)
+    const maxP50 = Math.max(...rows.map((r) => r.p50), 1)
+    const slowestP50 = Math.max(...rows.map((r) => r.p50), 0)
+
+    $("#pd-title").innerHTML = `<span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${p.name}</p><span class="badge ${s.badge}">${s.label}</span>`
+
+    const summary = `
+      <dl class="mb-4 grid grid-cols-3 gap-2.5 text-xs">
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="mt-1 font-mono text-lg font-semibold">${agg ? agg + " ms" : "—"}</dd></div>
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Requests 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.req}</dd></div>
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Errors 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.err}</dd></div>
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Keys</dt><dd class="mt-1 font-mono">${p.keys}</dd></div>
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="mt-1 font-mono">${p.up}</dd></div>
+        <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Models served</dt><dd class="mt-1 font-mono text-lg font-semibold">${rows.length}</dd></div>
+      </dl>`
+
+    const table = rows.length === 0
+      ? `<div class="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">No models are currently routed through this provider.</div>`
+      : `
+      <div class="overflow-hidden rounded-md border">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th class="px-3 py-2 font-medium">Model</th>
+              <th class="px-3 py-2 text-right font-medium">Requests</th>
+              <th class="px-3 py-2 font-medium">TTFT p50</th>
+              <th class="px-3 py-2 text-right font-medium">p95</th>
+              <th class="px-3 py-2 text-right font-medium">Tok/s</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            ${rows.map((r) => {
+              const slowest = r.p50 === slowestP50
+              return `
+              <tr>
+                <td class="px-3 py-2 font-mono">${r.route}
+                  <div class="mt-1.5 h-1.5 w-28 rounded-full bg-muted"><div class="h-1.5 rounded-full ${slowest ? "bg-amber-500" : "bg-primary"}" style="width:${Math.round((r.p50 / maxP50) * 100)}%"></div></div>
+                </td>
+                <td class="px-3 py-2 text-right font-mono">${r.req.toLocaleString("en-US")}<span class="block text-[10px] text-muted-foreground">${Math.round((r.req / totalReq) * 100)}% share</span></td>
+                <td class="px-3 py-2 font-mono">${r.p50} ms${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
+                <td class="px-3 py-2 text-right font-mono">${r.p95} ms</td>
+                <td class="px-3 py-2 text-right font-mono">${r.tps}</td>
+              </tr>`
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-2 text-[11px] leading-relaxed text-muted-foreground">Aggregate p50 is request-weighted across the models above — heavy models pull the provider average. Bar = relative to the slowest model.</p>`
+
+    $("#pd-body").innerHTML = summary + `<p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">TTFT by model</p>` + table
+    openProviderDrawer()
+    lucide.createIcons()
+  }
+
+  // ----- drawer tabs -----
+  $$(".tab-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      $$(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn))
+      $$("[data-pane]").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== btn.dataset.tab))
+    })
+  )
+
+  // ----- segmented buttons (visual only) -----
+  $$(".seg").forEach((seg) =>
+    seg.querySelectorAll(".seg-btn").forEach((btn) =>
+      btn.addEventListener("click", () =>
+        seg.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b === btn))
+      )
+    )
+  )
+
+  // ----- mock data: 15 providers / 15 models -----
+  const PROVIDERS = [
+    { name: "google", status: "degraded", keys: "3 · <span class=\"text-amber-600\">1 cooldown</span>", req: "486,210", err: "<span class=\"text-destructive\">9,204 (1.9%)</span>", up: "99.1%", on: true },
+    { name: "openai", status: "healthy", keys: "2 · all healthy", req: "512,877", err: "3,117 (0.6%)", up: "99.9%", on: true },
+    { name: "anthropic", status: "healthy", keys: "1 · healthy", req: "241,356", err: "412 (0.2%)", up: "99.95%", on: true },
+    { name: "openrouter", status: "healthy", keys: "1 · healthy", req: "132,480", err: "988 (0.7%)", up: "99.8%", on: true },
+    { name: "deepseek", status: "healthy", keys: "1 · healthy", req: "126,619", err: "1,013 (0.8%)", up: "99.6%", on: true },
+    { name: "groq", status: "degraded", keys: "2 · <span class=\"text-amber-600\">1 rate-limited</span>", req: "121,455", err: "<span class=\"text-destructive\">2,431 (2.0%)</span>", up: "98.4%", on: true },
+    { name: "azure-openai", status: "healthy", keys: "1 · healthy", req: "64,900", err: "152 (0.2%)", up: "99.99%", on: true },
+    { name: "together", status: "healthy", keys: "2 · all healthy", req: "83,215", err: "749 (0.9%)", up: "99.5%", on: true },
+    { name: "xai", status: "healthy", keys: "1 · healthy", req: "74,930", err: "1,349 (1.8%)", up: "99.2%", on: true },
+    { name: "fireworks", status: "healthy", keys: "1 · healthy", req: "41,220", err: "388 (0.9%)", up: "99.4%", on: true },
+    { name: "bedrock", status: "healthy", keys: "1 · healthy", req: "27,510", err: "96 (0.3%)", up: "100%", on: true },
+    { name: "mistral", status: "healthy", keys: "1 · healthy", req: "24,552", err: "221 (0.9%)", up: "99.3%", on: true },
+    { name: "cerebras", status: "degraded", keys: "1 · <span class=\"text-amber-600\">rate-limited</span>", req: "18,904", err: "<span class=\"text-destructive\">842 (4.5%)</span>", up: "97.8%", on: true },
+    { name: "cohere", status: "healthy", keys: "1 · healthy", req: "6,410", err: "52 (0.8%)", up: "99.7%", on: true },
+    { name: "volcengine", status: "disabled", keys: "<span class=\"text-destructive\">1 · invalid (401)</span>", req: "29,807", err: "<span class=\"text-destructive\">2,742 (9.2%)</span>", up: "—", on: false },
+  ]
+
+  const STATUS_META = {
+    healthy: { dot: "dot-live", badge: "tone-ok", label: "Healthy" },
+    degraded: { dot: "dot-warn", badge: "tone-warn", label: "Degraded" },
+    disabled: { dot: "dot-muted", badge: "tone-info", label: "Disabled" },
+  }
+
+  function providerCard(p) {
+    const s = STATUS_META[p.status]
+    const agg = PROVIDER_AGG[p.name]
+    return `
+      <div data-provider="${p.name}" title="Click to see TTFT by model" class="cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-shadow hover:shadow-md${p.on ? "" : " opacity-60"}">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2"><span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${p.name}</p><span class="badge ${s.badge}">${s.label}</span></div>
+          <input type="checkbox" class="sw" ${p.on ? "checked" : ""} />
+        </div>
+        <dl class="mt-3 flex flex-col gap-1.5 text-xs">
+          <div class="flex justify-between"><dt class="text-muted-foreground">Keys</dt><dd class="font-mono">${p.keys}</dd></div>
+          <div class="flex justify-between"><dt class="text-muted-foreground">Requests 24h</dt><dd class="font-mono">${p.req}</dd></div>
+          <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${agg ? agg + " ms" : "—"}</dd></div>
+          <div class="flex justify-between"><dt class="text-muted-foreground">Errors 24h</dt><dd class="font-mono">${p.err}</dd></div>
+          <div class="flex justify-between"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="font-mono">${p.up}</dd></div>
+        </dl>
+      </div>`
+  }
+  const NOTE_TONE = { ok: "tone-ok", warn: "tone-warn", error: "tone-error", info: "tone-info" }
+
+  const MODELS = [
+    { name: "gemini-3.8-flash", req: "486k", ok: "99.1%", ttft: 388, on: true, legs: [
+      { route: "google/gemini-3.8-flash", tone: "warn", note: "503 spike" },
+      { route: "openrouter/gemini-3.8-flash", tone: "info", note: "standby" },
+    ]},
+    { name: "gpt-5.2-mini", req: "513k", ok: "98.8%", ttft: 512, on: true, legs: [
+      { route: "openai/gpt-5.2-mini", tone: "ok", note: "healthy" },
+      { route: "azure-openai/gpt-5.2-mini", tone: "info", note: "standby" },
+    ]},
+    { name: "claude-sonnet-4.8", req: "241k", ok: "99.6%", ttft: 843, on: true, legs: [
+      { route: "anthropic/claude-sonnet-4.8", tone: "ok", note: "healthy" },
+      { route: "openrouter/claude-sonnet-4.8", tone: "info", note: "standby" },
+    ]},
+    { name: "gemini-3.8-pro", req: "96k", ok: "99.4%", ttft: 612, on: true, legs: [
+      { route: "google/gemini-3.8-pro", tone: "warn", note: "503 spike" },
+      { route: "openrouter/gemini-3.8-pro", tone: "info", note: "standby" },
+    ]},
+    { name: "deepseek-v4", req: "88k", ok: "99.2%", ttft: 421, on: true, legs: [
+      { route: "deepseek/deepseek-v4", tone: "ok", note: "healthy" },
+    ]},
+    { name: "grok-4-fast", req: "75k", ok: "98.2%", ttft: 356, on: true, legs: [
+      { route: "xai/grok-4-fast", tone: "ok", note: "healthy" },
+      { route: "openrouter/grok-4-fast", tone: "info", note: "standby" },
+    ]},
+    { name: "claude-haiku-4.5", req: "64k", ok: "99.7%", ttft: 524, on: true, legs: [
+      { route: "anthropic/claude-haiku-4.5", tone: "ok", note: "healthy" },
+      { route: "together/claude-haiku-4.5", tone: "info", note: "standby" },
+    ]},
+    { name: "gpt-5.2", req: "59k", ok: "99.0%", ttft: 738, on: true, legs: [
+      { route: "azure-openai/gpt-5.2", tone: "ok", note: "healthy" },
+      { route: "openai/gpt-5.2", tone: "info", note: "standby" },
+    ]},
+    { name: "llama-4-maverick", req: "44k", ok: "92.4%", ttft: 297, on: true, legs: [
+      { route: "groq/llama-4-maverick", tone: "error", note: "401 · key invalid" },
+      { route: "together/llama-4-maverick", tone: "info", note: "standby" },
+    ]},
+    { name: "deepseek-r2", req: "38k", ok: "98.9%", ttft: 468, on: true, legs: [
+      { route: "deepseek/deepseek-r2", tone: "ok", note: "healthy" },
+      { route: "fireworks/deepseek-r2", tone: "info", note: "standby" },
+    ]},
+    { name: "qwen3-max", req: "30k", ok: "97.8%", ttft: 549, on: true, legs: [
+      { route: "volcengine/qwen3-max", tone: "error", note: "401 · key invalid" },
+      { route: "cerebras/qwen3-max", tone: "warn", note: "rate-limited" },
+    ]},
+    { name: "mistral-large-3", req: "25k", ok: "99.1%", ttft: 445, on: true, legs: [
+      { route: "mistral/mistral-large-3", tone: "ok", note: "healthy" },
+    ]},
+    { name: "llama-4-scout", req: "18k", ok: "98.5%", ttft: 268, on: true, legs: [
+      { route: "together/llama-4-scout", tone: "ok", note: "healthy" },
+      { route: "fireworks/llama-4-scout", tone: "info", note: "standby" },
+    ]},
+    { name: "claude-opus-4.6", req: "12k", ok: "99.8%", ttft: 1180, on: true, legs: [
+      { route: "anthropic/claude-opus-4.6", tone: "ok", note: "healthy" },
+      { route: "bedrock/claude-opus-4.6", tone: "info", note: "standby" },
+    ]},
+    { name: "gpt-5.2-codex", req: "8.9k", ok: "99.3%", ttft: 902, on: true, legs: [
+      { route: "openai/gpt-5.2-codex", tone: "ok", note: "healthy" },
+    ]},
+  ]
+
+  // ----- per-provider TTFT breakdown (derived from MODELS legs) -----
+  function hashStr(s) {
+    let h = 0
+    for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0
+    return h
+  }
+
+  function providerModelRows(provider) {
+    const rows = []
+    MODELS.forEach((m) => {
+      m.legs.forEach((leg, i) => {
+        if (!leg.route.startsWith(provider + "/")) return
+        const baseReq = parseFloat(m.req) * 1000
+        const share = leg.tone === "error" ? 0.04 : leg.tone === "warn" ? 0.6 : i === 0 ? 0.85 : 0.15
+        const h = hashStr(leg.route)
+        const p50 = Math.round(m.ttft * (0.9 + (h % 25) / 100))
+        rows.push({
+          model: m.name,
+          route: leg.route,
+          tone: leg.tone,
+          req: Math.max(120, Math.round(baseReq * share)),
+          p50,
+          p95: Math.round(p50 * (2.3 + (h % 7) * 0.15)),
+          tps: Math.max(24, Math.round(96 - p50 / 22)),
+        })
+      })
+    })
+    return rows.sort((a, b) => b.req - a.req)
+  }
+
+  const PROVIDER_AGG = {}
+  PROVIDERS.forEach((p) => {
+    const rows = providerModelRows(p.name)
+    const totalReq = rows.reduce((s, r) => s + r.req, 0)
+    PROVIDER_AGG[p.name] = totalReq ? Math.round(rows.reduce((s, r) => s + r.req * r.p50, 0) / totalReq) : null
+  })
+
+  $("#provider-grid").innerHTML = PROVIDERS.map(providerCard).join("")
+  $$("#provider-grid [data-provider]").forEach((card) =>
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("input, button")) return
+      openProvider(card.dataset.provider)
+    })
+  )
+
+  function modelBlock(m) {
+    const legs = m.legs.map((leg, i) => `
+        <li class="flex items-center gap-3 py-2.5">
+          <span class="badge tone-info font-mono">${i + 1}</span>
+          <span class="font-mono text-xs">${leg.route}</span>
+          <span class="badge ${NOTE_TONE[leg.tone]}">${leg.note}</span>
+          <span class="ml-auto flex items-center gap-1.5">
+            <button class="rounded border p-1 text-muted-foreground hover:bg-accent"><i data-lucide="arrow-up" class="size-3"></i></button>
+            <button class="rounded border p-1 text-muted-foreground hover:bg-accent"><i data-lucide="arrow-down" class="size-3"></i></button>
+            <input type="checkbox" class="sw" checked />
+          </span>
+        </li>`).join("")
+    return `
+      <div class="rounded-lg border bg-card shadow-sm">
+        <div class="flex flex-wrap items-center gap-3 border-b px-5 py-3">
+          <span class="font-mono text-sm font-medium">${m.name}</span>
+          <span class="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
+            <span>req <span class="font-mono text-foreground">${m.req}</span></span>
+            <span>success <span class="font-mono text-foreground">${m.ok}</span></span>
+            <span>ttft <span class="font-mono text-foreground">${m.ttft} ms</span></span>
+            <input type="checkbox" class="sw" ${m.on ? "checked" : ""} />
+          </span>
+        </div>
+        <ul class="divide-y px-5 py-1 text-sm">${legs}
+          <li class="py-2.5">
+            <button class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-accent"><i data-lucide="plus" class="size-3"></i>Add failover leg</button>
+          </li>
+        </ul>
+      </div>`
+  }
+  $("#model-list").innerHTML = MODELS.map(modelBlock).join("")
+
+  const maxTtft = Math.max(...MODELS.map((m) => m.ttft))
+  const topModels = [...MODELS].sort((a, b) => parseFloat(b.req) - parseFloat(a.req)).slice(0, 10)
+  $("#ttft-list").innerHTML = topModels.map((m) => `
+    <div>
+      <div class="mb-1 flex justify-between"><span class="font-mono">${m.name}</span><span class="font-mono text-muted-foreground">${m.ttft} ms</span></div>
+      <div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary" style="width:${Math.round((m.ttft / maxTtft) * 100)}%"></div></div>
+    </div>`).join("")
+
+  // ----- custom dropdowns -----
+  function buildDD(id, options, selected) {
+    const root = $("#" + id)
+    root.innerHTML = `
+      <button type="button" class="dd-btn"><span class="dd-label">${selected}</span><i data-lucide="chevron-down"></i></button>
+      <div class="dd-menu">${options.map((o) => `<button type="button" class="dd-item${o === selected ? " active" : ""}">${o}</button>`).join("")}</div>`
+    root.querySelector(".dd-btn").addEventListener("click", (e) => {
+      e.stopPropagation()
+      const wasOpen = root.classList.contains("open")
+      $$(".dd.open").forEach((d) => d.classList.remove("open"))
+      if (!wasOpen) root.classList.add("open")
+    })
+    root.querySelectorAll(".dd-item").forEach((item) =>
+      item.addEventListener("click", () => {
+        root.querySelector(".dd-label").textContent = item.textContent
+        root.querySelectorAll(".dd-item").forEach((i) => i.classList.toggle("active", i === item))
+        root.classList.remove("open")
+      })
+    )
+  }
+
+  buildDD("dd-provider", ["All providers", ...PROVIDERS.map((p) => p.name)], "All providers")
+  buildDD("dd-model", ["All models", ...MODELS.map((m) => m.name)], "All models")
+  buildDD("dd-range", ["Last 1h", "Last 24h", "Last 7d", "Last 30d"], "Last 24h")
+
+  // ----- chart tooltips -----
+  function attachChart(id, tips) {
+    const wrap = $("#" + id)
+    if (!wrap) return
+    const tip = document.createElement("div")
+    tip.className = "chart-tip"
+    const guide = document.createElement("div")
+    guide.className = "chart-guide"
+    const cols = document.createElement("div")
+    cols.className = "chart-cols"
+    tips.forEach((t) => {
+      const col = document.createElement("div")
+      col.className = "chart-col"
+      col.addEventListener("mouseenter", () => {
+        tip.innerHTML = t
+        tip.classList.add("show")
+        guide.classList.add("show")
+        const x = col.offsetLeft + col.offsetWidth / 2
+        guide.style.left = x + "px"
+        tip.style.left = Math.min(Math.max(x, 80), wrap.clientWidth - 80) + "px"
+      })
+      cols.appendChild(col)
+    })
+    cols.addEventListener("mouseleave", () => {
+      tip.classList.remove("show")
+      guide.classList.remove("show")
+    })
+    wrap.append(guide, cols, tip)
+  }
+
+  const traffic = [
+    ["12:00", "82,140 req · 412 err (0.5%)"], ["14:00", "88,320 req · 388 err (0.4%)"],
+    ["16:00", "95,410 req · 455 err (0.5%)"], ["18:00", "104,220 req · 502 err (0.5%)"],
+    ["20:00", "97,180 req · 431 err (0.4%)"], ["22:00", "91,050 req · 398 err (0.4%)"],
+    ["00:00", "86,340 req · 377 err (0.4%)"], ["02:00", "58,410 req · 3,214 err (5.5%) · google 503"],
+    ["04:00", "42,880 req · 289 err (0.7%)"], ["06:00", "49,650 req · 302 err (0.6%)"],
+    ["08:00", "67,290 req · 356 err (0.5%)"], ["now", "84,770 req · 405 err (0.5%)"],
+  ]
+  attachChart("chart-traffic", traffic.map(([t, v]) => `<b>${t}</b><br>${v}`))
+
+  const week = ["Sep 1", "Sep 2", "Sep 3", "Sep 4", "Sep 5", "Sep 6", "Today"]
+  const success = ["99.1%", "99.0%", "99.2%", "99.0%", "97.1% · google 503 incident", "98.8%", "99.0%"]
+  attachChart("chart-success", week.map((d, i) => `<b>${d}</b><br>success ${success[i]}`))
+
+  const ttft7d = [
+    [398, 1240, 2410], [402, 1210, 2380], [395, 1265, 2455], [401, 1232, 2402],
+    [512, 1980, 4120], [399, 1225, 2390], [396, 1218, 2375],
+  ]
+  attachChart("chart-ttft", week.map((d, i) => `<b>${d}</b><br>p50 ${ttft7d[i][0]} · p95 ${ttft7d[i][1]} · p99 ${ttft7d[i][2]} ms`))
+
+  applyAuth()
+  route()
+  lucide.createIcons()
+</script>
+</body>
+</html>
