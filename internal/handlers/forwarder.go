@@ -9,6 +9,7 @@ import (
 	"routerllm/internal/adapter"
 	"routerllm/internal/model"
 	"routerllm/internal/services"
+	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 )
 
@@ -53,6 +54,12 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBody["stream"] = true
 
+	ctx, trace := services.WithRequestTrace(r.Context())
+	r = r.WithContext(ctx)
+
+	modelName := extractModel(raw)
+	reqID := r.Header.Get("X-Request-Id")
+
 	resp, route, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
 	if resp != nil {
 		defer resp.Body.Close()
@@ -61,6 +68,12 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
 			eb, _ := io.ReadAll(resp.Body)
 			util.WriteUpstreamError(w, resp.StatusCode, eb)
+
+			note := ""
+			if err != nil {
+				note = err.Error()
+			}
+			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, note, respTokens(resp)))
 			return
 		}
 
@@ -72,15 +85,18 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		if route.Provider.Style == "anthropic" {
 			_ = util.StreamRawSSE(resp.Body, w)
 		} else if route.Provider.Style == "google" {
-			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, extractModel(raw))
+			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName)
 		} else {
-			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, extractModel(raw))
+			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
 		}
+
+		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", respTokens(resp)))
 		return
 	}
 
 	if err != nil {
 		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0))
 		return
 	}
 }
@@ -91,6 +107,16 @@ func extractModel(raw []byte) string {
 	}
 	json.Unmarshal(raw, &v)
 	return v.Model
+}
+
+// respTokens reads the completion token count captured by the telemetry
+// watcher ForwardRaw attaches to the upstream body, 0 when none is present.
+func respTokens(resp *http.Response) int {
+	if w, ok := resp.Body.(*telemetry.Watcher); ok {
+		return w.Tokens()
+	}
+
+	return 0
 }
 
 func (h *Handlers) Models(w http.ResponseWriter, r *http.Request) {

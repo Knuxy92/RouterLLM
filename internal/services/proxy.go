@@ -15,10 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"os"
 	"routerllm/internal/adapter"
 	"routerllm/internal/cline"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
+	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 )
 
@@ -52,11 +54,13 @@ type Proxy struct {
 	debug                bool
 	advancedDebug        bool
 	forceStream          bool
+	forceStreamUsage     bool
 	forwardClientHeaders bool
 	allowClientHeaders   []string
 	systemPrompt         atomic.Pointer[string]
 	clineMu              sync.Mutex
 	clineManagers        map[string]*cline.Manager
+	telemetry            atomic.Pointer[telemetry.Store]
 }
 
 type upstreamCall struct {
@@ -92,11 +96,39 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, clineManagers: make(map[string]*cline.Manager)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, clineManagers: make(map[string]*cline.Manager)}
+	p.telemetry.Store(telemetry.NewMemStore())
 	p.registry.Store(reg)
 	p.systemPrompt.Store(&systemPrompt)
 
 	return p
+}
+
+// SetTelemetry attaches the request-event sink. Passing nil attaches an
+// in-memory no-persist store so recording stays nil-safe everywhere.
+func (p *Proxy) SetTelemetry(s *telemetry.Store) {
+	if s == nil {
+		s = telemetry.NewMemStore()
+	}
+	p.telemetry.Store(s)
+}
+
+// TelemetryStore exposes the event sink so handlers outside services can read
+// buffered events and metrics.
+func (p *Proxy) TelemetryStore() *telemetry.Store {
+	return p.telemetry.Load()
+}
+
+// recordTelemetry fills the common fields and hands the event to the store.
+func (p *Proxy) recordTelemetry(e telemetry.Event) {
+	p.telemetry.Load().Record(e)
+}
+
+// RecordTelemetry hands a finished event to the store. Handlers outside
+// services (e.g. /v1/messages) use it to close out a RequestTrace they started
+// with WithRequestTrace.
+func (p *Proxy) RecordTelemetry(e telemetry.Event) {
+	p.recordTelemetry(e)
 }
 
 func (p *Proxy) Registry() *provider.Registry {
@@ -231,6 +263,10 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		p.log.Printf("%s model=%s routes=%d request_id=%s", path, modelName, len(routes), requestID(r))
 	}
 
+	started := time.Now()
+	trace := traceFromContext(r.Context())
+	var attempts []telemetry.Attempt
+
 	var lastResp *http.Response
 	var lastRoute *provider.Route
 	var lastErr error
@@ -257,6 +293,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			delete(routeBody, "reasoning_exclude")
 			routeBody["model"] = route.ModelName
 			sessionID = cline.PrepareBody(routeBody)
+			p.injectStreamUsage(routeBody, path)
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		default:
@@ -269,12 +306,14 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 				}
 				applyReasoningDialect(routeBody, pv.ReasoningStyle)
 			}
+			p.injectStreamUsage(routeBody, path)
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		}
 
 		if err != nil {
 			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
+			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: 0, Note: "encode error"})
 			continue
 		}
 
@@ -294,6 +333,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
 			lastErr = fmt.Errorf("all keys exhausted for %s via %s (status=%d)", modelName, pv.Name, status)
+			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted"})
 			continue
 		}
 
@@ -308,6 +348,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			lastRoute = &route
 			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
 			lastErr = fmt.Errorf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, briefBody(eb))
+			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200"})
 			continue
 		}
 
@@ -317,13 +358,41 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if p.debug {
 			p.log.Printf("serving %s via provider=%s upstream_model=%s dialect=%s reasoning=[%s]: %s request_id=%s", path, pv.Name, route.ModelName, reasoningDialectLabel(pv), reasoningSummary(routeBody), respSummary(resp), requestID(r))
 		}
+
+		if trace != nil {
+			trace.setServed(pv.Name, route.ModelName, maskKey(servedKey(resp, pv)))
+			trace.attempts = attempts
+		}
+		resp.Body = telemetry.Watch(resp.Body)
+		if trace != nil {
+			trace.ttftMS = time.Since(started).Milliseconds()
+		}
 		return resp, &route, nil
 	}
 
+	if trace != nil {
+		trace.attempts = attempts
+	}
 	if lastResp != nil {
 		return lastResp, lastRoute, lastErr
 	}
 	return nil, nil, lastErr
+}
+
+// servedKey extracts the credential actually used from the completed request
+// so telemetry can store its mask. The style decides which header carries it.
+func servedKey(resp *http.Response, pv *provider.Provider) string {
+	if resp.Request == nil {
+		return ""
+	}
+	if pv.Style == "google" {
+		return resp.Request.Header.Get("x-goog-api-key")
+	}
+	if key := strings.TrimPrefix(resp.Request.Header.Get("Authorization"), "Bearer "); key != "" && key != resp.Request.Header.Get("Authorization") {
+		return key
+	}
+
+	return resp.Request.Header.Get("x-api-key")
 }
 
 func requestID(r *http.Request) string {
@@ -348,6 +417,11 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		body["stream"] = clientStream
 	}
 
+	ctx, trace := WithRequestTrace(r.Context())
+	r = r.WithContext(ctx)
+	modelName, _ := body["model"].(string)
+	reqID := requestID(r)
+
 	resp, route, err := p.ForwardRaw(path, r, body)
 	if resp != nil {
 		defer resp.Body.Close()
@@ -355,11 +429,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		if resp.StatusCode != http.StatusOK {
 			eb, _ := io.ReadAll(resp.Body)
 			util.WriteUpstreamError(w, resp.StatusCode, eb)
+			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0))
 			return
 		}
 
 		if forceStream && path == "/v1/chat/completions" {
 			p.serveForceStream(resp, route.ModelName, route.Provider.Style, w)
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp)))
 			return
 		}
 
@@ -372,19 +448,32 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		} else {
 			serveOpenAI(resp, clientStream, w)
 		}
+		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp)))
 		return
 	}
 
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusNotFound, err.Error(), 0))
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
 		} else {
 			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0))
 		}
 		return
 	}
+}
+
+// traceTokens reads the completion token count captured by the usage watcher,
+// if one was attached to this response body.
+func traceTokens(resp *http.Response) int {
+	if watcher, ok := resp.Body.(*telemetry.Watcher); ok {
+		return watcher.Tokens()
+	}
+
+	return 0
 }
 
 func parseAndForceStream(raw []byte) (map[string]any, bool, error) {
@@ -448,6 +537,21 @@ func applyLegacyDefaults(body map[string]any, defaults model.RequestDefaults) {
 			}
 		}
 	}
+}
+
+// injectStreamUsage asks OpenAI-compatible upstreams for a final usage chunk
+// so the telemetry watcher can sniff completion-token counts. A client-sent
+// stream_options wins; anthropic/google dialects and /v1/responses never see
+// the field, so they are left alone.
+func (p *Proxy) injectStreamUsage(routeBody map[string]any, path string) {
+	if !p.forceStreamUsage || path != "/v1/chat/completions" {
+		return
+	}
+	if _, ok := routeBody["stream_options"]; ok {
+		return
+	}
+
+	routeBody["stream_options"] = map[string]any{"include_usage": true}
 }
 
 func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
