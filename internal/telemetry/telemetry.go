@@ -103,6 +103,14 @@ func NewStore(path string) (*Store, error) {
 	return s, nil
 }
 
+// NewMemStore returns an in-memory store with no disk persistence — the
+// nil-safe default so telemetry calls never need a nil check.
+func NewMemStore() *Store {
+	s, _ := NewStore("")
+
+	return s
+}
+
 // load replays the tail of an existing jsonl. Events older than the retention
 // window are skipped, and the file is compacted when the majority is stale so
 // restart time stays bounded.

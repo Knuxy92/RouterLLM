@@ -35,7 +35,8 @@ func (b *bucketStats) add(e Event) {
 }
 
 // Metrics aggregates events into per-key 5-minute buckets. Series keys are
-// "p:<provider>", "l:<provider>/<upstream_model>" and "g" for global.
+// "p:<provider>", "l:<provider>/<upstream_model>", "m:<model_id>" and "g" for
+// global.
 type Metrics struct {
 	mu      sync.Mutex
 	buckets map[string]map[int64]*bucketStats
@@ -51,6 +52,9 @@ func bucketStart(t time.Time) int64 {
 
 func seriesKeys(e Event) []string {
 	keys := []string{"g"}
+	if e.Model != "" {
+		keys = append(keys, "m:"+e.Model)
+	}
 	if e.Provider != "" {
 		keys = append(keys, "p:"+e.Provider)
 		keys = append(keys, "l:"+e.Provider+"/"+e.UpstreamModel)

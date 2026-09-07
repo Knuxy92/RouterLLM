@@ -20,6 +20,7 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/routers"
 	"routerllm/internal/services"
+	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 )
 
@@ -77,6 +78,18 @@ func main() {
 	}
 	reloadTracker := admin.NewReloadTracker()
 	configPath := config.ConfigPath()
+
+	telePath := os.Getenv("ROUTERLLM_TELEMETRY_FILE")
+	if telePath == "" {
+		telePath = telemetry.DefaultPath(configPath)
+	}
+	teleStore, err := telemetry.NewStore(telePath)
+	if err != nil {
+		overviewLogger.Printf("telemetry store unavailable (%v) — falling back to in-memory", err)
+		teleStore = telemetry.NewMemStore()
+	}
+	proxy.SetTelemetry(teleStore)
+
 	applyConfig := func(next *config.Config) {
 		reloaded := provider.Rebuild(next.Providers, next.Routes, next.Cooldown, proxy.Registry())
 		proxy.Apply(reloaded, next.SystemPrompt)
@@ -93,6 +106,7 @@ func main() {
 		Sessions:  admin.NewSessionStore(func() string { return os.Getenv("ROUTERLLM_ADMIN_TOKEN") }),
 		Logs:      logBuffer,
 		Reloads:   reloadTracker,
+		Telemetry: teleStore,
 		StartedAt: time.Now(),
 		Reload:    reloader.Reload,
 	}
@@ -152,6 +166,19 @@ func main() {
 	defer stopWatcher()
 	go reloader.Watch(watchCtx)
 
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticker.C:
+				teleStore.Metrics().Prune()
+			}
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
@@ -180,6 +207,9 @@ func main() {
 		if err := adminTLS.Shutdown(ctx); err != nil {
 			overviewLogger.Fatal("admin TLS server forced to shutdown:", err)
 		}
+	}
+	if err := teleStore.Close(); err != nil {
+		overviewLogger.Printf("telemetry close failed: %v", err)
 	}
 	overviewLogger.Println("server stopped")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"routerllm/internal/provider"
+	"routerllm/internal/telemetry"
 )
 
 type Deps struct {
@@ -21,6 +22,7 @@ type Deps struct {
 	Sessions  *SessionStore
 	Logs      *LogBuffer
 	Reloads   *ReloadTracker
+	Telemetry *telemetry.Store
 	StartedAt time.Time
 }
 
@@ -39,6 +41,8 @@ func Mount(r chi.Router, deps Deps) {
 
 			authed.Get("/status", deps.handleStatus)
 			authed.Get("/logs", deps.handleLogs)
+			authed.Get("/requests", deps.handleRequests)
+			authed.Get("/metrics", deps.handleMetrics)
 			authed.Post("/reload", deps.handleReload)
 			authed.Post("/providers/{name}", deps.handleProviderToggle)
 			authed.Post("/providers/{name}/keys/{index}", deps.handleKeyToggle)
@@ -110,6 +114,50 @@ func (d Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
 
 	writeJSON(w, http.StatusOK, map[string]any{"entries": d.Logs.Since(since)})
+}
+
+func (d Deps) handleRequests(w http.ResponseWriter, r *http.Request) {
+	if d.Telemetry == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []telemetry.Event{}, "latest": uint64(0)})
+		return
+	}
+
+	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
+
+	writeJSON(w, http.StatusOK, map[string]any{"entries": d.Telemetry.Since(since), "latest": d.Telemetry.Latest()})
+}
+
+func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if d.Telemetry == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	m := d.Telemetry.Metrics()
+	reg := d.Registry()
+
+	providers := make(map[string]telemetry.Summary)
+	for _, pc := range reg.ProviderConfigs() {
+		providers[pc.Name] = m.Summary("p:" + pc.Name)
+	}
+
+	legs := make(map[string]telemetry.Summary)
+	models := make(map[string]telemetry.Summary)
+	for _, rule := range reg.Rules() {
+		models[rule.ModelID] = m.Summary("m:" + rule.ModelID)
+		for _, spec := range rule.Routes {
+			legs[spec.Provider+"/"+spec.Model] = m.Summary("l:" + spec.Provider + "/" + spec.Model)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"global":    m.Summary("g"),
+		"providers": providers,
+		"legs":      legs,
+		"models":    models,
+		"hourly":    m.Windows("g", 2*time.Hour, 12),
+		"weekly":    m.Windows("g", 24*time.Hour, 7),
+	})
 }
 
 func (d Deps) handleReload(w http.ResponseWriter, r *http.Request) {

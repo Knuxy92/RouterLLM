@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"time"
 
 	"routerllm/internal/provider"
@@ -35,6 +36,7 @@ type RouteLeg struct {
 	Disabled         bool   `json:"disabled"`
 	Active           bool   `json:"active"`
 	ProviderDisabled bool   `json:"provider_disabled"`
+	Note             string `json:"note,omitempty"`
 }
 
 type ModelStatus struct {
@@ -59,7 +61,7 @@ type Status struct {
 func (d Deps) buildStatus() Status {
 	reg := d.Registry()
 	providers := buildProviders(reg)
-	models := buildModels(reg)
+	models := d.buildModels(reg)
 
 	serving := 0
 	for _, m := range models {
@@ -134,7 +136,7 @@ func keyStates(p *provider.Provider) []KeyState {
 	return out
 }
 
-func buildModels(reg *provider.Registry) []ModelStatus {
+func (d Deps) buildModels(reg *provider.Registry) []ModelStatus {
 	rules := reg.Rules()
 	out := make([]ModelStatus, 0, len(rules))
 
@@ -161,6 +163,7 @@ func buildModels(reg *provider.Registry) []ModelStatus {
 				leg.Active = true
 				activeAssigned = true
 			}
+			leg.Note = d.legNote(spec.Provider+"/"+spec.Model, leg)
 			model.Chain = append(model.Chain, leg)
 		}
 
@@ -169,6 +172,26 @@ func buildModels(reg *provider.Registry) []ModelStatus {
 	}
 
 	return out
+}
+
+// legNote derives the UI health badge for one leg: disabled legs say so,
+// otherwise the trailing-24h error bucket wins over healthy/standby.
+func (d Deps) legNote(leg string, l RouteLeg) string {
+	if l.Disabled || l.ProviderDisabled {
+		return "disabled"
+	}
+
+	if d.Telemetry != nil {
+		if _, errs, found := d.Telemetry.Metrics().LastError("l:"+leg, 24*time.Hour); found {
+			return fmt.Sprintf("%d errors 24h", errs)
+		}
+	}
+
+	if l.Active {
+		return "healthy"
+	}
+
+	return "standby"
 }
 
 func countModelsPerProvider(providers []ProviderStatus, models []ModelStatus) {
