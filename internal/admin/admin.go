@@ -116,15 +116,43 @@ func (d Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": d.Logs.Since(since)})
 }
 
+// handleRequests serves the request log two ways: ?since=<seq> returns the raw
+// delta after that seq (used for cheap live tails), and the default page mode
+// (?page=&per_page=&provider=&model=&level=&q=&hours=) returns one filtered,
+// newest-first slice — the console only pulls the page it renders.
 func (d Deps) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if d.Telemetry == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"entries": []telemetry.Event{}, "latest": uint64(0)})
 		return
 	}
 
-	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
+	q := r.URL.Query()
+	if sinceStr := q.Get("since"); sinceStr != "" {
+		since, _ := strconv.ParseUint(sinceStr, 10, 64)
+		writeJSON(w, http.StatusOK, map[string]any{"entries": d.Telemetry.Since(since), "latest": d.Telemetry.Latest()})
+		return
+	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"entries": d.Telemetry.Since(since), "latest": d.Telemetry.Latest()})
+	opts := telemetry.QueryOpts{
+		Provider: q.Get("provider"),
+		Model:    q.Get("model"),
+		Text:     q.Get("q"),
+	}
+	if levels := q.Get("level"); levels != "" {
+		opts.Levels = map[string]bool{}
+		for _, lv := range strings.Split(levels, ",") {
+			if lv = strings.TrimSpace(lv); lv != "" {
+				opts.Levels[lv] = true
+			}
+		}
+	}
+	if hours, err := strconv.ParseFloat(q.Get("hours"), 64); err == nil && hours > 0 {
+		opts.NotBefore = time.Now().Add(-time.Duration(hours * float64(time.Hour)))
+	}
+	opts.Page, _ = strconv.Atoi(q.Get("page"))
+	opts.PerPage, _ = strconv.Atoi(q.Get("per_page"))
+
+	writeJSON(w, http.StatusOK, d.Telemetry.Query(opts))
 }
 
 func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {

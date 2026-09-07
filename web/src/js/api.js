@@ -87,6 +87,19 @@ export const api = {
   status: () => call("/status"),
   metrics: () => call("/metrics"),
   requests: (since = 0) => call("/requests?since=" + since),
+  /** Page mode: {page, perPage, provider, model, level, q, hours} → {entries, page, per_page, total, total_pages, error_total, latest} */
+  requestsPage: (p = {}) => {
+    const qs = new URLSearchParams()
+    if (p.page) qs.set("page", p.page)
+    if (p.perPage) qs.set("per_page", p.perPage)
+    if (p.provider) qs.set("provider", p.provider)
+    if (p.model) qs.set("model", p.model)
+    if (p.level) qs.set("level", p.level)
+    if (p.q) qs.set("q", p.q)
+    if (p.hours) qs.set("hours", p.hours)
+    const s = qs.toString()
+    return call("/requests" + (s ? "?" + s : ""))
+  },
   logs: (since = 0) => call("/logs?since=" + since),
   reload: () => post("/reload"),
   setProviderDisabled: (name, disabled) => post("/providers/" + encodeURIComponent(name), { disabled }),

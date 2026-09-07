@@ -24,6 +24,15 @@ export function hashStr(s) {
   return h
 }
 
+// Latency formatting: ms while fast, seconds from there on (17,739 ms reads
+// as "17.74 s"), minutes only for very long tails.
+export function fmtDur(ms) {
+  if (ms == null || ms <= 0) return "0 ms"
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+}
+
 export function fmtInt(n) {
   return (n ?? 0).toLocaleString("en-US")
 }
@@ -170,7 +179,7 @@ function logMsg(e) {
   const via = `${e.model} → ${e.provider || "—"}`
   if (e.err) return `${via}: ${e.err}`
   if (e.status >= 400) return `${via} failed: status=${e.status}${e.attempts?.length > 1 ? ` (${e.attempts.length} attempts)` : ""}`
-  return `routed ${via} (key ${e.key || "—"}) · ${e.status} · first token ${e.ttft_ms} ms`
+  return `routed ${via} (key ${e.key || "—"}) · ${e.status} · first token ${fmtDur(e.ttft_ms)}`
 }
 
 export function adaptLogs(entries) {
@@ -190,7 +199,7 @@ export function adaptLogs(entries) {
         provider: e.provider || "—",
         model: e.model || "—",
         key: e.key || "—",
-        ttft: e.ttft_ms ? `${fmtInt(e.ttft_ms)} ms` : "—",
+        ttft: e.ttft_ms ? fmtDur(e.ttft_ms) : "—",
         tps,
         status: e.status || null,
         ageH,

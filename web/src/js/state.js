@@ -8,14 +8,23 @@ import { adaptModels, adaptProviders } from "./data.js"
 // state is rolled back by re-fetching /status.
 
 const POLL_MS = 3000
-const RING_CAP = 2000
 
 let lastStatus = null
 let lastMetrics = null
-let requestEntries = []
-let lastReqSeq = 0
 let timer = null
 let polling = false
+
+// ----- request-log paging ---------------------------------------------------------
+// Only the rendered page (plus ±2 prefetched neighbours) lives in memory; the
+// server filters and slices. New events shift pages, so the current page is
+// re-fetched every poll tick while the other caches age until revisited.
+
+export const LOG_PER_PAGE = 50
+
+let logMeta = { page: 1, per_page: LOG_PER_PAGE, total: 0, total_pages: 1, error_total: 0, latest: 0 }
+let logPageCache = new Map() // page number → entries[]
+let logFilters = { provider: "", model: "", level: "", q: "", hours: 24, paused: false }
+let recentFailures = []
 
 const listeners = new Set()
 
@@ -27,8 +36,70 @@ export function getMetrics() {
   return lastMetrics
 }
 
+/** Concatenated cached pages — enough for the trace drawer and cmd+k lookups. */
 export function getRequests() {
-  return requestEntries
+  const all = []
+  for (const entries of [...logPageCache.values()].sort((a, b) => b.pageNo - a.pageNo)) {
+    all.push(...entries.entries)
+  }
+  return all
+}
+
+export function getLogsPage() {
+  return { entries: (logPageCache.get(logMeta.page)?.entries) || [], meta: logMeta }
+}
+
+export function getLogFilters() {
+  return logFilters
+}
+
+export function getRecentFailures() {
+  return recentFailures
+}
+
+function filterParams() {
+  const p = { page: logMeta.page, perPage: LOG_PER_PAGE }
+  if (logFilters.provider) p.provider = logFilters.provider
+  if (logFilters.model) p.model = logFilters.model
+  if (logFilters.level) p.level = logFilters.level
+  if (logFilters.q) p.q = logFilters.q
+  if (logFilters.hours) p.hours = logFilters.hours
+  return p
+}
+
+async function fetchPage(pageNo) {
+  const p = filterParams()
+  p.page = pageNo
+  const res = await api.requestsPage(p)
+  logPageCache.set(pageNo, { pageNo, entries: res.entries || [] })
+  return res
+}
+
+/** Change one filter (or jump pages) and reload page 1 / the given page. */
+export async function setLogFilter(patch, page = 1) {
+  logFilters = { ...logFilters, ...patch }
+  logPageCache = new Map()
+  logMeta = { ...logMeta, page, total: 0, total_pages: 1 }
+  await loadLogsPage(page, { prefetch: false })
+}
+
+export async function loadLogsPage(pageNo, { prefetch = true } = {}) {
+  const res = await fetchPage(pageNo)
+  logMeta = { ...logMeta, ...res }
+  notify()
+  if (prefetch) {
+    // warm the neighbours so paging feels instant; failures are silent
+    for (const n of [pageNo - 1, pageNo + 1, pageNo + 2, pageNo - 2]) {
+      if (n >= 1 && n <= logMeta.total_pages && !logPageCache.has(n)) {
+        fetchPage(n).catch(() => {})
+      }
+    }
+  }
+}
+
+async function refreshRecentFailures() {
+  const res = await api.requestsPage({ page: 1, perPage: 5, level: "warn,error", hours: logFilters.hours || undefined })
+  recentFailures = res.entries || []
 }
 
 export function getState() {
@@ -47,37 +118,18 @@ function notify() {
   listeners.forEach((fn) => fn())
 }
 
-function mergeRequests(entries, latest) {
-  if (latest < lastReqSeq) {
-    // Server restarted (seq counter reset) — drop the stale tail and resync.
-    requestEntries = []
-    lastReqSeq = 0
-    return false
-  }
-  if (entries?.length) {
-    requestEntries = requestEntries.concat(entries).slice(-RING_CAP)
-  }
-  lastReqSeq = latest
-  return true
-}
-
 async function pollOnce() {
   if (polling) return
   polling = true
 
   try {
-    const [status, metrics, reqs] = await Promise.all([
-      api.status(),
-      api.metrics(),
-      api.requests(lastReqSeq),
-    ])
-
+    const [status, metrics] = await Promise.all([api.status(), api.metrics()])
     lastStatus = status
     lastMetrics = metrics
-    if (!mergeRequests(reqs.entries, reqs.latest) ) {
-      const fresh = await api.requests(0)
-      mergeRequests(fresh.entries, fresh.latest)
-    }
+
+    const jobs = [refreshRecentFailures()]
+    if (!logFilters.paused) jobs.push(loadLogsPage(logMeta.page, { prefetch: false }))
+    await Promise.all(jobs)
 
     notify()
   } catch {

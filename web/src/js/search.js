@@ -1,4 +1,4 @@
-import { STATUS_META, adaptLogs, esc } from "./data.js"
+import { STATUS_META, adaptLogs, esc, fmtDur } from "./data.js"
 import { getRequests, getState } from "./state.js"
 import { $, openProvider } from "./render.js"
 
@@ -33,7 +33,7 @@ function collect(q) {
       icon: "box",
       title: m.name,
       sub: m.legs.map((l) => l.route).join("  ·  "),
-      meta: `${m.ttft} ms · req ${m.req}`,
+      meta: `${fmtDur(m.ttft)} · req ${m.req}`,
       go: () => gotoModel(m.name),
     })
   )

@@ -234,3 +234,61 @@ func TestFileEventsCarrySeq(t *testing.T) {
 		t.Fatalf("file seqs = %v, want [1 2] — the ring and the jsonl must agree", got)
 	}
 }
+
+func TestQueryPagedAndFiltered(t *testing.T) {
+	s, _ := NewStore("")
+	base := time.Now()
+
+	// 30 events: 24 ok + 6 error, alternating providers, spread over hours.
+	for i := range 30 {
+		e := testEvent("alpha", "up-a", 200, int64(10+i))
+		e.Time = base.Add(-time.Duration(i) * time.Hour)
+		e.Model = "m"
+		if i%5 == 0 {
+			e = testEvent("beta", "up-b", 402, 900) // 4xx (non-429) levels as "error"
+			e.Time = base.Add(-time.Duration(i) * time.Hour)
+			e.Model = "m"
+			e.Err = "boom"
+		}
+		s.Record(e)
+	}
+
+	full := s.Query(QueryOpts{PerPage: 10})
+	if full.Total != 30 || full.TotalPages != 3 || len(full.Entries) != 10 {
+		t.Fatalf("full = total %d pages %d len %d; want 30/3/10", full.Total, full.TotalPages, len(full.Entries))
+	}
+	if full.Entries[0].Seq != 30 || full.Entries[9].Seq != 21 {
+		t.Fatalf("page 1 not newest-first: first %d last %d", full.Entries[0].Seq, full.Entries[9].Seq)
+	}
+
+	page3 := s.Query(QueryOpts{Page: 3, PerPage: 10})
+	if len(page3.Entries) != 10 || page3.Entries[0].Seq != 10 {
+		t.Fatalf("page 3 = len %d first seq %d; want 10 events starting at seq 10", len(page3.Entries), page3.Entries[0].Seq)
+	}
+
+	errs := s.Query(QueryOpts{Levels: map[string]bool{"error": true}, PerPage: 10})
+	if errs.Total != 6 || errs.ErrorTotal != 6 {
+		t.Fatalf("error filter = total %d errTotal %d; want 6/6", errs.Total, errs.ErrorTotal)
+	}
+
+	byProv := s.Query(QueryOpts{Provider: "beta"})
+	if byProv.Total != 6 {
+		t.Fatalf("provider filter total = %d, want 6", byProv.Total)
+	}
+
+	windowed := s.Query(QueryOpts{NotBefore: base.Add(-5 * time.Hour)})
+	if windowed.Total != 6 {
+		t.Fatalf("hours window total = %d, want 6 (events 0-5h old)", windowed.Total)
+	}
+
+	text := s.Query(QueryOpts{Text: "BOOM"})
+	if text.Total != 6 {
+		t.Fatalf("text filter total = %d, want 6 (case-insensitive)", text.Total)
+	}
+
+	// page beyond the end clamps to the last page
+	clamped := s.Query(QueryOpts{Page: 99, PerPage: 10})
+	if clamped.Page != 3 {
+		t.Fatalf("page clamp = %d, want 3", clamped.Page)
+	}
+}

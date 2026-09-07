@@ -8,8 +8,10 @@ package telemetry
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -284,6 +286,129 @@ func (s *Store) Since(seq uint64) []Event {
 	}
 
 	return out
+}
+
+// QueryOpts filters and slices the ring for the console's request-log table.
+// Zero values mean "no filter". Levels is a set of accepted levels (empty set
+// = all levels).
+type QueryOpts struct {
+	Provider string
+	Model    string
+	Levels   map[string]bool
+	Text     string
+	NotBefore time.Time
+	Page     int // 1-based; <=0 treated as 1
+	PerPage  int // <=0 treated as 50, capped at the ring size
+}
+
+// Page is one slice of Query results, newest events first.
+type Page struct {
+	Entries    []Event `json:"entries"`
+	Page       int     `json:"page"`
+	PerPage    int     `json:"per_page"`
+	Total      int     `json:"total"`
+	TotalPages int     `json:"total_pages"`
+	ErrorTotal int     `json:"error_total"` // errors in the filtered set ignoring the level filter
+	Latest     uint64  `json:"latest"`
+}
+
+// Query returns one page of filtered events, newest first.
+func (s *Store) Query(o QueryOpts) Page {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	perPage := o.PerPage
+	if perPage <= 0 {
+		perPage = 50
+	}
+	if perPage > ringCapacity {
+		perPage = ringCapacity
+	}
+	page := o.Page
+	if page <= 0 {
+		page = 1
+	}
+	text := strings.ToLower(o.Text)
+
+	// Newest first: walk the ring backwards.
+	var matched []Event
+	for i := len(s.ring) - 1; i >= 0; i-- {
+		e := s.ring[i]
+		if !o.NotBefore.IsZero() && e.Time.Before(o.NotBefore) {
+			continue
+		}
+		if o.Provider != "" && e.Provider != o.Provider {
+			continue
+		}
+		if o.Model != "" && e.Model != o.Model {
+			continue
+		}
+		if len(o.Levels) > 0 && !o.Levels[e.Level()] {
+			continue
+		}
+		if text != "" && !strings.Contains(strings.ToLower(e.Msg()), text) {
+			continue
+		}
+		matched = append(matched, e)
+	}
+
+	total := len(matched)
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	start := (page - 1) * perPage
+	end := start + perPage
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+
+	entries := make([]Event, end-start)
+	copy(entries, matched[start:end])
+
+	errorTotal := 0
+	for _, e := range matched {
+		if e.Level() == "error" {
+			errorTotal++
+		}
+	}
+
+	return Page{
+		Entries:    entries,
+		Page:       page,
+		PerPage:    perPage,
+		Total:      total,
+		TotalPages: totalPages,
+		ErrorTotal: errorTotal,
+		Latest:     s.next,
+	}
+}
+
+// Msg renders the event the way the log table shows it: the human sentence
+// derived from outcome and routing. Kept in sync with Level().
+func (e Event) Msg() string {
+	if e.Err != "" {
+		return fmt.Sprintf("%s → %s: %s", e.Model, e.Provider, e.Err)
+	}
+	parts := []string{"routed " + e.Model}
+	if e.Provider != "" {
+		parts = append(parts, "→ "+e.Provider)
+	}
+	if e.Key != "" {
+		parts = append(parts, "(key "+e.Key+")")
+	}
+	if e.TokensOut > 0 {
+		parts = append(parts, fmt.Sprintf("· %d tokens out", e.TokensOut))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 // Latest returns the highest seq handed out so far.

@@ -5,18 +5,25 @@ import {
   adaptLogs,
   adaptTraffic,
   esc,
+  fmtDur,
   fmtInt,
   providerAgg,
   providerModelRows,
 } from "./data.js";
+import { api } from "./api.js";
 import {
+  getLogsPage,
+  getLogFilters,
   getMetrics,
+  getRecentFailures,
   getRequests,
   getState,
   getStatus,
+  loadLogsPage,
   moveLeg,
   reloadConfig,
   removeLeg,
+  setLogFilter,
   startPolling,
   subscribe,
   toggleKey,
@@ -26,6 +33,8 @@ import {
 } from "./state.js";
 
 export const $ = (s) => document.querySelector(s);
+
+
 export const $$ = (s) => document.querySelectorAll(s);
 
 // Smooth out state-driven re-renders where the browser supports it.
@@ -57,7 +66,7 @@ export function providerCard(p, agg) {
       <dl class="mt-3 flex flex-col gap-1.5 text-xs">
         <div class="flex justify-between"><dt class="text-muted-foreground">Keys</dt><dd class="font-mono">${keyLine(p)}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Requests 24h</dt><dd class="font-mono">${p.req}</dd></div>
-        <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${p50 ? p50 + " ms" : "—"}</dd></div>
+        <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${p50 ? fmtDur(p50) : "—"}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Errors 24h</dt><dd class="font-mono">${p.err}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="font-mono">${p.up}</dd></div>
       </dl>
@@ -90,7 +99,7 @@ export function modelBlock(m) {
         <span class="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
           <span>req <span class="font-mono text-foreground">${m.req}</span></span>
           <span>success <span class="font-mono text-foreground">${m.ok}</span></span>
-          <span>ttft <span class="font-mono text-foreground">${m.ttft} ms</span></span>
+          <span>ttft <span class="font-mono text-foreground">${fmtDur(m.ttft)}</span></span>
           <input type="checkbox" class="sw" data-action="model-toggle" data-model="${esc(m.name)}" ${m.on ? "checked" : ""} />
         </span>
       </div>
@@ -132,7 +141,7 @@ export function renderTtftList() {
     .map(
       (m) => `
     <div>
-      <div class="mb-1 flex justify-between"><span class="font-mono">${esc(m.name)}</span><span class="font-mono text-muted-foreground">${m.ttft} ms</span></div>
+      <div class="mb-1 flex justify-between"><span class="font-mono">${esc(m.name)}</span><span class="font-mono text-muted-foreground">${fmtDur(m.ttft)}</span></div>
       <div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary" style="width:${Math.round((m.ttft / maxTtft) * 100)}%"></div></div>
     </div>`,
     )
@@ -213,8 +222,8 @@ function renderKpis() {
   set("kpi-req-sub", `${getStatus()?.models_serving ?? 0} models serving`);
   set("kpi-success", g && g.req > 0 ? `${g.success_pct}<span class="text-sm">%</span>` : "—");
   set("kpi-success-sub", g && g.req > 0 ? `${fmtInt(g.req - g.err)} ok` : "no traffic yet");
-  set("kpi-ttft", g?.ttft_p50_ms ? `${fmtInt(g.ttft_p50_ms)}<span class="text-sm"> ms</span>` : "—");
-  set("kpi-ttft-sub", g?.ttft_p95_ms ? `p95 ${fmtInt(g.ttft_p95_ms)} ms` : "");
+  set("kpi-ttft", g?.ttft_p50_ms ? fmtDur(g.ttft_p50_ms) : "—");
+  set("kpi-ttft-sub", g?.ttft_p95_ms ? `p95 ${fmtDur(g.ttft_p95_ms)}` : "");
   set("kpi-tok", g?.tok_per_sec ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>` : "—");
   set("kpi-tok-sub", g?.tokens ? `${fmtInt(g.tokens)} tokens out` : "");
   set("kpi-err", fmtInt(g?.err ?? 0));
@@ -242,9 +251,7 @@ function renderTopModels() {
 function renderRecentFailures() {
   const ul = $("#recent-failures");
   if (!ul) return;
-  const rows = adaptLogs(getRequests())
-    .filter((r) => r.level !== "info")
-    .slice(0, 5);
+  const rows = adaptLogs(getRecentFailures());
   if (!rows.length) {
     ul.innerHTML = `<li class="px-5 py-6 text-center text-xs text-muted-foreground">No failures in the retained window.</li>`;
     return;
@@ -276,13 +283,13 @@ export function openTraceBySeq(seq) {
     ? `<span class="badge font-mono ${e.status < 400 ? "tone-ok" : "tone-error"}">${e.status}</span>`
     : `<span class="badge tone-error">no response</span>`;
   $("#trace-started").textContent = d.toLocaleString();
-  $("#trace-duration").textContent = fmtInt(e.duration_ms) + " ms";
+  $("#trace-duration").textContent = fmtDur(e.duration_ms);
   $("#trace-model").textContent =
     e.upstream_model && e.upstream_model !== e.model
       ? `${e.model} → ${e.upstream_model}`
       : e.model;
   $("#trace-provider").textContent = `${e.provider || "—"} · ${e.key || "—"}`;
-  $("#trace-ttft").textContent = e.ttft_ms ? fmtInt(e.ttft_ms) + " ms" : "—";
+  $("#trace-ttft").textContent = e.ttft_ms ? fmtDur(e.ttft_ms) : "—";
   $("#trace-tokens").textContent = e.tokens_out ? fmtInt(e.tokens_out) : "—";
 
   const what = $("#trace-what");
@@ -333,7 +340,7 @@ export function openTraceBySeq(seq) {
   $("#trace-timeline").innerHTML = attempts
     .map(
       (a, i) => `
-    <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full ${a.status && a.status < 400 ? "bg-primary" : "bg-amber-500"}"></span><p class="font-mono">attempt ${i + 1}/${attempts.length} → ${esc(a.provider)}${a.model ? "/" + esc(a.model) : ""}${a.key ? " · key " + esc(a.key) : ""} · <span class="${a.status && a.status < 400 ? "" : "text-destructive font-semibold"}">${a.status || "—"}</span> · ${fmtInt(a.latency_ms)} ms${a.note ? " · " + esc(a.note) : ""}</p></li>`,
+    <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full ${a.status && a.status < 400 ? "bg-primary" : "bg-amber-500"}"></span><p class="font-mono">attempt ${i + 1}/${attempts.length} → ${esc(a.provider)}${a.model ? "/" + esc(a.model) : ""}${a.key ? " · key " + esc(a.key) : ""} · <span class="${a.status && a.status < 400 ? "" : "text-destructive font-semibold"}">${a.status || "—"}</span> · ${fmtDur(a.latency_ms)}${a.note ? " · " + esc(a.note) : ""}</p></li>`,
     )
     .join("");
 
@@ -354,7 +361,7 @@ function refreshAll() {
   renderRecentFailures();
   renderTrafficChart();
   buildLogDropdowns();
-  if (!logFilter.paused) renderLogs();
+  if (!getLogFilters().paused) renderLogs();
   window.lucide.createIcons();
 }
 
@@ -462,8 +469,8 @@ function buildAnalytics(name) {
         ${cell("Requests", fmtInt(s.req))}
         ${cell("Errors", fmtInt(s.err))}
         ${cell("Success", s.req > 0 ? s.success_pct + "%" : "—")}
-        ${cell("TTFT p50", s.ttft_p50_ms ? fmtInt(s.ttft_p50_ms) + " ms" : "—")}
-        ${cell("TTFT p95", s.ttft_p95_ms ? fmtInt(s.ttft_p95_ms) + " ms" : "—")}
+        ${cell("TTFT p50", s.ttft_p50_ms ? fmtDur(s.ttft_p50_ms) : "—")}
+        ${cell("TTFT p95", s.ttft_p95_ms ? fmtDur(s.ttft_p95_ms) : "—")}
         ${cell("Tok/s", s.tok_per_sec || "—")}
       </dl>
     </div>`;
@@ -489,7 +496,7 @@ export function openProvider(name, onOpened) {
 
   const summary = `
     <dl class="mb-4 grid grid-cols-3 gap-2.5 text-xs">
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="mt-1 font-mono text-lg font-semibold">${agg ? agg + " ms" : "—"}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="mt-1 font-mono text-lg font-semibold">${agg ? fmtDur(agg) : "—"}</dd></div>
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Requests 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.req}</dd></div>
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Errors 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.err}</dd></div>
       <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Keys</dt><dd class="mt-1 font-mono">${keyLine(p)}</dd></div>
@@ -522,8 +529,8 @@ export function openProvider(name, onOpened) {
                 <div class="mt-1.5 h-1.5 w-28 rounded-full bg-muted"><div class="h-1.5 rounded-full ${slowest ? "bg-amber-500" : "bg-primary"}" style="width:${Math.round((r.p50 / maxP50) * 100)}%"></div></div>
               </td>
               <td class="px-3 py-2 text-right font-mono">${fmtInt(r.req)}<span class="block text-[10px] text-muted-foreground">${totalReq ? Math.round((r.req / totalReq) * 100) : 0}% share</span></td>
-              <td class="px-3 py-2 font-mono">${r.p50 ? r.p50 + " ms" : "—"}${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
-              <td class="px-3 py-2 text-right font-mono">${r.p95 ? r.p95 + " ms" : "—"}</td>
+              <td class="px-3 py-2 font-mono">${r.p50 ? fmtDur(r.p50) : "—"}${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
+              <td class="px-3 py-2 text-right font-mono">${r.p95 ? fmtDur(r.p95) : "—"}</td>
               <td class="px-3 py-2 text-right font-mono">${r.tps || "—"}</td>
             </tr>`;
             })
@@ -607,67 +614,42 @@ export function openLegDialog(modelName) {
   dialog.showModal();
 }
 
-// ----- request logs (paged) -----------------------------------------------
+// ----- request logs (server-paged) ----------------------------------------
+// One page at a time comes from /admin/api/requests (page mode, newest
+// first); the state module prefetches +-2 pages so paging feels instant
+// without ever pulling the whole ring.
 
-const LOG_PAGE_SIZE = 10;
-let logPage = 1;
-let logQuery = "";
 const RANGE_HOURS = {
   "Last 1h": 1,
   "Last 24h": 24,
   "Last 7d": 168,
   "Last 30d": 720,
 };
-const logFilter = {
-  provider: "All providers",
-  model: "All models",
-  level: "All",
-  range: "Last 24h",
-  paused: false,
+
+const levelBadge = {
+  info: "tone-info",
+  warn: "tone-warn",
+  error: "tone-error",
 };
 
-function filteredLogs(skip) {
-  const q = logQuery.trim().toLowerCase();
-  const maxAge = RANGE_HOURS[logFilter.range] ?? 720;
-  return adaptLogs(getRequests()).filter((r) => {
-    if (r.ageH > maxAge) return false;
-    if (
-      logFilter.provider !== "All providers" &&
-      r.provider !== logFilter.provider
-    )
-      return false;
-    if (logFilter.model !== "All models" && r.model !== logFilter.model)
-      return false;
-    if (
-      skip !== "level" &&
-      logFilter.level !== "All" &&
-      r.level !== logFilter.level
-    )
-      return false;
-    if (
-      q &&
-      ![r.msg, r.provider, r.model, r.key, r.time, String(r.status ?? "")].some(
-        (s) => s.toLowerCase().includes(q),
-      )
-    )
-      return false;
-    return true;
-  });
+function logFilterFromState() {
+  const f = getLogFilters();
+  return {
+    provider: f.provider || "All providers",
+    model: f.model || "All models",
+    level: f.level || "All",
+    range:
+      Object.entries(RANGE_HOURS).find(([, h]) => h === (f.hours || 24))?.[0] ??
+      "Last 24h",
+  };
 }
 
 export function renderLogs() {
   const tbody = $("#log-tbody");
   if (!tbody) return;
-  const logs = filteredLogs();
-  const totalPages = Math.max(1, Math.ceil(logs.length / LOG_PAGE_SIZE));
-  logPage = Math.min(Math.max(logPage, 1), totalPages);
-  const start = (logPage - 1) * LOG_PAGE_SIZE;
-  const rows = logs.slice(start, start + LOG_PAGE_SIZE);
-  const levelBadge = {
-    info: "tone-info",
-    warn: "tone-warn",
-    error: "tone-error",
-  };
+  const { entries, meta } = getLogsPage();
+  const rows = adaptLogs(entries);
+
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-10 text-center text-sm text-muted-foreground">No requests match the current filters.</td></tr>`;
   } else {
@@ -676,7 +658,7 @@ export function renderLogs() {
         (r) => `
     <tr class="${r.status && r.status !== 200 ? "log-error-row" : ""} cursor-pointer hover:bg-muted/50" data-open-trace data-seq="${r.seq}">
       <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs">${r.time}</td>
-      <td class="px-3 py-2.5"><span class="badge ${levelBadge[r.level]}">${r.level}</span></td>
+      <td class="px-3 py-2.5"><span class="badge ${levelBadge[r.level] ?? "tone-info"}">${r.level}</span></td>
       <td class="max-w-[340px] truncate px-3 py-2.5">${esc(r.msg)}</td>
       <td class="px-3 py-2.5 font-mono text-xs">${esc(r.provider)}</td>
       <td class="px-3 py-2.5 font-mono text-xs">${esc(r.model)}</td>
@@ -690,33 +672,50 @@ export function renderLogs() {
       .join("");
   }
 
-  $("#log-rows-label").innerHTML = logs.length
-    ? `Rows <span class="font-mono text-foreground">${start + 1}–${start + rows.length}</span> of <span class="font-mono text-foreground">${logs.length}</span>`
+  const start = (meta.page - 1) * meta.per_page;
+  $("#log-rows-label").innerHTML = meta.total
+    ? `Rows <span class="font-mono text-foreground">${start + 1}–${start + rows.length}</span> of <span class="font-mono text-foreground">${meta.total}</span>`
     : `Rows <span class="font-mono text-foreground">0</span> of <span class="font-mono text-foreground">0</span>`;
-  $("#log-error-count").textContent = filteredLogs("level").filter(
-    (r) => r.level === "error",
-  ).length;
 
-  const pbtn = (label, page, { active = false, disabled = false } = {}) =>
-    `<button data-log-page="${page}"${disabled ? " disabled" : ""} class="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40${active ? " bg-primary font-medium text-primary-foreground" : ""}">${label}</button>`;
-  $("#log-pagination").innerHTML =
-    pbtn("Prev", logPage - 1, { disabled: logPage === 1 }) +
-    Array.from({ length: totalPages }, (_, i) =>
-      pbtn(i + 1, i + 1, { active: i + 1 === logPage }),
-    ).join("") +
-    pbtn("Next", logPage + 1, { disabled: logPage === totalPages });
+  const errBtn = $("#log-level-seg [data-level='error']");
+  let errCount = errBtn?.querySelector("#log-error-count");
+  if (errBtn && !errCount) {
+    errCount = document.createElement("span");
+    errCount.id = "log-error-count";
+    errCount.className =
+      "ml-1 rounded-full bg-destructive/15 px-1.5 text-[10px] font-semibold text-destructive";
+    errBtn.appendChild(errCount);
+  }
+  if (errCount) errCount.textContent = meta.error_total ?? 0;
+
+  // Windowed pagination: Prev/Next plus at most 5 page buttons centred on the
+  // current one — never the whole range.
+  const page = meta.page;
+  const totalPages = Math.max(1, meta.total_pages);
+  const first = Math.max(1, Math.min(page - 2, totalPages - 4));
+  const last = Math.min(totalPages, first + 4);
+  const pbtn = (label, target, { active = false, disabled = false, ellipsis = false } = {}) =>
+    ellipsis
+      ? `<span class="px-1 text-xs text-muted-foreground">…</span>`
+      : `<button data-log-page="${target}"${disabled ? " disabled" : ""} class="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40${active ? " bg-primary font-medium text-primary-foreground" : ""}">${label}</button>`;
+  let bar = pbtn("Prev", page - 1, { disabled: page === 1 });
+  if (first > 1) {
+    bar += pbtn(1, 1);
+    if (first > 2) bar += pbtn("…", 0, { ellipsis: true, disabled: true });
+  }
+  for (let n = first; n <= last; n++) bar += pbtn(n, n, { active: n === page });
+  if (last < totalPages) {
+    if (last < totalPages - 1) bar += pbtn("…", 0, { ellipsis: true, disabled: true });
+    bar += pbtn(totalPages, totalPages);
+  }
+  bar += pbtn("Next", page + 1, { disabled: page === totalPages });
+  $("#log-pagination").innerHTML = bar;
   window.lucide.createIcons();
 }
 
-function goToLogPage(page) {
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredLogs().length / LOG_PAGE_SIZE),
-  );
-  const next = Math.min(Math.max(page, 1), totalPages);
-  if (next === logPage) return;
-  logPage = next;
-  withTransition(renderLogs);
+async function goToLogPage(page) {
+  if (page < 1 || page > getLogsPage().meta.total_pages) return;
+  await loadLogsPage(page);
 }
 
 // Rebuilt only when the provider/model name set actually changes, so an open
@@ -730,29 +729,28 @@ function buildLogDropdowns() {
   if (sig === ddSig) return;
   ddSig = sig;
 
-  if (!providers.some((p) => p.name === logFilter.provider))
-    logFilter.provider = "All providers";
-  if (!models.some((m) => m.name === logFilter.model))
-    logFilter.model = "All models";
+  const f = logFilterFromState();
+  if (!providers.some((p) => p.name === f.provider)) f.provider = "All providers";
+  if (!models.some((m) => m.name === f.model)) f.model = "All models";
 
   buildDD(
     "dd-provider",
     ["All providers", ...providers.map((p) => p.name)],
-    logFilter.provider,
+    f.provider,
     (v) => {
-      logFilter.provider = v;
-      logPage = 1;
-      renderLogs();
+      const cur = logFilterFromState();
+      if (v === cur.provider) return;
+      setLogFilter({ provider: v === "All providers" ? "" : v });
     },
   );
   buildDD(
     "dd-model",
     ["All models", ...models.map((m) => m.name)],
-    logFilter.model,
+    f.model,
     (v) => {
-      logFilter.model = v;
-      logPage = 1;
-      renderLogs();
+      const cur = logFilterFromState();
+      if (v === cur.model) return;
+      setLogFilter({ model: v === "All models" ? "" : v });
     },
   );
 }
@@ -773,9 +771,7 @@ export function initDynamic() {
     ["Last 1h", "Last 24h", "Last 7d", "Last 30d"],
     "Last 24h",
     (v) => {
-      logFilter.range = v;
-      logPage = 1;
-      renderLogs();
+      setLogFilter({ hours: RANGE_HOURS[v] ?? 24 });
     },
   );
 
@@ -863,39 +859,40 @@ export function initDynamic() {
     const btn = e.target.closest("[data-log-page]");
     if (btn) goToLogPage(Number(btn.dataset.logPage));
   });
+  let searchTimer = null;
   $("#log-search").addEventListener("input", (e) => {
-    logQuery = e.target.value;
-    logPage = 1;
-    renderLogs();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => setLogFilter({ q: e.target.value.trim() }), 250);
   });
 
   // level segmented filter (visual active state is handled by wireUi's .seg handler)
   $("#log-level-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-level]");
     if (!btn) return;
-    logFilter.level = btn.dataset.level;
-    logPage = 1;
-    renderLogs();
+    setLogFilter({ level: btn.dataset.level });
   });
 
   // pause/resume toggle (mirrors the LIVE badge)
   $("#log-pause").addEventListener("click", () => {
-    logFilter.paused = !logFilter.paused;
-    $("#log-pause").innerHTML = logFilter.paused
+    const paused = !getLogFilters().paused;
+    setLogFilter({ paused });
+    $("#log-pause").innerHTML = paused
       ? `<i data-lucide="play" class="size-3.5"></i>Resume`
       : `<i data-lucide="pause" class="size-3.5"></i>Pause`;
     const badge = $("#log-live-badge");
-    badge.className = logFilter.paused ? "badge tone-warn" : "badge tone-ok";
-    badge.innerHTML = logFilter.paused
+    badge.className = paused ? "badge tone-warn" : "badge tone-ok";
+    badge.innerHTML = paused
       ? `<span class="dot dot-warn"></span>PAUSED`
       : `<span class="dot dot-live"></span>LIVE · auto-refresh 3s`;
     window.lucide.createIcons();
   });
 
-  // export the current filtered set as CSV
-  $("#log-export").addEventListener("click", () => {
+  // export the filtered set as CSV — pulled from the server in bulk
+  $("#log-export").addEventListener("click", async () => {
     const header = "time,level,message,provider,model,key,ttft,tok_s,status";
-    const lines = filteredLogs().map((r) =>
+    const f = getLogFilters();
+    const res = await api.requestsPage({ page: 1, perPage: 2000, provider: f.provider, model: f.model, level: f.level, q: f.q, hours: f.hours });
+    const lines = adaptLogs(res.entries || []).map((r) =>
       [
         r.time,
         r.level,
