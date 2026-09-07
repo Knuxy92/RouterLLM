@@ -239,7 +239,7 @@ function providerSeries(name) {
 
 function buildAnalytics(name) {
   const series = providerSeries(name);
-  const { labels, success, p50, p95, p99 } = series;
+  const { success, p50, p95, p99 } = series;
   const successSvg = chartSvg([{ values: success, color: "hsl(142 71% 45%)" }]);
   const ttftSvg = chartSvg([
     { values: p50, color: "#059669" },

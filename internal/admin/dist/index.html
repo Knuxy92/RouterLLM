@@ -1,14 +1,486 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <title>RouterLLM admin</title>
-    <script type="module" crossorigin src="/admin/assets/index-DQqgMMjW.js"></script>
-    <link rel="stylesheet" crossorigin href="/admin/assets/index-5mJg2qY9.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>RouterLLM admin</title>
+<link rel="icon" href="/admin/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="/admin/vendor/lucide.min.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-Bwj1GUzW.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-CxgDtXms.css">
+</head>
+<body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+
+<!-- ============================================================= -->
+<!-- 1 · LOGIN (auth gate — once per device)                        -->
+<!-- ============================================================= -->
+<div id="page-login" class="flex min-h-dvh items-center justify-center bg-muted/40 px-4">
+  <div class="w-full max-w-sm">
+    <div class="mb-6 flex flex-col items-center gap-2">
+      <div class="flex size-11 items-center justify-center rounded-lg border bg-background shadow-sm">
+        <i data-lucide="waypoints" class="size-5"></i>
+      </div>
+      <h1 class="text-lg font-semibold tracking-tight">RouterLLM</h1>
+      <p class="text-sm text-muted-foreground">Sign in to the admin console</p>
+    </div>
+
+    <div class="rounded-lg border bg-card p-6 shadow-sm">
+      <form id="login-form" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+          <label for="token" class="text-sm font-medium">Admin token</label>
+          <div class="relative">
+            <i data-lucide="key-round" class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"></i>
+            <input id="token" name="token" type="password" value="demo-token" autocomplete="off"
+                   class="w-full rounded-md border bg-transparent py-2 pl-9 pr-3 text-sm shadow-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30" placeholder="Paste admin token" />
+          </div>
+          <p class="text-xs text-muted-foreground">Same token as the current TokenGate (HMAC-signed session).</p>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input id="remember" name="remember" type="checkbox" checked class="size-4 rounded border-input accent-[hsl(var(--primary))]" />
+          Remember this device
+        </label>
+
+        <button type="submit" class="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+          Sign in
+        </button>
+      </form>
+    </div>
+
+    <p class="mt-4 text-center text-xs text-muted-foreground">
+      Wireframe behaviour: any token works · session persists on this device (auth once)
+    </p>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- APP SHELL                                                      -->
+<!-- ============================================================= -->
+<div id="app" class="hidden min-h-dvh">
+
+  <!-- sidebar -->
+  <div id="sidebar-scrim" class="scrim fixed inset-0 z-30 bg-black/50 md:hidden"></div>
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r bg-card transition-transform duration-200 md:translate-x-0">
+    <div class="flex h-14 items-center gap-2.5 border-b px-4">
+      <div class="flex size-7 items-center justify-center rounded-md border bg-background">
+        <i data-lucide="waypoints" class="size-4"></i>
+      </div>
+      <div class="leading-tight">
+        <p class="text-sm font-semibold">RouterLLM</p>
+        <p class="font-mono text-[10px] text-muted-foreground">routerllm.yaml · v0.4.2</p>
+      </div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-3 py-3">
+      <p class="px-2.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Platform</p>
+      <a class="nav-item" data-nav="dashboard" href="#/dashboard"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a class="nav-item" data-nav="logs" href="#/logs"><i data-lucide="scroll-text"></i>Request logs</a>
+
+      <p class="px-2.5 pb-1.5 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Management</p>
+      <a class="nav-item" data-nav="providers" href="#/providers"><i data-lucide="server"></i>Providers &amp; Models</a>
+      <a class="nav-item cursor-not-allowed opacity-50" title="Planned"><i data-lucide="settings"></i>Settings <span class="badge tone-info ml-auto">soon</span></a>
+    </nav>
+
+    <div class="border-t px-3 py-3">
+      <div class="flex items-center gap-2 rounded-md px-2 py-1.5">
+        <span class="dot dot-live"></span>
+        <p class="text-xs text-muted-foreground">Router process <span class="text-foreground">healthy</span></p>
+        <span class="badge tone-info ml-auto font-mono">up 6d 4h</span>
+      </div>
+      <p class="px-2 pt-1 text-[10px] text-muted-foreground/70">MOCK DATA — native build, backend wiring next</p>
+    </div>
+  </aside>
+
+  <!-- main column -->
+  <div class="md:pl-64">
+    <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur">
+      <button id="menu-btn" class="rounded-md border p-1.5 md:hidden"><i data-lucide="menu" class="size-4"></i></button>
+
+      <div class="flex items-center gap-1.5 text-sm">
+        <span class="font-medium">RouterLLM</span>
+        <i data-lucide="chevron-right" class="size-3.5 text-muted-foreground"></i>
+        <span id="page-title" class="text-muted-foreground">Dashboard</span>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <button id="global-search" type="button" class="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent sm:flex">
+          <i data-lucide="search" class="size-3.5"></i>
+          <span class="text-xs">Search requests, models…</span>
+          <span class="kbd ml-6">⌘K</span>
+        </button>
+        <button class="relative rounded-md border p-1.5">
+          <i data-lucide="bell" class="size-4"></i>
+          <span class="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-destructive"></span>
+        </button>
+        <button id="theme-btn" class="rounded-md border p-1.5">
+          <i data-lucide="sun" class="hidden size-4 dark:block"></i>
+          <i data-lucide="moon" class="size-4 dark:hidden"></i>
+        </button>
+        <div class="relative">
+          <button id="avatar-btn" class="flex size-8 items-center justify-center rounded-full border bg-secondary text-xs font-semibold">PA</button>
+          <div id="avatar-menu" class="hidden absolute right-0 top-10 z-30 w-44 rounded-md border bg-card p-1 shadow-md">
+            <div class="px-2.5 py-2">
+              <p class="text-sm font-medium">pavar</p>
+              <p class="text-xs text-muted-foreground">admin · local</p>
+            </div>
+            <div class="my-1 h-px bg-border"></div>
+            <button id="signout-btn" class="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-destructive hover:bg-accent">
+              <i data-lucide="log-out" class="size-4"></i>Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+
+      <!-- ======================================================= -->
+      <!-- 2 · DASHBOARD                                            -->
+      <!-- ======================================================= -->
+      <section id="page-dashboard" class="page">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <p class="text-sm text-muted-foreground">Live overview of the router — last 24 hours.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="seg"><button class="seg-btn active">24h</button><button class="seg-btn">7d</button><button class="seg-btn">30d</button></div>
+            <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent"><i data-lucide="refresh-cw" class="size-3.5"></i>Reload config</button>
+          </div>
+        </div>
+
+        <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Requests 24h</p><i data-lucide="zap" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">1,284,392</p>
+            <span class="badge tone-ok mt-1.5">▲ 12.4% vs prev</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Success rate</p><i data-lucide="gauge" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">98.72<span class="text-sm">%</span></p>
+            <span class="badge tone-ok mt-1.5">▲ 0.3 pt</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Median TTFT</p><i data-lucide="clock" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">412<span class="text-sm"> ms</span></p>
+            <span class="badge tone-ok mt-1.5">▼ 38 ms</span>
+          </div>
+          <div class="rounded-lg border bg-card p-4 shadow-sm">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Throughput</p><i data-lucide="trending-up" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">1,842<span class="text-sm"> tok/s</span></p>
+            <span class="badge tone-ok mt-1.5">▲ 6.1%</span>
+          </div>
+          <div class="col-span-2 rounded-lg border bg-card p-4 shadow-sm lg:col-span-1">
+            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Errors 24h</p><i data-lucide="shield-alert" class="size-3.5 text-muted-foreground"></i></div>
+            <p class="mt-1.5 font-mono text-xl font-semibold">16,404</p>
+            <span class="badge tone-error mt-1.5">▼ 112 · 1.28%</span>
+          </div>
+        </div>
+
+        <div class="mb-5 grid gap-3 lg:grid-cols-3">
+          <div class="min-w-0 rounded-lg border bg-card p-5 shadow-sm lg:col-span-2">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-y-1">
+              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p class="text-xs text-muted-foreground">Requests vs upstream errors · 5-min buckets</p></div>
+              <div class="flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-primary"></span>requests</span>
+                <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-destructive"></span>errors</span>
+              </div>
+            </div>
+            <div id="chart-traffic" class="chart-wrap"><svg viewBox="0 0 640 220" class="h-56 w-full" preserveAspectRatio="none">
+              <g stroke="hsl(var(--border))" stroke-width="1"><line x1="0" y1="40" x2="640" y2="40"/><line x1="0" y1="90" x2="640" y2="90"/><line x1="0" y1="140" x2="640" y2="140"/><line x1="0" y1="190" x2="640" y2="190"/></g>
+              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44 L640,220 L0,220 Z" fill="hsl(var(--primary))" opacity="0.07"/>
+              <path d="M0,150 C40,142 60,120 90,124 C120,128 140,90 170,96 C200,102 220,74 250,80 C280,86 300,60 330,66 C360,72 380,88 410,70 C440,52 460,84 490,76 C520,68 540,52 570,58 C600,64 620,48 640,44" fill="none" stroke="hsl(var(--primary))" stroke-width="2"/>
+              <path d="M0,196 C60,194 120,197 180,192 C240,187 300,193 360,190 C420,187 480,191 540,186 C580,183 620,188 640,184" fill="none" stroke="hsl(var(--destructive))" stroke-width="2" stroke-dasharray="4 3"/>
+              <circle cx="360" cy="190" r="4" fill="hsl(var(--destructive))"/>
+            </svg></div>
+            <p class="mt-2 text-xs text-muted-foreground">↑ Spike at 01:44 — google upstream 503 on <span class="font-mono">gemini-3.8-flash</span> (3 retries × 3 keys exhausted)</p>
+          </div>
+
+          <div class="min-w-0 rounded-lg border bg-card p-5 shadow-sm">
+            <p class="text-sm font-medium">TTFT p50 by model</p>
+            <p class="mb-3 text-xs text-muted-foreground">Time to first token · 24h · top 10 of 15 models, by requests</p>
+            <div id="ttft-list" class="flex max-h-64 flex-col gap-3.5 overflow-y-auto pr-1 text-xs"></div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 lg:grid-cols-3">
+          <div class="min-w-0 overflow-hidden rounded-lg border bg-card shadow-sm lg:col-span-2">
+            <div class="flex items-center justify-between border-b px-5 py-3.5">
+              <div><p class="text-sm font-medium">Recent failures</p><p class="text-xs text-muted-foreground">Click a row to open the full request trace</p></div>
+              <a href="#/logs" class="text-xs text-muted-foreground underline-offset-2 hover:underline">View all logs</a>
+            </div>
+            <ul class="divide-y text-sm">
+              <li class="log-error-row flex cursor-pointer items-center gap-3 px-5 py-3" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:52</span>
+                <span class="badge tone-error">error</span>
+                <span class="min-w-0 flex-1 truncate">all keys exhausted for gemini-3.8-flash via google: status=503</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">502</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:44</span>
+                <span class="badge tone-warn">warn</span>
+                <span class="min-w-0 flex-1 truncate">upstream google transient (retry 3/3): status=503 xrid=—</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">503</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:31</span>
+                <span class="badge tone-warn">warn</span>
+                <span class="min-w-0 flex-1 truncate">upstream openai 429 rate_limited (retry 1/3) → backoff 800ms</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">429</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+              <li class="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-muted/50" data-open-trace>
+                <span class="font-mono text-xs text-muted-foreground">01:44:22</span>
+                <span class="badge tone-error">error</span>
+                <span class="min-w-0 flex-1 truncate">invalid api key for groq (key k#3): 401 unauthorized — key disabled 15m</span>
+                <span class="hidden font-mono text-xs text-muted-foreground sm:inline">401</span>
+                <i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i>
+              </li>
+            </ul>
+          </div>
+
+          <div class="rounded-lg border bg-card p-5 shadow-sm">
+            <p class="text-sm font-medium">Top models · 24h</p>
+            <p class="mb-4 text-xs text-muted-foreground">Share of requests</p>
+            <div class="flex flex-col gap-4 text-xs">
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gpt-5.2-mini</span><span class="text-muted-foreground">512.9k · 40%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:40%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">gemini-3.8-flash</span><span class="text-muted-foreground">486.2k · 38%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:38%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">claude-sonnet-4.8</span><span class="text-muted-foreground">241.4k · 19%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:19%"></div></div></div>
+              <div><div class="mb-1 flex items-center justify-between"><span class="font-mono">llama-4-maverick</span><span class="text-muted-foreground">43.9k · 3%</span></div><div class="h-2 rounded-full bg-muted"><div class="h-2 rounded-full bg-primary/70" style="width:3%"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================= -->
+      <!-- 3 · LOGS                                                 -->
+      <!-- ======================================================= -->
+      <section id="page-logs" class="page hidden">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Request logs</h1>
+            <p class="text-sm text-muted-foreground">Every routed request with full trace. Click a row to inspect.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="log-live-badge" class="badge tone-ok"><span class="dot dot-live"></span>LIVE · auto-refresh 3s</span>
+            <button id="log-export" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent"><i data-lucide="download" class="size-3.5"></i>Export CSV</button>
+          </div>
+        </div>
+
+        <div class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-sm">
+          <div class="relative min-w-[220px] flex-1">
+            <i data-lucide="search" class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+            <input id="log-search" name="search" placeholder="Search message, x-request-id, key…" class="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30" />
+          </div>
+          <div class="dd" id="dd-provider"></div>
+          <div class="dd" id="dd-model"></div>
+          <div class="seg" id="log-level-seg">
+            <button class="seg-btn active" data-level="All">All</button>
+            <button class="seg-btn" data-level="info">Info</button>
+            <button class="seg-btn" data-level="warn">Warn</button>
+            <button class="seg-btn" data-level="error">Error <span id="log-error-count" class="ml-1 rounded-full bg-destructive/15 px-1.5 text-[10px] font-semibold text-destructive">—</span></button>
+          </div>
+          <div class="dd" id="dd-range"></div>
+          <button id="log-pause" class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent"><i data-lucide="pause" class="size-3.5"></i>Pause</button>
+        </div>
+
+        <div class="overflow-hidden rounded-lg border bg-card shadow-sm">
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[980px] text-left text-sm">
+              <thead>
+                <tr class="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                  <th class="px-4 py-2.5 font-medium">Time</th><th class="px-3 py-2.5 font-medium">Level</th>
+                  <th class="px-3 py-2.5 font-medium">Message</th><th class="px-3 py-2.5 font-medium">Provider</th>
+                  <th class="px-3 py-2.5 font-medium">Model</th><th class="px-3 py-2.5 font-medium">Key</th>
+                  <th class="px-3 py-2.5 text-right font-medium">TTFT</th><th class="px-3 py-2.5 text-right font-medium">Tok/s</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Status</th><th class="px-3 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody id="log-tbody" class="divide-y"></tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
+            <span id="log-rows-label">Rows <span class="font-mono text-foreground">1–10</span> of <span class="font-mono text-foreground">—</span></span>
+            <div id="log-pagination" class="flex items-center gap-1"></div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ======================================================= -->
+      <!-- 5 · PROVIDERS & MODELS                                   -->
+      <!-- ======================================================= -->
+      <section id="page-providers" class="page hidden">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight">Providers &amp; Models</h1>
+            <p class="text-sm text-muted-foreground">Toggle providers, manage key pools and edit fallback chains per model. Click a provider card to see TTFT broken down by model.</p>
+          </div>
+          <button class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="plus" class="size-3.5"></i>Add provider</button>
+        </div>
+
+        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Providers</p>
+        <div id="provider-grid" class="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
+
+        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Models &amp; fallback chains</p>
+        <div id="model-list" class="flex flex-col gap-3"></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<!-- REQUEST TRACE DRAWER                                           -->
+<!-- ============================================================= -->
+<div id="drawer-scrim" class="scrim fixed inset-0 z-40 bg-black/50"></div>
+<aside id="drawer" class="drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-card shadow-xl">
+  <div class="flex h-14 items-center justify-between border-b px-4">
+    <div class="flex items-center gap-2">
+      <p class="text-sm font-semibold">Request trace</p>
+      <span class="badge tone-info font-mono">req_9f3a1c</span>
+      <button class="rounded p-1 text-muted-foreground hover:bg-accent" title="Copy id"><i data-lucide="copy" class="size-3.5"></i></button>
+    </div>
+    <button id="drawer-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto px-4 py-4">
+    <dl class="mb-4 grid grid-cols-2 gap-2.5 text-xs">
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Status</dt><dd class="mt-1"><span class="badge tone-error">502 Bad Gateway</span></dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Duration</dt><dd class="mt-1 font-mono">841 ms</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Model</dt><dd class="mt-1 font-mono">gemini-3.8-flash</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Provider / key</dt><dd class="mt-1 font-mono">google · g#2</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Started</dt><dd class="mt-1 font-mono">01:44:41.102</dd></div>
+      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Client</dt><dd class="mt-1 font-mono">10.0.0.14:52881 · SSE</dd></div>
+    </dl>
+
+    <div class="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs">
+      <p class="mb-1 flex items-center gap-2 font-semibold text-destructive"><i data-lucide="alert-triangle" class="size-3.5"></i>What happened</p>
+      <p class="leading-relaxed text-foreground">Upstream <span class="font-mono font-semibold">503 Service Unavailable</span> — google returned 503 on 3 consecutive attempts and all 3 keys for <span class="font-mono">gemini-3.8-flash</span> entered cooldown. No failover leg was enabled, so the client received <span class="font-mono">502</span>.</p>
+      <p class="mt-2 leading-relaxed text-muted-foreground">Upstream did not return an <span class="font-mono">x-request-id</span> on any attempt (header absent) — nothing to correlate with google's side.</p>
+    </div>
+
+    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Retry timeline</p>
+    <ol class="mb-4 flex flex-col gap-0 border-l pl-4 text-xs">
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:41.102 · attempt 1/3 → <span class="text-destructive font-semibold">503</span> · 312 ms · ct=text/event-stream · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5 text-muted-foreground"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-muted-foreground/40"></span><p class="font-mono">01:44:44 · backoff 200 ms → retry</p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:44.412 · attempt 2/3 → <span class="text-destructive font-semibold">503</span> · 3,204 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-amber-500"></span><p class="font-mono">01:44:52 · attempt 3/3 → <span class="text-destructive font-semibold">503</span> · 8,102 ms · xrid=<span class="text-muted-foreground">—</span></p></li>
+      <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full bg-destructive"></span><p class="font-mono font-semibold text-destructive">01:44:52.931 · all keys exhausted → respond 502 to client</p></li>
+    </ol>
+
+    <div class="mb-4 border-b">
+      <div class="flex gap-1">
+        <button class="tab-btn active" data-tab="headers">Headers</button>
+        <button class="tab-btn" data-tab="reqbody">Request body</button>
+        <button class="tab-btn" data-tab="resbody">Response body</button>
+        <button class="tab-btn" data-tab="raw">Raw log</button>
+      </div>
+    </div>
+
+    <div data-pane="headers" class="grid gap-3 text-xs md:grid-cols-2">
+      <div class="rounded-md border bg-muted/30 p-3">
+        <p class="mb-2 font-medium">Request → upstream</p>
+        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">POST /v1beta/models/gemini-3.8-flash:streamGenerateContent
+authorization: Bearer g#2•••••
+content-type: application/json
+accept: text/event-stream
+x-forwarded-for: 10.0.0.14</pre>
+      </div>
+      <div class="rounded-md border bg-muted/30 p-3">
+        <p class="mb-2 font-medium">← Upstream response</p>
+        <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">status: 503
+content-type: text/event-stream
+x-request-id: <span class="text-destructive">(absent)</span>
+retry-after: 0
+alt-svc: h3=":443"</pre>
+      </div>
+    </div>
+
+    <div data-pane="reqbody" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
+  "model": "gemini-3.8-flash",
+  "stream": true,
+  "messages": [{ "role": "user", "content": "…" }],
+  "max_tokens": 1024
+}</pre>
+    </div>
+
+    <div data-pane="resbody" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">{
+  "error": {
+    "code": 503,
+    "message": "The service is currently unavailable.",
+    "status": "UNAVAILABLE"
+  }
+}</pre>
+    </div>
+
+    <div data-pane="raw" class="hidden rounded-md border bg-muted/30 p-3">
+      <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">01:44:41  warn  upstream google transient (retry 1/3): status=503 ct=text/event-stream xrid=
+01:44:44  warn  upstream google transient (retry 2/3): status=503 ct=text/event-stream xrid=
+01:44:52  warn  upstream google transient (retry 3/3): status=503 ct=text/event-stream xrid=
+01:44:52  error all keys exhausted for gemini-3.8-flash via google: status=503</pre>
+    </div>
+
+    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Suggested actions</p>
+    <div class="flex flex-wrap gap-2">
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="zap" class="size-3"></i>Enable failover → openrouter leg</button>
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="shield-alert" class="size-3"></i>Cooldown key g#2 · 5 min</button>
+      <button class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="external-link" class="size-3"></i>Google status page</button>
+    </div>
+  </div>
+</aside>
+
+<!-- provider detail drawer -->
+<div id="pd-scrim" class="scrim fixed inset-0 z-40 bg-black/50"></div>
+<aside id="provider-drawer" class="drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-card shadow-xl">
+  <div class="flex h-14 items-center justify-between border-b px-4">
+    <div id="pd-title" class="flex items-center gap-2"></div>
+    <button id="pd-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
+  </div>
+  <div id="pd-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
+</aside>
+
+<!-- global search / command palette -->
+<dialog id="cmdk" class="cmdk-dialog">
+  <div class="flex items-center gap-2.5 border-b px-4 py-3">
+    <i data-lucide="search" class="size-4 flex-none text-muted-foreground"></i>
+    <input id="cmdk-input" name="cmdk-query" type="text" autocomplete="off" spellcheck="false" placeholder="Search models, providers, logs, pages…" class="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
+    <span class="kbd flex-none">esc</span>
+  </div>
+  <div id="cmdk-results" class="max-h-80 overflow-y-auto p-1.5"></div>
+</dialog>
+
+<!-- add failover leg dialog -->
+<dialog id="leg-dialog" class="leg-dialog">
+  <div class="p-5">
+    <h3 class="text-sm font-semibold">Add failover leg</h3>
+    <p class="mt-1 text-xs text-muted-foreground">Fallback route for <span id="leg-dialog-model" class="font-mono text-foreground"></span></p>
+    <div class="mt-4">
+      <p class="text-xs font-medium text-muted-foreground">Provider</p>
+      <div id="leg-dialog-provider" class="dd mt-1.5"></div>
+    </div>
+    <div class="mt-3">
+      <label class="block text-xs font-medium text-muted-foreground" for="leg-dialog-upstream">Upstream model</label>
+      <input id="leg-dialog-upstream" name="upstream-model" type="text" autocomplete="off" spellcheck="false" placeholder="defaults to the router model name" class="mt-1.5 w-full rounded-md border bg-transparent px-2.5 py-2 text-sm text-foreground font-mono focus:border-ring focus:outline-none" />
+    </div>
+    <div class="mt-3">
+      <p class="text-xs font-medium text-muted-foreground">Reasoning effort</p>
+      <div id="leg-dialog-effort" class="dd mt-1.5"></div>
+    </div>
+    <p class="mt-3 text-[11px] text-muted-foreground">The leg is appended last (lowest priority) and starts in standby. Reorder it with the arrows afterwards.</p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button id="leg-dialog-cancel" class="rounded-md border px-3 py-1.5 text-sm hover:bg-accent">Cancel</button>
+      <button id="leg-dialog-confirm" class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">Add leg</button>
+    </div>
+  </div>
+</dialog>
+</body>
 </html>
