@@ -13,6 +13,10 @@
 routerllm.yaml
 cline-accounts.json
 
+# Request-event telemetry (written beside the config at runtime)
+routerllm-telemetry.jsonl
+routerllm-telemetry.jsonl.tmp
+
 # IDE / OS
 .idea/
 .vscode/
