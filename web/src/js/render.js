@@ -34,7 +34,6 @@ import {
 
 export const $ = (s) => document.querySelector(s);
 
-
 export const $$ = (s) => document.querySelectorAll(s);
 
 // Smooth out state-driven re-renders where the browser supports it.
@@ -128,12 +127,15 @@ export function renderModels() {
 
 export function renderTtftList() {
   const models = getState().models;
-  const topModels = [...models].sort((a, b) => b.reqNum - a.reqNum).slice(0, 10);
+  const topModels = [...models]
+    .sort((a, b) => b.reqNum - a.reqNum)
+    .slice(0, 10);
   const caption = $("#ttft-caption");
   if (caption)
     caption.textContent = `Time to first token · p50 · 24h · top ${topModels.length} of ${models.length} models, by requests`;
   if (!topModels.length) {
-    $("#ttft-list").innerHTML = `<p class="text-xs text-muted-foreground">No traffic recorded yet.</p>`;
+    $("#ttft-list").innerHTML =
+      `<p class="text-xs text-muted-foreground">No traffic recorded yet.</p>`;
     return;
   }
   const maxTtft = Math.max(...topModels.map((m) => m.ttft), 1);
@@ -201,7 +203,11 @@ function renderTrafficChart() {
   wrap.innerHTML = chartSvg(
     [
       { values: series.map((s) => s.req), color: "hsl(var(--primary))" },
-      { values: series.map((s) => s.err), color: "hsl(var(--destructive))", dash: true },
+      {
+        values: series.map((s) => s.err),
+        color: "hsl(var(--destructive))",
+        dash: true,
+      },
     ],
     220,
   );
@@ -220,11 +226,22 @@ function renderKpis() {
   const errPct = g && g.req > 0 ? ((g.err / g.req) * 100).toFixed(2) : null;
   set("kpi-req", fmtInt(g?.req ?? 0));
   set("kpi-req-sub", `${getStatus()?.models_serving ?? 0} models serving`);
-  set("kpi-success", g && g.req > 0 ? `${g.success_pct}<span class="text-sm">%</span>` : "—");
-  set("kpi-success-sub", g && g.req > 0 ? `${fmtInt(g.req - g.err)} ok` : "no traffic yet");
+  set(
+    "kpi-success",
+    g && g.req > 0 ? `${g.success_pct}<span class="text-sm">%</span>` : "—",
+  );
+  set(
+    "kpi-success-sub",
+    g && g.req > 0 ? `${fmtInt(g.req - g.err)} ok` : "no traffic yet",
+  );
   set("kpi-ttft", g?.ttft_p50_ms ? fmtDur(g.ttft_p50_ms) : "—");
   set("kpi-ttft-sub", g?.ttft_p95_ms ? `p95 ${fmtDur(g.ttft_p95_ms)}` : "");
-  set("kpi-tok", g?.tok_per_sec ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>` : "—");
+  set(
+    "kpi-tok",
+    g?.tok_per_sec
+      ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>`
+      : "—",
+  );
   set("kpi-tok-sub", g?.tokens ? `${fmtInt(g.tokens)} tokens out` : "");
   set("kpi-err", fmtInt(g?.err ?? 0));
   set("kpi-err-sub", errPct != null ? `${errPct}% of requests` : "");
@@ -294,7 +311,8 @@ export function openTraceBySeq(seq) {
 
   const what = $("#trace-what");
   if (e.err) {
-    what.className = "mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs";
+    what.className =
+      "mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs";
     what.innerHTML = `<p class="mb-1 flex items-center gap-2 font-semibold text-destructive"><i data-lucide="alert-triangle" class="size-3.5"></i>What happened</p><p class="leading-relaxed text-foreground">${esc(e.err)}</p>`;
   } else {
     what.className = "mb-4 rounded-md border bg-muted/30 p-3.5 text-xs";
@@ -312,7 +330,10 @@ export function openTraceBySeq(seq) {
       });
   });
   if (e.resp_body && !bodies.some((b) => b.body === e.resp_body))
-    bodies.push({ label: `final → client${e.status ? " · " + e.status : ""}`, body: e.resp_body });
+    bodies.push({
+      label: `final → client${e.status ? " · " + e.status : ""}`,
+      body: e.resp_body,
+    });
   const respBox = $("#trace-responses");
   if (respBox) {
     if (bodies.length) {
@@ -336,7 +357,15 @@ export function openTraceBySeq(seq) {
 
   const attempts = e.attempts?.length
     ? e.attempts
-    : [{ provider: e.provider || "—", model: e.upstream_model || e.model, key: e.key, status: e.status, latency_ms: e.duration_ms }];
+    : [
+        {
+          provider: e.provider || "—",
+          model: e.upstream_model || e.model,
+          key: e.key,
+          status: e.status,
+          latency_ms: e.duration_ms,
+        },
+      ];
   $("#trace-timeline").innerHTML = attempts
     .map(
       (a, i) => `
@@ -605,7 +634,7 @@ export function openLegDialog(modelName) {
   );
   buildDD(
     "leg-dialog-effort",
-    ["(none)", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    ["(none)", "none", "low", "medium", "high", "xhigh", "max"],
     "(none)",
   );
   $("#leg-dialog-upstream").value = "";
@@ -694,7 +723,11 @@ export function renderLogs() {
   const totalPages = Math.max(1, meta.total_pages);
   const first = Math.max(1, Math.min(page - 2, totalPages - 4));
   const last = Math.min(totalPages, first + 4);
-  const pbtn = (label, target, { active = false, disabled = false, ellipsis = false } = {}) =>
+  const pbtn = (
+    label,
+    target,
+    { active = false, disabled = false, ellipsis = false } = {},
+  ) =>
     ellipsis
       ? `<span class="px-1 text-xs text-muted-foreground">…</span>`
       : `<button data-log-page="${target}"${disabled ? " disabled" : ""} class="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40${active ? " bg-primary font-medium text-primary-foreground" : ""}">${label}</button>`;
@@ -705,7 +738,8 @@ export function renderLogs() {
   }
   for (let n = first; n <= last; n++) bar += pbtn(n, n, { active: n === page });
   if (last < totalPages) {
-    if (last < totalPages - 1) bar += pbtn("…", 0, { ellipsis: true, disabled: true });
+    if (last < totalPages - 1)
+      bar += pbtn("…", 0, { ellipsis: true, disabled: true });
     bar += pbtn(totalPages, totalPages);
   }
   bar += pbtn("Next", page + 1, { disabled: page === totalPages });
@@ -725,12 +759,15 @@ let ddSig = "";
 function buildLogDropdowns() {
   const { providers, models } = getState();
   const sig =
-    providers.map((p) => p.name).join(",") + "|" + models.map((m) => m.name).join(",");
+    providers.map((p) => p.name).join(",") +
+    "|" +
+    models.map((m) => m.name).join(",");
   if (sig === ddSig) return;
   ddSig = sig;
 
   const f = logFilterFromState();
-  if (!providers.some((p) => p.name === f.provider)) f.provider = "All providers";
+  if (!providers.some((p) => p.name === f.provider))
+    f.provider = "All providers";
   if (!models.some((m) => m.name === f.model)) f.model = "All models";
 
   buildDD(
@@ -862,7 +899,10 @@ export function initDynamic() {
   let searchTimer = null;
   $("#log-search").addEventListener("input", (e) => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => setLogFilter({ q: e.target.value.trim() }), 250);
+    searchTimer = setTimeout(
+      () => setLogFilter({ q: e.target.value.trim() }),
+      250,
+    );
   });
 
   // level segmented filter (visual active state is handled by wireUi's .seg handler)
@@ -891,7 +931,15 @@ export function initDynamic() {
   $("#log-export").addEventListener("click", async () => {
     const header = "time,level,message,provider,model,key,ttft,tok_s,status";
     const f = getLogFilters();
-    const res = await api.requestsPage({ page: 1, perPage: 2000, provider: f.provider, model: f.model, level: f.level, q: f.q, hours: f.hours });
+    const res = await api.requestsPage({
+      page: 1,
+      perPage: 2000,
+      provider: f.provider,
+      model: f.model,
+      level: f.level,
+      q: f.q,
+      hours: f.hours,
+    });
     const lines = adaptLogs(res.entries || []).map((r) =>
       [
         r.time,
