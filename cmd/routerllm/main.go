@@ -109,6 +109,9 @@ func main() {
 		Telemetry: teleStore,
 		StartedAt: time.Now(),
 		Reload:    reloader.Reload,
+		Test: func(r *http.Request, req services.TestRequest) *services.TestResult {
+			return proxy.RunTest(r.Context(), req)
+		},
 	}
 
 	// When the TLS admin port is set, the console exists only on that HTTPS

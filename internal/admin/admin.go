@@ -13,6 +13,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"routerllm/internal/provider"
+	"routerllm/internal/services"
 	"routerllm/internal/telemetry"
 )
 
@@ -25,6 +26,8 @@ type Deps struct {
 	Reloads   *ReloadTracker
 	Telemetry *telemetry.Store
 	StartedAt time.Time
+	// Test drives the provider test feature; nil disables the endpoint.
+	Test func(r *http.Request, req services.TestRequest) *services.TestResult
 }
 
 func Mount(r chi.Router, deps Deps) {
@@ -50,6 +53,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Get("/metrics", deps.handleMetrics)
 			authed.Post("/reload", deps.handleReload)
 			authed.Post("/providers/{name}", deps.handleProviderToggle)
+			authed.Post("/providers/{name}/test", deps.handleProviderTest)
 			authed.Post("/providers/{name}/keys/{index}", deps.handleKeyToggle)
 			authed.Post("/routes/{model}/move", deps.handleRouteMove)
 			authed.Post("/routes/{model}/add", deps.handleRouteAdd)
