@@ -110,4 +110,5 @@ export const api = {
   moveRoute: (model, index, direction) => post("/routes/" + encodeURIComponent(model) + "/move", { index, direction }),
   addRouteLeg: (model, leg) => post("/routes/" + encodeURIComponent(model) + "/add", leg),
   removeRouteLeg: (model, index) => post("/routes/" + encodeURIComponent(model) + "/remove", { index }),
+  testProvider: (name, body) => post("/providers/" + encodeURIComponent(name) + "/test", body),
 }

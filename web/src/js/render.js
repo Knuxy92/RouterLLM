@@ -590,6 +590,23 @@ export function openProvider(name, onOpened) {
     </div>
     <p class="mt-1.5 text-[11px] text-muted-foreground">Keys arrive masked from the backend. The manual toggle is runtime-only — a process restart re-enables disabled keys.</p>`;
 
+  const testSection =
+    rows.length === 0
+      ? ""
+      : `
+    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Test model</p>
+    <div class="rounded-md border bg-card p-4">
+      <div class="grid grid-cols-2 gap-2.5 text-xs">
+        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
+        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
+        <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc("Say 'pong' and nothing else.")}</textarea></div>
+        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+      </div>
+      <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
+      <div id="pd-test-result" class="mt-3 hidden"></div>
+    </div>`;
+
   const analyticsBar = `
     <div class="mt-4 flex items-center justify-between border-t pt-3">
       <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Analytics</p>
@@ -602,6 +619,7 @@ export function openProvider(name, onOpened) {
     `<p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">TTFT by model</p>` +
     table +
     keysSection +
+    testSection +
     analyticsBar;
 
   $("#pd-analytics-btn").addEventListener("click", () => {
@@ -614,6 +632,80 @@ export function openProvider(name, onOpened) {
     if (!showing) box.innerHTML = buildAnalytics(name);
     window.lucide.createIcons();
   });
+
+  if (rows.length > 0) {
+    let testModel = rows[0].modelId;
+    let testEffort = "";
+    buildDD("pd-test-model", rows.map((r) => r.modelId), testModel, (v) => {
+      testModel = v;
+    });
+    buildDD(
+      "pd-test-effort",
+      ["(none)", "none", "low", "medium", "high", "xhigh", "max"],
+      "(none)",
+      (v) => {
+        testEffort = v === "(none)" ? "" : v;
+      },
+    );
+
+    const clamp = (v, lo, hi, fallback) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(hi, Math.max(lo, Math.round(n)));
+    };
+
+    $("#pd-test-run").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const body = {
+        model: testModel,
+        prompt: $("#pd-test-prompt").value,
+        max_tokens: clamp($("#pd-test-max-tokens").value, 1, 8192, 256),
+        effort: testEffort,
+        timeout_seconds: clamp($("#pd-test-timeout").value, 5, 120, 20),
+      };
+      const result = $("#pd-test-result");
+      btn.disabled = true;
+      btn.textContent = "Testing…";
+
+      let res = null;
+      let thrown = null;
+      try {
+        res = await api.testProvider(name, body);
+      } catch (err) {
+        thrown = err?.message || String(err);
+      }
+
+      if (thrown !== null) {
+        result.innerHTML = `
+          <div class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
+            <p class="mb-1 font-semibold text-destructive">Test failed</p>
+            <p class="leading-relaxed">${esc(thrown)}</p>
+          </div>`;
+      } else {
+        const ok = res.status === 200 && !res.error;
+        const tps =
+          res.duration_ms > 0 ? Math.round(res.tokens / (res.duration_ms / 1000)) : "—";
+        const chip = (label, value) =>
+          `<div class="rounded-md border bg-muted/30 px-2 py-1.5"><p class="text-[10px] uppercase tracking-wide text-muted-foreground">${label}</p><p class="mt-0.5 truncate font-mono text-xs font-medium">${value}</p></div>`;
+        result.innerHTML = `
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            ${chip("Status", `<span class="badge ${ok ? "tone-ok" : "tone-error"}">${res.status ?? "—"}</span>`)}
+            ${chip("TTFT", fmtDur(res.ttft_ms))}
+            ${chip("Duration", fmtDur(res.duration_ms))}
+            ${chip("Tok/s", tps === "—" ? "—" : fmtInt(tps))}
+            ${chip("Tokens", fmtInt(res.tokens))}
+            ${chip("Upstream model", `<span class="font-mono">${esc(res.upstream_model || testModel)}</span>`)}
+          </div>
+          ${res.error ? `<div class="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs"><p class="leading-relaxed">${esc(res.error)}</p></div>` : ""}
+          ${res.content ? `<pre class="mt-2 rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed max-h-40 overflow-auto whitespace-pre-wrap">${esc(res.content)}</pre>` : ""}`;
+      }
+
+      result.classList.remove("hidden");
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="play" class="size-3.5"></i>Run test`;
+      window.lucide.createIcons();
+    });
+  }
 
   onOpened();
   window.lucide.createIcons();
