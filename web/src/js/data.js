@@ -99,7 +99,6 @@ export function adaptProviders(status, metrics) {
 }
 
 // Provider-weighted TTFT p50 (ms) across its legs, from metrics.legs.
-// Replaces the old static PROVIDER_AGG map.
 export function providerAgg(metrics) {
   const out = {}
   for (const [route, s] of Object.entries(metrics?.legs || {})) {

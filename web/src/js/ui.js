@@ -2,7 +2,6 @@ import { addLeg, getLogsPage } from "./state.js"
 import { $, $$, openTrace } from "./render.js"
 
 export function wireUi() {
-  // mobile sidebar
   $("#menu-btn").addEventListener("click", () => {
     $("#sidebar").classList.remove("-translate-x-full")
     $("#sidebar-scrim").classList.add("open")
@@ -12,14 +11,13 @@ export function wireUi() {
     $("#sidebar-scrim").classList.remove("open")
   })
 
-  // avatar dropdown
   $("#avatar-btn").addEventListener("click", (e) => { e.stopPropagation(); $("#avatar-menu").classList.toggle("hidden") })
   document.addEventListener("click", () => {
     $("#avatar-menu").classList.add("hidden")
     $$(".dd.open").forEach((d) => d.classList.remove("open"))
   })
 
-  // request trace drawer — rows re-render per page, so delegate on the tbody
+  // rows re-render per page, so delegate on the tbody
   const closeDrawer = () => {
     $("#drawer").classList.remove("open")
     $("#drawer-scrim").classList.remove("open")
@@ -37,7 +35,6 @@ export function wireUi() {
   $("#drawer-close").addEventListener("click", closeDrawer)
   $("#drawer-scrim").addEventListener("click", closeDrawer)
 
-  // provider detail drawer — X button and scrim both close it
   $("#pd-close").addEventListener("click", closeProviderDrawer)
   $("#pd-scrim").addEventListener("click", closeProviderDrawer)
   document.addEventListener("keydown", (e) => {
@@ -46,7 +43,6 @@ export function wireUi() {
     closeProviderDrawer()
   })
 
-  // add-failover-leg dialog
   const dialog = $("#leg-dialog")
   $("#leg-dialog-cancel").addEventListener("click", () => dialog.close())
   $("#leg-dialog-confirm").addEventListener("click", () => {
@@ -60,7 +56,6 @@ export function wireUi() {
     if (e.target === dialog) dialog.close()
   })
 
-  // trace drawer tabs
   $$(".tab-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       $$(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn))
@@ -68,7 +63,6 @@ export function wireUi() {
     })
   )
 
-  // segmented buttons (visual only)
   $$(".seg").forEach((seg) =>
     seg.querySelectorAll(".seg-btn").forEach((btn) =>
       btn.addEventListener("click", () =>

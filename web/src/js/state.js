@@ -1,11 +1,10 @@
 import { api } from "./api.js"
 import { adaptModels, adaptProviders } from "./data.js"
 
-// Server-backed state. Nothing is persisted locally — /status, /metrics and
-// /requests are polled every 3s and every mutation goes through the admin API.
-// Toggles are optimistic: the local status copy is mutated immediately, then
-// the API result (which is itself a fresh Status) replaces it; on failure the
-// state is rolled back by re-fetching /status.
+// Server-backed state: /status, /metrics and /requests are polled every 3s and
+// every mutation goes through the admin API. Toggles are optimistic — the local
+// copy is mutated immediately, then replaced by the API's fresh Status; on
+// failure the state is rolled back by re-fetching /status.
 
 const POLL_MS = 3000
 
@@ -22,7 +21,7 @@ let polling = false
 export const LOG_PER_PAGE = 20
 
 let logMeta = { page: 1, per_page: LOG_PER_PAGE, total: 0, total_pages: 1, error_total: 0, latest: 0 }
-let logPageCache = new Map() // page number → entries[]
+let logPageCache = new Map()
 let logFilters = { provider: "", model: "", level: "", q: "", hours: 24, paused: false }
 let recentFailures = []
 

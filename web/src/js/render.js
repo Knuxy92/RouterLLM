@@ -821,7 +821,6 @@ export function initDynamic() {
     },
   );
 
-  // dashboard: chart range + config reload
   $("#chart-range-seg")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-range]");
     if (!btn) return;
@@ -842,7 +841,6 @@ export function initDynamic() {
     if (ev) openTrace(ev.entry);
   });
 
-  // provider cards: click opens drawer, switch toggles state
   $("#provider-grid").addEventListener("click", (e) => {
     if (e.target.closest("input, button")) return;
     const card = e.target.closest("[data-provider]");
@@ -886,7 +884,7 @@ export function initDynamic() {
       );
   });
 
-  // provider drawer: per-key enable/disable (bound once; #pd-body is static markup)
+  // bound once; #pd-body is static markup
   $("#pd-body").addEventListener("change", (e) => {
     const input = e.target.closest("input[data-action='key-toggle']");
     if (!input) return;
@@ -904,7 +902,6 @@ export function initDynamic() {
       );
   });
 
-  // request logs pagination + search
   $("#log-pagination").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-log-page]");
     if (btn) goToLogPage(Number(btn.dataset.logPage));
@@ -918,14 +915,13 @@ export function initDynamic() {
     );
   });
 
-  // level segmented filter (visual active state is handled by wireUi's .seg handler)
+  // visual active state is handled by wireUi's .seg handler
   $("#log-level-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-level]");
     if (!btn) return;
     setLogFilter({ level: btn.dataset.level });
   });
 
-  // pause/resume toggle (mirrors the LIVE badge)
   $("#log-pause").addEventListener("click", () => {
     const paused = !getLogFilters().paused;
     setLogFilter({ paused });
@@ -940,7 +936,6 @@ export function initDynamic() {
     window.lucide.createIcons();
   });
 
-  // export the filtered set as CSV — pulled from the server in bulk
   $("#log-export").addEventListener("click", async () => {
     const btn = $("#log-export");
     btn.disabled = true;
@@ -988,6 +983,5 @@ export function initDynamic() {
     }
   });
 
-  // re-render on any committed state change
   subscribe(() => withTransition(refreshAll));
 }
