@@ -301,6 +301,10 @@ With a session, the console gains two write paths on Signal paths:
 - **Model toggle** (the switch on a model card) persists to `routerllm.yaml` as `disabled: true` on the route rule: the model disappears from `/v1/models` and requests for it 404, while the whole chain stays in the file. Endpoint: `POST /admin/api/routes/{model} {"disabled":bool}`.
 - **Key toggle** (in a provider's detail drawer) is **runtime-only**: it flips a manual disable inside the key manager that survives hot-reload but not a process restart. Keys arrive as `${ENV}` placeholders so there is nothing durable to write — to retire a key for good, remove it from the env var. Endpoint: `POST /admin/api/providers/{name}/keys/{index} {"disabled":bool}`.
 
+### Provider test
+
+The provider drawer also has a **Test** button that fires a one-shot chat request pinned to that provider — it bypasses route chains and uses the provider's real key pool and the same request translation as normal proxying (anthropic/google/cline/openai dialects). You pick the upstream model and can adjust four fields: test prompt, max_tokens, reasoning effort and a timeout (default 20s, clamped to 5–120s). Results render inline — status, TTFT, duration, tok/s, token count and the returned content, or the upstream error body on failure. Every run is recorded as a telemetry event too, so tests show up in **Request logs** alongside proxied traffic.
+
 ### Telemetry & request logs
 
 Every proxied request records one **event** — key always masked (`…abcd`), request bodies and successful response bodies are never stored. **Failed** requests capture the upstream's error response body (2 KB cap, per attempt) for debugging:
