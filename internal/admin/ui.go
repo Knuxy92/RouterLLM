@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
 //go:embed all:dist
@@ -25,25 +26,29 @@ func MountUI(r chi.Router) {
 
 	files := http.FileServer(http.FS(dist))
 
-	r.Get("/admin", http.RedirectHandler("/admin/", http.StatusFound).ServeHTTP)
-	r.Get("/admin/*", func(w http.ResponseWriter, req *http.Request) {
-		path := strings.TrimPrefix(req.URL.Path, "/admin/")
-		if path == "" {
-			serveIndex(w, index)
-			return
-		}
+	r.Group(func(ui chi.Router) {
+		ui.Use(chimw.Compress(5))
 
-		if _, err := fs.Stat(dist, path); err != nil {
-			serveIndex(w, index)
-			return
-		}
+		ui.Get("/admin", http.RedirectHandler("/admin/", http.StatusFound).ServeHTTP)
+		ui.Get("/admin/*", func(w http.ResponseWriter, req *http.Request) {
+			path := strings.TrimPrefix(req.URL.Path, "/admin/")
+			if path == "" {
+				serveIndex(w, index)
+				return
+			}
 
-		if strings.HasPrefix(path, "assets/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		}
+			if _, err := fs.Stat(dist, path); err != nil {
+				serveIndex(w, index)
+				return
+			}
 
-		req.URL.Path = "/" + path
-		files.ServeHTTP(w, req)
+			if strings.HasPrefix(path, "assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+
+			req.URL.Path = "/" + path
+			files.ServeHTTP(w, req)
+		})
 	})
 }
 

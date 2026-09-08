@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"routerllm/internal/provider"
 	"routerllm/internal/telemetry"
@@ -32,6 +33,8 @@ func Mount(r chi.Router, deps Deps) {
 	}
 
 	r.Route("/admin/api", func(api chi.Router) {
+		api.Use(chimw.Compress(5))
+
 		// The handshake itself runs without a session — it is how one is earned.
 		api.Post("/auth/challenge", deps.handleAuthChallenge)
 		api.Post("/auth/verify", deps.handleAuthVerify)
@@ -40,6 +43,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Use(deps.requireSession())
 
 			authed.Post("/auth/logout", deps.handleAuthLogout)
+			authed.Get("/pulse", deps.handlePulse)
 			authed.Get("/status", deps.handleStatus)
 			authed.Get("/logs", deps.handleLogs)
 			authed.Get("/requests", deps.handleRequests)
