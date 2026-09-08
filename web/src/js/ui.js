@@ -1,5 +1,5 @@
-import { addLeg } from "./state.js"
-import { $, $$, openTraceBySeq } from "./render.js"
+import { addLeg, getLogsPage } from "./state.js"
+import { $, $$, openTrace } from "./render.js"
 
 export function wireUi() {
   // mobile sidebar
@@ -30,7 +30,9 @@ export function wireUi() {
   }
   $("#log-tbody").addEventListener("click", (e) => {
     const row = e.target.closest("[data-open-trace]")
-    if (row) openTraceBySeq(Number(row.dataset.seq))
+    if (!row) return
+    const ev = getLogsPage().entries.find((x) => x.seq === Number(row.dataset.seq))
+    if (ev) openTrace(ev)
   })
   $("#drawer-close").addEventListener("click", closeDrawer)
   $("#drawer-scrim").addEventListener("click", closeDrawer)

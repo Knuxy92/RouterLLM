@@ -18,16 +18,10 @@ export const KEY_TONE = {
   disabled: "tone-info",
 }
 
-export function hashStr(s) {
-  let h = 0
-  for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return h
-}
-
 // Latency formatting: ms while fast, seconds from there on (17,739 ms reads
 // as "17.74 s"), minutes only for very long tails.
 export function fmtDur(ms) {
-  if (ms == null || ms <= 0) return "0 ms"
+  if (ms == null || ms <= 0) return "—"
   if (ms < 1000) return `${Math.round(ms)} ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
@@ -230,21 +224,6 @@ export function adaptTraffic(metrics, range = "24h") {
       tip: `${fmtInt(w.req)} req · ${fmtInt(w.err)} err (${pct}%)`,
     }
   })
-}
-
-// 7-day rollups for the drawer/global widgets: labels, per-day success %,
-// and [p50, p95] TTFT pairs (the backend tracks no p99).
-export function adaptWeekly(metrics) {
-  const WEEK = []
-  const SUCCESS = []
-  const TTFT_7D = []
-  for (const w of metrics?.weekly || []) {
-    const d = new Date(w.start * 1000)
-    WEEK.push(d.toLocaleDateString("en-US", { month: "short", day: "numeric" }))
-    SUCCESS.push(w.req > 0 ? (((w.req - w.err) / w.req) * 100).toFixed(1) + "%" : "—")
-    TTFT_7D.push([w.ttft_p50_ms || 0, w.ttft_p95_ms || 0])
-  }
-  return { WEEK, SUCCESS, TTFT_7D }
 }
 
 // ----- provider drawer table ----------------------------------------------------------

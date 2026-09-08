@@ -16,7 +16,6 @@ import {
   getLogFilters,
   getMetrics,
   getRecentFailures,
-  getRequests,
   getState,
   getStatus,
   loadLogsPage,
@@ -24,7 +23,6 @@ import {
   reloadConfig,
   removeLeg,
   setLogFilter,
-  startPolling,
   subscribe,
   toggleKey,
   toggleLeg,
@@ -265,10 +263,13 @@ function renderTopModels() {
     .join("");
 }
 
+let recentFailureRows = [];
+
 function renderRecentFailures() {
   const ul = $("#recent-failures");
   if (!ul) return;
   const rows = adaptLogs(getRecentFailures());
+  recentFailureRows = rows;
   if (!rows.length) {
     ul.innerHTML = `<li class="px-5 py-6 text-center text-xs text-muted-foreground">No failures in the retained window.</li>`;
     return;
@@ -289,8 +290,7 @@ function renderRecentFailures() {
 
 // ----- request trace drawer -------------------------------------------------------
 
-export function openTraceBySeq(seq) {
-  const e = getRequests().find((x) => x.seq === seq);
+export function openTrace(e) {
   if (!e) return;
   const r = adaptLogs([e])[0];
   const d = new Date(e.time);
@@ -399,8 +399,8 @@ function refreshAll() {
 export function buildDD(id, options, selected, onPick) {
   const root = $("#" + id);
   root.innerHTML = `
-    <button type="button" class="dd-btn"><span class="dd-label">${selected}</span><i data-lucide="chevron-down"></i></button>
-    <div class="dd-menu">${options.map((o) => `<button type="button" class="dd-item${o === selected ? " active" : ""}">${o}</button>`).join("")}</div>`;
+    <button type="button" class="dd-btn"><span class="dd-label">${esc(selected)}</span><i data-lucide="chevron-down"></i></button>
+    <div class="dd-menu">${options.map((o) => `<button type="button" class="dd-item${o === selected ? " active" : ""}">${esc(o)}</button>`).join("")}</div>`;
   root.querySelector(".dd-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     const wasOpen = root.classList.contains("open");
@@ -500,7 +500,10 @@ function buildAnalytics(name) {
         ${cell("Success", s.req > 0 ? s.success_pct + "%" : "—")}
         ${cell("TTFT p50", s.ttft_p50_ms ? fmtDur(s.ttft_p50_ms) : "—")}
         ${cell("TTFT p95", s.ttft_p95_ms ? fmtDur(s.ttft_p95_ms) : "—")}
-        ${cell("Tok/s", s.tok_per_sec || "—")}
+        ${cell(
+          "Tok/s",
+          s.tok_per_sec ? fmtInt(Math.round(s.tok_per_sec)) : "—",
+        )}
       </dl>
     </div>`;
 }
@@ -661,6 +664,8 @@ const levelBadge = {
   error: "tone-error",
 };
 
+const csvQuote = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+
 function logFilterFromState() {
   const f = getLogFilters();
   return {
@@ -766,9 +771,14 @@ function buildLogDropdowns() {
   ddSig = sig;
 
   const f = logFilterFromState();
-  if (!providers.some((p) => p.name === f.provider))
+  if (!providers.some((p) => p.name === f.provider)) {
     f.provider = "All providers";
-  if (!models.some((m) => m.name === f.model)) f.model = "All models";
+    if (getLogFilters().provider) setLogFilter({ provider: "" });
+  }
+  if (!models.some((m) => m.name === f.model)) {
+    f.model = "All models";
+    if (getLogFilters().model) setLogFilter({ model: "" });
+  }
 
   buildDD(
     "dd-provider",
@@ -797,7 +807,6 @@ function buildLogDropdowns() {
 let wired = false;
 
 export function initDynamic() {
-  startPolling();
   refreshAll();
 
   if (wired) return;
@@ -826,7 +835,11 @@ export function initDynamic() {
   });
   $("#recent-failures")?.addEventListener("click", (e) => {
     const row = e.target.closest("[data-open-trace]");
-    if (row) openTraceBySeq(Number(row.dataset.seq));
+    if (!row) return;
+    const ev = recentFailureRows.find(
+      (r) => r.entry.seq === Number(row.dataset.seq),
+    );
+    if (ev) openTrace(ev.entry);
   });
 
   // provider cards: click opens drawer, switch toggles state
@@ -929,38 +942,50 @@ export function initDynamic() {
 
   // export the filtered set as CSV — pulled from the server in bulk
   $("#log-export").addEventListener("click", async () => {
-    const header = "time,level,message,provider,model,key,ttft,tok_s,status";
-    const f = getLogFilters();
-    const res = await api.requestsPage({
-      page: 1,
-      perPage: 2000,
-      provider: f.provider,
-      model: f.model,
-      level: f.level,
-      q: f.q,
-      hours: f.hours,
-    });
-    const lines = adaptLogs(res.entries || []).map((r) =>
-      [
-        r.time,
-        r.level,
-        `"${r.msg.replaceAll('"', '""')}"`,
-        r.provider,
-        r.model,
-        r.key,
-        r.ttft,
-        r.tps ?? "",
-        r.status ?? "",
-      ].join(","),
-    );
-    const blob = new Blob([header + "\n" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "routerllm-requests.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const btn = $("#log-export");
+    btn.disabled = true;
+    try {
+      const header = "time,level,message,provider,model,key,ttft,tok_s,status";
+      const f = getLogFilters();
+      const res = await api.requestsPage({
+        page: 1,
+        perPage: 2000,
+        provider: f.provider,
+        model: f.model,
+        level: f.level,
+        q: f.q,
+        hours: f.hours,
+      });
+      const lines = adaptLogs(res.entries || []).map((r) =>
+        [
+          r.time,
+          r.level,
+          r.msg,
+          r.provider,
+          r.model,
+          r.key,
+          r.ttft,
+          r.tps ?? "",
+          r.status ?? "",
+        ]
+          .map(csvQuote)
+          .join(","),
+      );
+      const blob = new Blob([header + "\n" + lines.join("\n")], {
+        type: "text/csv;charset=utf-8",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "routerllm-requests.csv";
+      a.click();
+      URL.revokeObjectURL(a.href);
+
+      btn.disabled = false;
+    } catch {
+      setTimeout(() => {
+        btn.disabled = false;
+      }, 1500);
+    }
   });
 
   // re-render on any committed state change

@@ -26,6 +26,10 @@ let logPageCache = new Map() // page number → entries[]
 let logFilters = { provider: "", model: "", level: "", q: "", hours: 24, paused: false }
 let recentFailures = []
 
+// Bumped on every filter change; in-flight page fetches compare their captured
+// generation against it and discard results that no longer match the filters.
+let logGen = 0
+
 const listeners = new Set()
 
 export function getStatus() {
@@ -68,15 +72,18 @@ function filterParams() {
 }
 
 async function fetchPage(pageNo) {
+  const gen = logGen
   const p = filterParams()
   p.page = pageNo
   const res = await api.requestsPage(p)
+  if (gen !== logGen) return
   logPageCache.set(pageNo, { pageNo, entries: res.entries || [] })
   return res
 }
 
 /** Change one filter (or jump pages) and reload page 1 / the given page. */
 export async function setLogFilter(patch, page = 1) {
+  logGen++
   logFilters = { ...logFilters, ...patch }
   logPageCache = new Map()
   logMeta = { ...logMeta, page, total: 0, total_pages: 1 }
@@ -84,7 +91,9 @@ export async function setLogFilter(patch, page = 1) {
 }
 
 export async function loadLogsPage(pageNo, { prefetch = true } = {}) {
+  const gen = logGen
   const res = await fetchPage(pageNo)
+  if (gen !== logGen || !res) return
   logMeta = { ...logMeta, ...res }
   notify()
   if (prefetch) {

@@ -86,7 +86,6 @@ export const api = {
   login,
   status: () => call("/status"),
   metrics: () => call("/metrics"),
-  requests: (since = 0) => call("/requests?since=" + since),
   /** Page mode: {page, perPage, provider, model, level, q, hours} → {entries, page, per_page, total, total_pages, error_total, latest} */
   requestsPage: (p = {}) => {
     const qs = new URLSearchParams()
@@ -100,7 +99,6 @@ export const api = {
     const s = qs.toString()
     return call("/requests" + (s ? "?" + s : ""))
   },
-  logs: (since = 0) => call("/logs?since=" + since),
   reload: () => post("/reload"),
   setProviderDisabled: (name, disabled) => post("/providers/" + encodeURIComponent(name), { disabled }),
   setKeyDisabled: (name, index, disabled) => post(`/providers/${encodeURIComponent(name)}/keys/${index}`, { disabled }),

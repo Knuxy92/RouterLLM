@@ -1,6 +1,6 @@
 import { STATUS_META, adaptLogs, esc, fmtDur } from "./data.js"
 import { getRequests, getState } from "./state.js"
-import { $, openProvider } from "./render.js"
+import { $, openProvider, openTrace } from "./render.js"
 
 // Global ⌘K palette: pages, models, providers and log lines — usable from any page.
 
@@ -53,7 +53,7 @@ function collect(q) {
     adaptLogs(getRequests()).filter((r) => hit(r.msg, r.provider, r.model, r.key, String(r.status ?? "")))
       .slice(0, 6)
       .forEach((r) =>
-        out.push({ group: "Logs", icon: "file-text", title: r.msg, sub: `${r.time} · ${r.provider} · ${r.model}`, meta: r.status ?? "—", go: () => go("logs") })
+        out.push({ group: "Logs", icon: "file-text", title: r.msg, sub: `${r.time} · ${r.provider} · ${r.model}`, meta: r.status ?? "—", go: () => openTrace(r.entry) })
       )
   }
 
