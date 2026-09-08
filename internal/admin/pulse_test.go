@@ -83,6 +83,7 @@ func TestPulseTracksTelemetrySeq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	t.Cleanup(func() { store.Close() })
 	deps.Telemetry = store
 
 	srv := adminServer(t, deps)
