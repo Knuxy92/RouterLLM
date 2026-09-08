@@ -275,42 +275,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		pv := route.Provider
 		routeBody := cloneBody(body)
 
-		var reqBody []byte
-		var reqPath string
-		var sessionID string
-		var err error
-
-		switch {
-		case pv.Style == "anthropic":
-			applyCanonicalDefaults(routeBody, route.Defaults)
-			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
-		case pv.Style == "google":
-			applyCanonicalDefaults(routeBody, route.Defaults)
-			reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
-		case pv.Style == "cline":
-			applyCanonicalDefaults(routeBody, route.Defaults)
-			delete(routeBody, "thinking_budget")
-			delete(routeBody, "reasoning_exclude")
-			routeBody["model"] = route.ModelName
-			sessionID = cline.PrepareBody(routeBody)
-			p.injectStreamUsage(routeBody, path)
-			reqBody, err = json.Marshal(routeBody)
-			reqPath = path
-		default:
-			routeBody["model"] = route.ModelName
-			if pv.ReasoningStyle == "raw" || path != "/v1/chat/completions" {
-				applyLegacyDefaults(routeBody, route.Defaults)
-			} else {
-				if notice := canonicalizeReasoning(routeBody, route.Defaults); notice != "" {
-					p.log.Printf("route %s/%s: %s — ignored", route.ModelName, pv.Name, notice)
-				}
-				applyReasoningDialect(routeBody, pv.ReasoningStyle)
-			}
-			p.injectStreamUsage(routeBody, path)
-			reqBody, err = json.Marshal(routeBody)
-			reqPath = path
-		}
-
+		reqBody, reqPath, sessionID, err := p.translateRoute(pv, route, path, routeBody)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
 			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: 0, Note: "encode error"})
@@ -385,6 +350,45 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		return lastResp, lastRoute, lastErr
 	}
 	return nil, nil, lastErr
+}
+
+// translateRoute builds the outbound body and request path for one route leg:
+// it folds the route defaults and the provider's reasoning dialect into
+// routeBody (mutated in place) and translates it into the provider's wire
+// dialect. Shared by ForwardRaw and the admin test runner.
+func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, err error) {
+	switch {
+	case pv.Style == "anthropic":
+		applyCanonicalDefaults(routeBody, route.Defaults)
+		reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
+	case pv.Style == "google":
+		applyCanonicalDefaults(routeBody, route.Defaults)
+		reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
+	case pv.Style == "cline":
+		applyCanonicalDefaults(routeBody, route.Defaults)
+		delete(routeBody, "thinking_budget")
+		delete(routeBody, "reasoning_exclude")
+		routeBody["model"] = route.ModelName
+		sessionID = cline.PrepareBody(routeBody)
+		p.injectStreamUsage(routeBody, path)
+		reqBody, err = json.Marshal(routeBody)
+		reqPath = path
+	default:
+		routeBody["model"] = route.ModelName
+		if pv.ReasoningStyle == "raw" || path != "/v1/chat/completions" {
+			applyLegacyDefaults(routeBody, route.Defaults)
+		} else {
+			if notice := canonicalizeReasoning(routeBody, route.Defaults); notice != "" {
+				p.log.Printf("route %s/%s: %s — ignored", route.ModelName, pv.Name, notice)
+			}
+			applyReasoningDialect(routeBody, pv.ReasoningStyle)
+		}
+		p.injectStreamUsage(routeBody, path)
+		reqBody, err = json.Marshal(routeBody)
+		reqPath = path
+	}
+
+	return reqBody, reqPath, sessionID, err
 }
 
 // servedKey extracts the credential actually used from the completed request
