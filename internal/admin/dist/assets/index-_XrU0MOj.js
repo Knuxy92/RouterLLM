@@ -136,7 +136,7 @@
           </div>`;else{let e=c.status===200&&!c.error,n=c.duration_ms>0?Math.round(c.tokens/(c.duration_ms/1e3)):`—`,r=(e,t)=>`<div class="rounded-md border bg-muted/30 px-2 py-1.5"><p class="text-[10px] uppercase tracking-wide text-muted-foreground">${e}</p><p class="mt-0.5 truncate font-mono text-xs font-medium">${t}</p></div>`;s.innerHTML=`
           <div class="grid grid-cols-3 gap-2 text-xs">
             ${r(`Status`,`<span class="badge ${e?`tone-ok`:`tone-error`}">${c.status??`—`}</span>`)}
-            ${r(`TTFT`,y(c.ttft_ms))}
+            ${r(`TTFT`,c.ttft_ms>0?y(c.ttft_ms):c.ttft_ms===0?`0 ms`:`—`)}
             ${r(`Duration`,y(c.duration_ms))}
             ${r(`Tok/s`,n===`—`?`—`:b(n))}
             ${r(`Tokens`,b(c.tokens))}

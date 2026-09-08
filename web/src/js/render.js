@@ -690,7 +690,7 @@ export function openProvider(name, onOpened) {
         result.innerHTML = `
           <div class="grid grid-cols-3 gap-2 text-xs">
             ${chip("Status", `<span class="badge ${ok ? "tone-ok" : "tone-error"}">${res.status ?? "—"}</span>`)}
-            ${chip("TTFT", fmtDur(res.ttft_ms))}
+            ${chip("TTFT", res.ttft_ms > 0 ? fmtDur(res.ttft_ms) : res.ttft_ms === 0 ? "0 ms" : "—")}
             ${chip("Duration", fmtDur(res.duration_ms))}
             ${chip("Tok/s", tps === "—" ? "—" : fmtInt(tps))}
             ${chip("Tokens", fmtInt(res.tokens))}
