@@ -195,7 +195,7 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		"providers": providers,
 		"legs":      legs,
 		"models":    models,
-		"hourly":    m.Windows("g", 2*time.Hour, 12),
+		"hourly":    m.Windows("g", time.Hour, 24),
 		"weekly":    m.Windows("g", 24*time.Hour, 7),
 	})
 }

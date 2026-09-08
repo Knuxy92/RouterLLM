@@ -205,7 +205,7 @@ export function adaptLogs(entries) {
 // ----- charts ----------------------------------------------------------------------
 
 // One chart point from a metrics Window. `range` picks the window series:
-// "24h" → hourly (2h buckets), "7d" → weekly (24h buckets).
+// "24h" → hourly (1h buckets), "7d" → weekly (midnight-anchored 24h buckets).
 export function adaptTraffic(metrics, range = "24h") {
   const windows = range === "7d" ? metrics?.weekly : metrics?.hourly
   return (windows || []).map((w) => {

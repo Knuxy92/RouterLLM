@@ -10,10 +10,25 @@ services:
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:rw
       - ./system_prompt.txt:/app/system_prompt.txt:ro
+      # Request-event telemetry survives container rebuilds only if the whole
+      # /app/data directory is mounted (the store rotates by rename, so a
+      # single-file bind mount would break rotation). A named volume is used
+      # because Docker initializes it with the image's /app/data ownership
+      # (UID 65532) — a host bind mount would be root- or user-owned and the
+      # non-root container could not write it. Survives `up --build` and
+      # container recreation; removed only by `docker compose down -v`.
+      - routerllm-data:/app/data
       # Cline providers only: mount cline-accounts.json AFTER running
       # `routerllm --cline-login` on the host (the file must exist first —
       # a missing host path is auto-created as a directory by Docker).
       - ./cline-accounts.json:/app/cline-accounts.json:ro
+    environment:
+      # Keep the request-event jsonl on the persistent volume, not beside the
+      # config (a single-file bind mount is backed by the container layer).
+      ROUTERLLM_TELEMETRY_FILE: /app/data/routerllm-telemetry.jsonl
     restart: unless-stopped
     env_file:
       - .env
+
+volumes:
+  routerllm-data:

@@ -112,20 +112,25 @@ func (m *Metrics) series(name string) map[int64]*bucketStats {
 }
 
 // Windows merges the series into exactly count contiguous windows of the
-// given width, ending at the current one (oldest first). Windows are anchored
-// to clock boundaries (top of the hour for hour-multiple widths) so labels
-// line up with wall-clock hours, and empty windows come back as zero rows —
-// the caller renders the full span, not just the busy parts.
+// given width, ending at the current one (oldest first). Windows anchor to
+// clock boundaries — clock-hour multiples align to the top of the hour, a
+// 24h window aligns to midnight so day-bucketed labels match real calendar
+// days — and empty windows come back as zero rows so the caller renders the
+// full span, not just the busy parts.
 func (m *Metrics) Windows(name string, width time.Duration, count int) []Window {
 	src := m.series(name)
 
 	now := time.Now()
-	hourStart := now.Truncate(time.Hour)
 	secs := int64(width / time.Second)
+	anchor := now.Truncate(time.Hour).Unix()
+	if width >= 24*time.Hour {
+		y, mo, d := now.Date()
+		anchor = time.Date(y, mo, d, 0, 0, 0, 0, now.Location()).Unix()
+	}
 
 	out := make([]Window, 0, count)
 	for i := count - 1; i >= 0; i-- {
-		start := hourStart.Unix() - int64(i)*secs
+		start := anchor - int64(i)*secs
 		w := Window{Start: start}
 		var samples []int64
 		for bStart, b := range src {

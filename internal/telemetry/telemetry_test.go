@@ -341,3 +341,29 @@ func TestWindowsFullSpanAndHourAlignment(t *testing.T) {
 		t.Fatalf("current window req = %d, want 1", windows[len(windows)-1].Req)
 	}
 }
+
+// Daily windows anchor to local midnight, so a "Sep 8" bucket really is the
+// calendar day — not a 24h slice ending at whatever hour the process started.
+func TestWeeklyWindowsAnchorToMidnight(t *testing.T) {
+	m := NewMetrics()
+
+	now := time.Now()
+	e := testEvent("alpha", "up-a", 200, 100)
+	e.Time = now
+	m.Record(e)
+
+	windows := m.Windows("g", 24*time.Hour, 7)
+
+	if len(windows) != 7 {
+		t.Fatalf("windows = %d, want 7", len(windows))
+	}
+	for _, w := range windows {
+		d := time.Unix(w.Start, 0)
+		if d.Hour() != 0 || d.Minute() != 0 || d.Second() != 0 {
+			t.Fatalf("daily window start %d is not local midnight (%s)", w.Start, d)
+		}
+	}
+	if last := time.Unix(windows[6].Start, 0); last.Format("2006-01-02") != now.Format("2006-01-02") {
+		t.Fatalf("newest daily window = %s, want today %s", last, now.Format("2006-01-02"))
+	}
+}

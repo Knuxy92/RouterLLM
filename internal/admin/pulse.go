@@ -35,7 +35,10 @@ func (d Deps) handlePulse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reload := d.Reloads.Last()
-	bucket := time.Now().Unix() / 300
+
+	// A 1-minute clock tick keeps time-anchored windows (the current hour on
+	// the chart) moving without any traffic flowing.
+	bucket := time.Now().Unix() / 60
 
 	writeJSON(w, http.StatusOK, Pulse{
 		Seq:        seq,

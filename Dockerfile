@@ -20,6 +20,10 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /out/routerllm .
+# The non-root runtime user needs to create runtime artifacts beside the
+# config (telemetry jsonl, config .bak, atomic temp file), and /app/data is
+# the default mount point for persisted telemetry.
+RUN chown 65532:65532 /app && mkdir /app/data && chown 65532:65532 /app/data
 EXPOSE 1765
 USER 65532:65532
 
