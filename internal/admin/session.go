@@ -126,6 +126,13 @@ func (s *SessionStore) Valid(session string) bool {
 	return ok && time.Now().Before(expiry)
 }
 
+// Logout removes a session id immediately; deleting an unknown id is a no-op.
+func (s *SessionStore) Logout(session string) {
+	s.mu.Lock()
+	delete(s.sessions, session)
+	s.mu.Unlock()
+}
+
 // sweepLocked drops expired challenges and sessions. Called on every access so
 // the maps never grow without bound even if challenges are issued and abandoned.
 func (s *SessionStore) sweepLocked() {

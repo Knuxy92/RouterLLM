@@ -280,6 +280,29 @@ func TestExpiredSessionIsRejected(t *testing.T) {
 	}
 }
 
+func TestLogoutInvalidatesSession(t *testing.T) {
+	t.Setenv("ROUTERLLM_ADMIN_TOKEN", "secret")
+	deps, _ := testDeps(t, seedConfig(t))
+	srv := adminServer(t, deps)
+	session := login(t, srv, "secret")
+	if !deps.Sessions.Valid(session) {
+		t.Fatal("fresh session should be valid")
+	}
+
+	w := request(t, srv, http.MethodPost, "/admin/api/auth/logout", session, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("logout status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if deps.Sessions.Valid(session) {
+		t.Fatal("session should be invalid after logout")
+	}
+	if w := request(t, srv, http.MethodGet, "/admin/api/status", session, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 after logout", w.Code)
+	}
+
+	deps.Sessions.Logout("no-such-session")
+}
+
 func TestSessionStoreCapsAtMaxSessions(t *testing.T) {
 	store := NewSessionStore(func() string { return "secret" })
 	for i := 0; i < maxSessions; i++ {

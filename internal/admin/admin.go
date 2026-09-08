@@ -39,6 +39,7 @@ func Mount(r chi.Router, deps Deps) {
 		api.Group(func(authed chi.Router) {
 			authed.Use(deps.requireSession())
 
+			authed.Post("/auth/logout", deps.handleAuthLogout)
 			authed.Get("/status", deps.handleStatus)
 			authed.Get("/logs", deps.handleLogs)
 			authed.Get("/requests", deps.handleRequests)
@@ -104,6 +105,13 @@ func (d Deps) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"session": session, "expires_in": expiresIn})
+}
+
+func (d Deps) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	session := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	d.Sessions.Logout(session)
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
