@@ -1,22 +1,31 @@
 import { api } from "./api.js"
-import { adaptModels, adaptProviders } from "./data.js"
+import { adaptLogs, adaptModels, adaptProviders } from "./data.js"
 
-// Server-backed state: /status, /metrics and /requests are polled every 3s and
-// every mutation goes through the admin API. Toggles are optimistic — the local
-// copy is mutated immediately, then replaced by the API's fresh Status; on
-// failure the state is rolled back by re-fetching /status.
+// Server-backed state. The poll loop hits /pulse (a ~100-byte change-signature
+// heartbeat) every 3s and re-fetches /status, /metrics or the request log only
+// when its signature or cursor moved; new requests arrive as ?since= deltas
+// into a client-side ring. /status's uptime is extrapolated client-side so a
+// frozen payload still ticks. Toggles are optimistic — the local copy mutates
+// immediately, then is replaced by the API's fresh Status; on failure the
+// state rolls back by re-fetching /status.
 
 const POLL_MS = 3000
+const RING_CAP = 2000
 
 let lastStatus = null
 let lastMetrics = null
+let lastStatusAt = 0
+let statusSig = ""
+let metricsSig = ""
+let cursor = 0
+let ring = []
 let timer = null
 let polling = false
 
 // ----- request-log paging ---------------------------------------------------------
-// Only the rendered page (plus ±2 prefetched neighbours) lives in memory; the
-// server filters and slices. New events shift pages, so the current page is
-// re-fetched every poll tick while the other caches age until revisited.
+// Filtered page views are server-sliced as before (page nav, filters, export).
+// Live updates flow through the delta ring: page 1 is re-fetched only when new
+// events actually arrived, and pages >1 stay put while you browse them.
 
 export const LOG_PER_PAGE = 20
 
@@ -39,15 +48,6 @@ export function getMetrics() {
   return lastMetrics
 }
 
-/** Concatenated cached pages — enough for the trace drawer and cmd+k lookups. */
-export function getRequests() {
-  const all = []
-  for (const entries of [...logPageCache.values()].sort((a, b) => b.pageNo - a.pageNo)) {
-    all.push(...entries.entries)
-  }
-  return all
-}
-
 export function getLogsPage() {
   return { entries: (logPageCache.get(logMeta.page)?.entries) || [], meta: logMeta }
 }
@@ -58,6 +58,18 @@ export function getLogFilters() {
 
 export function getRecentFailures() {
   return recentFailures
+}
+
+/** Newest-first delta-ring view (capped at RING_CAP) for cmd+k and traces. */
+export function getRequests() {
+  return ring
+}
+
+export function getUptimeSeconds() {
+  const base = lastStatus?.uptime_seconds
+  if (base == null) return null
+
+  return base + Math.max(0, Math.round((Date.now() - lastStatusAt) / 1000))
 }
 
 function filterParams() {
@@ -105,9 +117,15 @@ export async function loadLogsPage(pageNo, { prefetch = true } = {}) {
   }
 }
 
-async function refreshRecentFailures() {
-  const res = await api.requestsPage({ page: 1, perPage: 5, level: "warn,error", hours: logFilters.hours || undefined })
-  recentFailures = res.entries || []
+function appendEvents(ring, fresh) {
+  const next = ring.concat(fresh)
+
+  return next.length > RING_CAP ? next.slice(next.length - RING_CAP) : next
+}
+
+function deriveRecentFailures() {
+  const rows = adaptLogs(ring).filter((r) => r.level !== "info")
+  recentFailures = rows.slice(0, 5).map((r) => r.entry)
 }
 
 export function getState() {
@@ -131,15 +149,60 @@ async function pollOnce() {
   polling = true
 
   try {
-    const [status, metrics] = await Promise.all([api.status(), api.metrics()])
-    lastStatus = status
-    lastMetrics = metrics
+    const pulse = await api.pulse()
 
-    const jobs = [refreshRecentFailures()]
-    if (!logFilters.paused) jobs.push(loadLogsPage(logMeta.page, { prefetch: false }))
+    if (pulse.seq < cursor) {
+      // the store reset (restart with a replay that lost events) — resync
+      // everything from scratch on this tick
+      ring = []
+      recentFailures = []
+      cursor = 0
+      statusSig = ""
+      metricsSig = ""
+      lastStatus = null
+      lastMetrics = null
+    }
+
+    const jobs = []
+    let dirty = false
+    let newCount = 0
+
+    if (!lastStatus || pulse.status_sig !== statusSig) {
+      jobs.push(api.status().then((s) => {
+        lastStatus = s
+        lastStatusAt = Date.now()
+        statusSig = pulse.status_sig
+        dirty = true
+      }))
+    }
+    if (!lastMetrics || pulse.metrics_sig !== metricsSig) {
+      jobs.push(api.metrics().then((m) => {
+        lastMetrics = m
+        metricsSig = pulse.metrics_sig
+        dirty = true
+      }))
+    }
+    jobs.push(api.requestsSince(cursor).then((res) => {
+      const fresh = res.entries || []
+      cursor = res.latest ?? pulse.seq
+      if (fresh.length) {
+        ring = appendEvents(ring, fresh)
+        newCount = fresh.length
+      }
+    }))
+
     await Promise.all(jobs)
 
-    notify()
+    if (newCount > 0) {
+      dirty = true
+      deriveRecentFailures()
+      if (!logFilters.paused && logMeta.page === 1 && logPageCache.has(1))
+        await loadLogsPage(1, { prefetch: false })
+    }
+    if (!logFilters.paused && !logPageCache.has(logMeta.page))
+      await loadLogsPage(logMeta.page, { prefetch: false })
+
+    if (dirty) notify()
   } catch {
     // 401 is handled globally by api.js (unauthorized event); transient
     // network/5xx failures just wait for the next tick with the old state.
@@ -171,9 +234,11 @@ async function mutate(optimistic, request) {
 
   try {
     lastStatus = await request()
+    lastStatusAt = Date.now()
   } catch {
     try {
       lastStatus = await api.status()
+      lastStatusAt = Date.now()
     } catch {
       // keep the optimistic state if even the rollback fetch fails; the next
       // poll tick will resync anyway
@@ -279,9 +344,11 @@ export function toggleKey(providerName, index, on) {
 export async function reloadConfig() {
   try {
     lastStatus = await api.reload()
+    lastStatusAt = Date.now()
   } catch {
     try {
       lastStatus = await api.status()
+      lastStatusAt = Date.now()
     } catch {
       // next poll tick resyncs
     }

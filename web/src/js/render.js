@@ -18,6 +18,7 @@ import {
   getRecentFailures,
   getState,
   getStatus,
+  getUptimeSeconds,
   loadLogsPage,
   moveLeg,
   reloadConfig,
@@ -174,7 +175,7 @@ function renderSidebarStatus() {
   health.textContent = ok ? "healthy" : "reload failed";
   health.className = ok ? "text-foreground" : "text-destructive";
   if (dot) dot.className = "dot " + (ok ? "dot-live" : "dot-warn");
-  if (uptime) uptime.textContent = fmtUptime(status.uptime_seconds);
+  if (uptime) uptime.textContent = fmtUptime(getUptimeSeconds());
   const cfg = $("#sidebar-config");
   if (cfg && status.config_path)
     cfg.textContent = status.config_path.split(/[\\/]/).pop();
@@ -811,6 +812,12 @@ export function initDynamic() {
 
   if (wired) return;
   wired = true;
+
+  // The sidebar uptime ticks locally: a pulse-only poll changes no state, so
+  // the label needs its own clock.
+  setInterval(() => {
+    if (getUptimeSeconds() != null) renderSidebarStatus();
+  }, 10_000);
 
   buildDD(
     "dd-range",
