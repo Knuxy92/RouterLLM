@@ -138,6 +138,17 @@ providers:
   #   style: cline
   #   base_url: https://api.cline.bot/api
 
+  # --- Alysis free models ---
+  # Commented out on purpose: an ENABLED alysis provider refuses to start until
+  # `routerllm --alysis-login` has created alysis-accounts.json next to the
+  # executable (override with ALYSIS_ACCOUNTS_FILE). Uncomment BOTH this block
+  # and the alysis route below after logging in. No api_key is needed — keys
+  # come from the accounts file — and the gateway is plain OpenAI passthrough.
+  #
+  # - name: alysis
+  #   style: alysis
+  #   base_url: https://vzigujbcjjmpntxhmyvr.supabase.co/functions/v1/llm/v1
+
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these
 # headers to match the expected client environment:
@@ -248,6 +259,13 @@ routes:
   #   routes:
   #     - provider: cline
   #       model: cline-free/glm-5.2
+
+  # Alysis free model (daily allowance) — uncomment together with the alysis
+  # provider above (requires `routerllm --alysis-login` first).
+  # - model_id: deepseek-v4-flash
+  #   routes:
+  #     - provider: alysis
+  #       model: deepseek-v4-flash
 
   # Disabled fallback entry: skipped, the remaining entries still serve the
   # model. If every entry for a model_id is disabled the model disappears from

@@ -175,6 +175,104 @@ routes:
 	}
 }
 
+func TestLoadYAMAlysisProviderReadsAccountsFile(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "alysis-accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"accounts":[{"accountId":"acc_1","gatewayKey":"slk_test1234","createdAt":"2026-01-01T00:00:00Z"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ALYSIS_ACCOUNTS_FILE", accounts)
+
+	path := writeTempYAML(t, `
+providers:
+  - name: alysis
+    style: alysis
+    base_url: https://gateway.alysis.test/v1
+routes:
+  - model_id: alysis-model
+    routes:
+      - provider: alysis
+        model: alysis-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 1 || cfg.Providers[0].Keys[0] != "slk_test1234" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMAlysisProviderWithoutAccountsFails(t *testing.T) {
+	t.Setenv("ALYSIS_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: alysis
+    style: alysis
+    base_url: https://gateway.alysis.test/v1
+routes:
+  - model_id: alysis-model
+    routes:
+      - provider: alysis
+        model: alysis-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "no alysis accounts found") {
+		t.Fatalf("error = %v, want 'no alysis accounts found'", err)
+	}
+}
+
+func TestLoadYAMAlysisProviderAPIKeyWins(t *testing.T) {
+	t.Setenv("ALYSIS_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: alysis
+    style: alysis
+    base_url: https://gateway.alysis.test/v1
+    api_key: slk_explicit
+routes:
+  - model_id: alysis-model
+    routes:
+      - provider: alysis
+        model: alysis-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 1 || cfg.Providers[0].Keys[0] != "slk_explicit" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLDisabledAlysisProviderWithoutAPIKey(t *testing.T) {
+	t.Setenv("ALYSIS_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: alysis
+    style: alysis
+    base_url: https://gateway.alysis.test/v1
+    disabled: true
+routes:
+  - model_id: alysis-model
+    routes:
+      - provider: alysis
+        model: alysis-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || !cfg.Providers[0].Disabled || len(cfg.Providers[0].Keys) != 0 {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
 func TestLoadYAMLAutoModelKeyIsIgnored(t *testing.T) {
 	path := writeTempYAML(t, `
 auto_model:

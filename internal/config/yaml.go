@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"routerllm/internal/alysis"
 	"routerllm/internal/cline"
 	"routerllm/internal/model"
 
@@ -113,11 +114,11 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		}
 
 		switch yp.Style {
-		case "openai", "anthropic", "cline", "google":
+		case "openai", "anthropic", "cline", "google", "alysis":
 		case "":
-			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, cline, or google)", yp.Name)
+			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, or alysis)", yp.Name)
 		default:
-			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, or google)", yp.Name, yp.Style)
+			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, or alysis)", yp.Name, yp.Style)
 		}
 
 		switch yp.AuthMode {
@@ -136,7 +137,7 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 			return nil, fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
 		}
 
-		if len(yp.APIKey) == 0 && yp.Style != "cline" && !yp.Disabled {
+		if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && !yp.Disabled {
 			return nil, fmt.Errorf("provider %q: api_key is required", yp.Name)
 		}
 
@@ -157,6 +158,17 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 			keys = store.RefreshTokens()
 			if len(keys) == 0 {
 				return nil, fmt.Errorf("provider %q: no cline accounts found in %s — run `routerllm --cline-login`", yp.Name, store.Path())
+			}
+		}
+
+		if yp.Style == "alysis" && len(keys) == 0 && !yp.Disabled {
+			store, err := alysis.LoadAccountStore(alysis.DefaultAccountsPath())
+			if err != nil {
+				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
+			}
+			keys = store.GatewayKeys()
+			if len(keys) == 0 {
+				return nil, fmt.Errorf("provider %q: no alysis accounts found in %s — run `routerllm --alysis-login`", yp.Name, store.Path())
 			}
 		}
 

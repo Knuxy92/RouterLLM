@@ -34,6 +34,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "--alysis-login" {
+		if err := runAlysisLogin(); err != nil {
+			log.Fatalf("alysis login failed: %v", err)
+		}
+		return
+	}
+
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
 	logBuffer := admin.NewLogBuffer()
