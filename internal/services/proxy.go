@@ -26,6 +26,13 @@ import (
 
 const maxRetries = 3
 
+// The alysis gateway enforces OpenAI's 128-tool cap and rejects larger
+// requests with a generic invalid-request error, so the guard fires before
+// the upstream call and the client gets an actionable 400 instead.
+const maxUpstreamTools = 128
+
+var errTooManyTools = errors.New("too many tools")
+
 var deadStatuses = map[int]bool{
 	401: true, 402: true, 403: true,
 }
@@ -277,7 +284,10 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 
 		reqBody, reqPath, sessionID, err := p.translateRoute(pv, route, path, routeBody)
 		if err != nil {
-			lastErr = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
+			if !errors.Is(err, errTooManyTools) {
+				err = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
+			}
+			lastErr = err
 			attempts = append(attempts, telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: 0, Note: "encode error"})
 			continue
 		}
@@ -374,6 +384,11 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		reqBody, err = json.Marshal(routeBody)
 		reqPath = path
 	default:
+		if pv.Style == "alysis" {
+			if tools, ok := routeBody["tools"].([]any); ok && len(tools) > maxUpstreamTools {
+				return nil, "", "", fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
+			}
+		}
 		routeBody["model"] = route.ModelName
 		if pv.ReasoningStyle == "raw" || path != "/v1/chat/completions" {
 			applyLegacyDefaults(routeBody, route.Defaults)
@@ -470,6 +485,9 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusNotFound, err.Error(), 0, ""))
 		} else if strings.Contains(err.Error(), "request cancelled") {
 			return
+		} else if errors.Is(err, errTooManyTools) {
+			util.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadRequest, err.Error(), 0, ""))
 		} else {
 			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, trace.LastBody()))
