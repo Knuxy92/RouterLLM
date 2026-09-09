@@ -114,7 +114,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 	}
 
 	key := maskKey(servedKey(resp, pv))
-	resp.Body = telemetry.Watch(resp.Body)
+	resp.Body = telemetry.WatchAnchored(resp.Body, start)
 	content, err := bufferedTestContent(resp.Body, pv.Style, req.Model)
 	if err != nil {
 		result.Status = http.StatusOK

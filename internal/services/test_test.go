@@ -45,6 +45,10 @@ func newTestRunnerProxy(t *testing.T, style string, upstreamHandler http.Handler
 func TestRunTestOpenAIStream(t *testing.T) {
 	p, store := newTestRunnerProxy(t, "openai", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
+		// Hold the first chunk back so it is not already sitting in the
+		// transport buffer when the response returns — TTFT must reflect the
+		// wait, not collapse to ~0.
+		time.Sleep(250 * time.Millisecond)
 		io.WriteString(w, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"po\"}}]}\n\n")
 		io.WriteString(w, "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ng\"}}]}\n\n")
 		io.WriteString(w, "data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":7,\"total_tokens\":8}}\n\n")
@@ -68,8 +72,8 @@ func TestRunTestOpenAIStream(t *testing.T) {
 	if res.Tokens <= 0 {
 		t.Fatalf("tokens = %d, want > 0", res.Tokens)
 	}
-	if res.TTFTMS < 0 {
-		t.Fatalf("ttft_ms = %d, want >= 0", res.TTFTMS)
+	if res.TTFTMS < 200 || res.TTFTMS > 5000 {
+		t.Fatalf("ttft_ms = %d, want ~250 (measured from request start)", res.TTFTMS)
 	}
 
 	events := store.Since(0)

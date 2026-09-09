@@ -40,6 +40,14 @@ func Watch(src io.ReadCloser) *Watcher {
 	return &Watcher{src: src, started: time.Now()}
 }
 
+// Watch anchors timing to a caller-supplied instant instead of now. The
+// response headers have usually already arrived by the time the watcher wraps
+// the body, so Watch-then-read measures nearly zero; anchoring to the request
+// start makes TTFTMS the real time-to-first-byte.
+func WatchAnchored(src io.ReadCloser, started time.Time) *Watcher {
+	return &Watcher{src: src, started: started}
+}
+
 func (w *Watcher) Read(p []byte) (int, error) {
 	n, err := w.src.Read(p)
 
