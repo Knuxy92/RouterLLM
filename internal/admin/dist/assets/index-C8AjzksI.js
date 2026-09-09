@@ -113,23 +113,28 @@
         </div>`).join(``)}
     </div>
     <p class="mt-1.5 text-[11px] text-muted-foreground">Keys arrive masked from the backend. The manual toggle is runtime-only — a process restart re-enables disabled keys.</p>`,f=i.length===0?``:`
-    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Test model</p>
-    <div class="rounded-md border bg-card p-4">
-      <div class="grid grid-cols-2 gap-2.5 text-xs">
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
-        <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${x(`Say 'pong' and nothing else.`)}</textarea></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+    <div class="mt-4 flex items-center justify-between border-t pt-3">
+      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Test model</p>
+      <button id="pd-test-open-btn" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="flask-conical" class="size-3"></i>Open test</button>
+    </div>
+    <div id="pd-test-panel" class="mt-3 hidden">
+      <div class="rounded-md border bg-card p-4">
+        <div class="grid grid-cols-2 gap-2.5 text-xs">
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
+          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${x(`Say 'pong' and nothing else.`)}</textarea></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+        </div>
+        <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
+        <div id="pd-test-result" class="mt-3 hidden"></div>
       </div>
-      <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
-      <div id="pd-test-result" class="mt-3 hidden"></div>
     </div>`;if(J(`#pd-body`).innerHTML=l+`<p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">TTFT by model</p>`+u+d+f+`
     <div class="mt-4 flex items-center justify-between border-t pt-3">
       <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Analytics</p>
       <button id="pd-analytics-btn" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="bar-chart-3" class="size-3"></i>View analytics</button>
     </div>
-    <div id="pd-analytics" class="mt-3 hidden"></div>`,J(`#pd-analytics-btn`).addEventListener(`click`,()=>{let t=J(`#pd-analytics`),n=!t.classList.contains(`hidden`);t.classList.toggle(`hidden`,n),J(`#pd-analytics-btn`).innerHTML=n?`<i data-lucide="bar-chart-3" class="size-3"></i>View analytics`:`<i data-lucide="chevron-up" class="size-3"></i>Hide analytics`,n||(t.innerHTML=ct(e)),window.lucide.createIcons()}),i.length>0){let t=i[0].modelId,n=``;X(`pd-test-model`,i.map(e=>e.modelId),t,e=>{t=e}),X(`pd-test-effort`,[`(none)`,`none`,`low`,`medium`,`high`,`xhigh`,`max`],`(none)`,e=>{n=e===`(none)`?``:e});let r=(e,t,n,r)=>{let i=Number(e);return Number.isFinite(i)?Math.min(n,Math.max(t,Math.round(i))):r};J(`#pd-test-run`).addEventListener(`click`,async i=>{let a=i.currentTarget,o={model:t,prompt:J(`#pd-test-prompt`).value,max_tokens:r(J(`#pd-test-max-tokens`).value,1,8192,256),effort:n,timeout_seconds:r(J(`#pd-test-timeout`).value,5,120,20)},s=J(`#pd-test-result`);a.disabled=!0,a.textContent=`Testing…`;let c=null,l=null;try{c=await _.testProvider(e,o)}catch(e){l=e?.message||String(e)}if(l!==null)s.innerHTML=`
+    <div id="pd-analytics" class="mt-3 hidden"></div>`,J(`#pd-analytics-btn`).addEventListener(`click`,()=>{let t=J(`#pd-analytics`),n=!t.classList.contains(`hidden`);t.classList.toggle(`hidden`,n),J(`#pd-analytics-btn`).innerHTML=n?`<i data-lucide="bar-chart-3" class="size-3"></i>View analytics`:`<i data-lucide="chevron-up" class="size-3"></i>Hide analytics`,n||(t.innerHTML=ct(e)),window.lucide.createIcons()}),i.length>0){J(`#pd-test-open-btn`).addEventListener(`click`,()=>{let e=J(`#pd-test-panel`),t=!e.classList.contains(`hidden`);e.classList.toggle(`hidden`,t),J(`#pd-test-open-btn`).innerHTML=t?`<i data-lucide="flask-conical" class="size-3"></i>Open test`:`<i data-lucide="chevron-up" class="size-3"></i>Close test`,t||e.scrollIntoView({behavior:`smooth`,block:`nearest`}),window.lucide.createIcons()});let t=i[0].modelId,n=``;X(`pd-test-model`,i.map(e=>e.modelId),t,e=>{t=e}),X(`pd-test-effort`,[`(none)`,`none`,`low`,`medium`,`high`,`xhigh`,`max`],`(none)`,e=>{n=e===`(none)`?``:e});let r=(e,t,n,r)=>{let i=Number(e);return Number.isFinite(i)?Math.min(n,Math.max(t,Math.round(i))):r};J(`#pd-test-run`).addEventListener(`click`,async i=>{let a=i.currentTarget,o={model:t,prompt:J(`#pd-test-prompt`).value,max_tokens:r(J(`#pd-test-max-tokens`).value,1,8192,256),effort:n,timeout_seconds:r(J(`#pd-test-timeout`).value,5,120,20)},s=J(`#pd-test-result`);a.disabled=!0,a.textContent=`Testing…`;let c=null,l=null;try{c=await _.testProvider(e,o)}catch(e){l=e?.message||String(e)}if(l!==null)s.innerHTML=`
           <div class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
             <p class="mb-1 font-semibold text-destructive">Test failed</p>
             <p class="leading-relaxed">${x(l)}</p>

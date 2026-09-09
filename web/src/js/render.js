@@ -594,17 +594,22 @@ export function openProvider(name, onOpened) {
     rows.length === 0
       ? ""
       : `
-    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Test model</p>
-    <div class="rounded-md border bg-card p-4">
-      <div class="grid grid-cols-2 gap-2.5 text-xs">
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
-        <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc("Say 'pong' and nothing else.")}</textarea></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
-        <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+    <div class="mt-4 flex items-center justify-between border-t pt-3">
+      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Test model</p>
+      <button id="pd-test-open-btn" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm hover:bg-accent"><i data-lucide="flask-conical" class="size-3"></i>Open test</button>
+    </div>
+    <div id="pd-test-panel" class="mt-3 hidden">
+      <div class="rounded-md border bg-card p-4">
+        <div class="grid grid-cols-2 gap-2.5 text-xs">
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
+          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc("Say 'pong' and nothing else.")}</textarea></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+        </div>
+        <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
+        <div id="pd-test-result" class="mt-3 hidden"></div>
       </div>
-      <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
-      <div id="pd-test-result" class="mt-3 hidden"></div>
     </div>`;
 
   const analyticsBar = `
@@ -634,6 +639,17 @@ export function openProvider(name, onOpened) {
   });
 
   if (rows.length > 0) {
+    $("#pd-test-open-btn").addEventListener("click", () => {
+      const panel = $("#pd-test-panel");
+      const showing = !panel.classList.contains("hidden");
+      panel.classList.toggle("hidden", showing);
+      $("#pd-test-open-btn").innerHTML = showing
+        ? `<i data-lucide="flask-conical" class="size-3"></i>Open test`
+        : `<i data-lucide="chevron-up" class="size-3"></i>Close test`;
+      if (!showing) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      window.lucide.createIcons();
+    });
+
     let testModel = rows[0].modelId;
     let testEffort = "";
     buildDD("pd-test-model", rows.map((r) => r.modelId), testModel, (v) => {
