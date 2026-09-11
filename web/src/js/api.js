@@ -7,16 +7,42 @@ import { hmacProof } from "./hmac.js"
 const SESSION_KEY = "routerllm.admin.session"
 const BASE = "/admin/api"
 
+const memoryStore = new Map()
+
+export function readLocal(key) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return memoryStore.get(key) ?? null
+  }
+}
+
+export function writeLocal(key, value) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    memoryStore.set(key, value)
+  }
+}
+
+export function removeLocal(key) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    memoryStore.delete(key)
+  }
+}
+
 export function getToken() {
-  return localStorage.getItem(SESSION_KEY)
+  return readLocal(SESSION_KEY)
 }
 
 export function setToken(t) {
-  localStorage.setItem(SESSION_KEY, t)
+  writeLocal(SESSION_KEY, t)
 }
 
 export function clearToken() {
-  localStorage.removeItem(SESSION_KEY)
+  removeLocal(SESSION_KEY)
 }
 
 export class ApiError extends Error {
@@ -102,6 +128,7 @@ export const api = {
     const s = qs.toString()
     return call("/requests" + (s ? "?" + s : ""))
   },
+  logout: () => post("/auth/logout"),
   reload: () => post("/reload"),
   setProviderDisabled: (name, disabled) => post("/providers/" + encodeURIComponent(name), { disabled }),
   setKeyDisabled: (name, index, disabled) => post(`/providers/${encodeURIComponent(name)}/keys/${index}`, { disabled }),

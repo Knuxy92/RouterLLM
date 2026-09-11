@@ -1,5 +1,5 @@
 import { addLeg, getLogsPage } from "./state.js"
-import { $, $$, openTrace } from "./render.js"
+import { $, $$, closeDialog, openTrace } from "./render.js"
 
 export function wireUi() {
   $("#menu-btn").addEventListener("click", () => {
@@ -44,16 +44,16 @@ export function wireUi() {
   })
 
   const dialog = $("#leg-dialog")
-  $("#leg-dialog-cancel").addEventListener("click", () => dialog.close())
+  $("#leg-dialog-cancel").addEventListener("click", () => closeDialog(dialog))
   $("#leg-dialog-confirm").addEventListener("click", () => {
     const provider = $("#leg-dialog-provider .dd-label")?.textContent.trim()
     const effort = $("#leg-dialog-effort .dd-label")?.textContent.trim()
     const upstream = $("#leg-dialog-upstream").value.trim()
     if (provider && !provider.startsWith("—")) addLeg(dialog.dataset.model, provider, { upstreamModel: upstream, effort: effort === "(none)" ? null : effort })
-    dialog.close()
+    closeDialog(dialog)
   })
   dialog.addEventListener("click", (e) => {
-    if (e.target === dialog) dialog.close()
+    if (e.target === dialog) closeDialog(dialog)
   })
 
   $$(".tab-btn").forEach((btn) =>

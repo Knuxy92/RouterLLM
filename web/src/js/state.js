@@ -224,6 +224,20 @@ export function stopPolling() {
   timer = null
 }
 
+/** Drop every server-derived value so a signed-out session cannot leak into the next one. */
+export function resetState() {
+  ring = []
+  recentFailures = []
+  logPageCache = new Map()
+  logMeta = { ...logMeta, page: 1, total: 0, total_pages: 1, error_total: 0, latest: 0 }
+  cursor = 0
+  lastStatus = null
+  lastMetrics = null
+  lastStatusAt = 0
+  statusSig = ""
+  metricsSig = ""
+}
+
 // ----- mutations -----------------------------------------------------------------
 
 async function mutate(optimistic, request) {

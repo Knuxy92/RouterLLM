@@ -42,6 +42,36 @@ export function withTransition(fn) {
   else fn();
 }
 
+// Icons are progressive enhancement: a missing/failed bundle must not abort a render.
+export function refreshIcons() {
+  window.lucide?.createIcons();
+}
+
+export function openDialog(d) {
+  if (d.showModal) d.showModal();
+  else {
+    d.setAttribute("open", "");
+    d.style.display = "block";
+  }
+}
+
+export function closeDialog(d) {
+  if (d.close) d.close();
+  else {
+    d.removeAttribute("open");
+    d.style.display = "";
+  }
+}
+
+export function closeDrawers() {
+  $("#drawer")?.classList.remove("open");
+  $("#drawer-scrim")?.classList.remove("open");
+  $("#provider-drawer")?.classList.remove("open");
+  $("#pd-scrim")?.classList.remove("open");
+  const cmdk = $("#cmdk");
+  if (cmdk) closeDialog(cmdk);
+}
+
 // ----- providers grid --------------------------------------------------------
 
 function keyLine(p) {
@@ -85,6 +115,7 @@ export function modelBlock(m) {
         <span class="ml-auto flex items-center gap-1.5">
           <button data-action="move-up" data-model="${esc(m.name)}" data-index="${i}" ${i === 0 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-up" class="size-3"></i></button>
           <button data-action="move-down" data-model="${esc(m.name)}" data-index="${i}" ${i === m.legs.length - 1 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-down" class="size-3"></i></button>
+          <button data-action="remove-leg" data-model="${esc(m.name)}" data-index="${i}" ${m.legs.length <= 1 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-30"><i data-lucide="x" class="size-3"></i></button>
           <input type="checkbox" class="sw" data-action="leg-toggle" data-model="${esc(m.name)}" data-index="${i}" ${leg.on === false ? "" : "checked"} />
         </span>
       </li>`,
@@ -387,7 +418,7 @@ export function openTrace(e) {
 
   $("#drawer").classList.add("open");
   $("#drawer-scrim").classList.add("open");
-  window.lucide.createIcons();
+  refreshIcons();
 }
 
 function refreshAll() {
@@ -401,7 +432,7 @@ function refreshAll() {
   renderTrafficChart();
   buildLogDropdowns();
   if (!getLogFilters().paused) renderLogs();
-  window.lucide.createIcons();
+  refreshIcons();
 }
 
 // ----- custom dropdowns ------------------------------------------------------
@@ -427,7 +458,7 @@ export function buildDD(id, options, selected, onPick) {
       onPick?.(item.textContent);
     }),
   );
-  window.lucide?.createIcons();
+  refreshIcons();
 }
 
 // ----- chart tooltips --------------------------------------------------------
@@ -644,7 +675,7 @@ export function openProvider(name, onOpened) {
       ? `<i data-lucide="bar-chart-3" class="size-3"></i>View analytics`
       : `<i data-lucide="chevron-up" class="size-3"></i>Hide analytics`;
     if (!showing) box.innerHTML = buildAnalytics(name);
-    window.lucide.createIcons();
+    refreshIcons();
   });
 
   if (rows.length > 0) {
@@ -656,7 +687,7 @@ export function openProvider(name, onOpened) {
         ? `<i data-lucide="flask-conical" class="size-3"></i>Open test`
         : `<i data-lucide="chevron-up" class="size-3"></i>Close test`;
       if (!showing) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      window.lucide.createIcons();
+      refreshIcons();
     });
 
     let testModel = rows[0].modelId;
@@ -680,7 +711,6 @@ export function openProvider(name, onOpened) {
     };
 
     $("#pd-test-run").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
       const body = {
         model: testModel,
         prompt: $("#pd-test-prompt").value,
@@ -688,9 +718,8 @@ export function openProvider(name, onOpened) {
         effort: testEffort,
         timeout_seconds: clamp($("#pd-test-timeout").value, 5, 120, 20),
       };
-      const result = $("#pd-test-result");
-      btn.disabled = true;
-      btn.textContent = "Testing…";
+      e.currentTarget.disabled = true;
+      e.currentTarget.textContent = "Testing…";
 
       let res = null;
       let thrown = null;
@@ -699,6 +728,12 @@ export function openProvider(name, onOpened) {
       } catch (err) {
         thrown = err?.message || String(err);
       }
+
+      // A re-render may have replaced #pd-body mid-request; the nodes captured
+      // before the await are then detached.
+      const btn = $("#pd-test-run");
+      const result = $("#pd-test-result");
+      if (!btn || !result) return;
 
       if (thrown !== null) {
         result.innerHTML = `
@@ -728,12 +763,12 @@ export function openProvider(name, onOpened) {
       result.classList.remove("hidden");
       btn.disabled = false;
       btn.innerHTML = `<i data-lucide="play" class="size-3.5"></i>Run test`;
-      window.lucide.createIcons();
+      refreshIcons();
     });
   }
 
   onOpened();
-  window.lucide.createIcons();
+  refreshIcons();
 }
 
 // ----- add-failover-leg dialog -------------------------------------------------
@@ -761,7 +796,7 @@ export function openLegDialog(modelName) {
   $("#leg-dialog-upstream").value = "";
   $("#leg-dialog-confirm").disabled = candidates.length === 0;
   dialog.dataset.model = modelName;
-  dialog.showModal();
+  openDialog(dialog);
 }
 
 // ----- request logs (server-paged) ----------------------------------------
@@ -782,7 +817,13 @@ const levelBadge = {
   error: "tone-error",
 };
 
-const csvQuote = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+const FORMULA_LEAD = /^[=+@\t\r-]/;
+
+const csvQuote = (v) => {
+  const raw = String(v ?? "");
+  const safe = FORMULA_LEAD.test(raw) ? "'" + raw : raw;
+  return `"${safe.split('"').join('""')}"`;
+};
 
 function logFilterFromState() {
   const f = getLogFilters();
@@ -867,7 +908,7 @@ export function renderLogs() {
   }
   bar += pbtn("Next", page + 1, { disabled: page === totalPages });
   $("#log-pagination").innerHTML = bar;
-  window.lucide.createIcons();
+  refreshIcons();
 }
 
 async function goToLogPage(page) {
@@ -889,14 +930,20 @@ function buildLogDropdowns() {
   ddSig = sig;
 
   const f = logFilterFromState();
+  const stale = {};
   if (!providers.some((p) => p.name === f.provider)) {
     f.provider = "All providers";
-    if (getLogFilters().provider) setLogFilter({ provider: "" });
+    if (getLogFilters().provider) stale.provider = "";
   }
   if (!models.some((m) => m.name === f.model)) {
     f.model = "All models";
-    if (getLogFilters().model) setLogFilter({ model: "" });
+    if (getLogFilters().model) stale.model = "";
   }
+
+  // The filter reset needs a data fetch, so it must stay out of the render
+  // path; defer it past the current render instead of re-rendering from inside.
+  if (Object.keys(stale).length)
+    queueMicrotask(() => setLogFilter(stale).catch(() => {}));
 
   buildDD(
     "dd-provider",
@@ -923,18 +970,28 @@ function buildLogDropdowns() {
 // ----- init ---------------------------------------------------------------------
 
 let wired = false;
+let uptimeTimer = null;
+
+// The sidebar uptime ticks locally: a pulse-only poll changes no state, so the
+// label needs its own clock.
+function startUptimeTicker() {
+  if (uptimeTimer) return;
+  uptimeTimer = setInterval(() => {
+    if (getUptimeSeconds() != null) renderSidebarStatus();
+  }, 10_000);
+}
+
+export function stopUptimeTicker() {
+  if (uptimeTimer) clearInterval(uptimeTimer);
+  uptimeTimer = null;
+}
 
 export function initDynamic() {
   refreshAll();
+  startUptimeTicker();
 
   if (wired) return;
   wired = true;
-
-  // The sidebar uptime ticks locally: a pulse-only poll changes no state, so
-  // the label needs its own clock.
-  setInterval(() => {
-    if (getUptimeSeconds() != null) renderSidebarStatus();
-  }, 10_000);
 
   buildDD(
     "dd-range",
@@ -1044,7 +1101,7 @@ export function initDynamic() {
   $("#log-level-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-level]");
     if (!btn) return;
-    setLogFilter({ level: btn.dataset.level });
+    setLogFilter({ level: btn.dataset.level === "All" ? "" : btn.dataset.level });
   });
 
   $("#log-pause").addEventListener("click", () => {
@@ -1058,7 +1115,7 @@ export function initDynamic() {
     badge.innerHTML = paused
       ? `<span class="dot dot-warn"></span>PAUSED`
       : `<span class="dot dot-live"></span>LIVE · auto-refresh 3s`;
-    window.lucide.createIcons();
+    refreshIcons();
   });
 
   $("#log-export").addEventListener("click", async () => {
@@ -1094,11 +1151,14 @@ export function initDynamic() {
       const blob = new Blob([header + "\n" + lines.join("\n")], {
         type: "text/csv;charset=utf-8",
       });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = "routerllm-requests.csv";
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(a.href);
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
 
       btn.disabled = false;
     } catch {

@@ -1,10 +1,14 @@
 import { STATUS_META, adaptLogs, esc, fmtDur } from "./data.js"
 import { getRequests, getState } from "./state.js"
-import { $, openProvider, openTrace } from "./render.js"
+import { $, closeDialog, openDialog, openProvider, openTrace, refreshIcons } from "./render.js"
 
 // Global ⌘K palette: pages, models, providers and log lines — usable from any page.
 
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const selectorEscape = (s) => (window.CSS?.escape ? CSS.escape(s) : s.replace(/[\\"]/g, "\\$&"))
+
+const dialogOpen = (d) => !!(d.open || d.hasAttribute("open"))
 
 function hi(text, q) {
   if (!q) return text
@@ -68,7 +72,7 @@ function go(page) {
 function gotoModel(name) {
   go("providers")
   setTimeout(() => {
-    const el = document.querySelector(`[data-model-block="${CSS.escape(name)}"]`)
+    const el = document.querySelector(`[data-model-block="${selectorEscape(name)}"]`)
     if (!el) return
     el.scrollIntoView({ behavior: "smooth", block: "center" })
     el.classList.add("model-flash")
@@ -109,7 +113,7 @@ function draw(q) {
   })
   box.innerHTML = html
   box.querySelector(".active")?.scrollIntoView({ block: "nearest" })
-  window.lucide?.createIcons()
+  refreshIcons()
 }
 
 function setActive(i) {
@@ -129,7 +133,7 @@ export function wireCmdk() {
     results = collect("")
     active = 0
     draw("")
-    dialog.showModal()
+    openDialog(dialog)
     input.focus()
   }
 
@@ -137,7 +141,7 @@ export function wireCmdk() {
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
       e.preventDefault()
-      if (dialog.open) dialog.close()
+      if (dialogOpen(dialog)) closeDialog(dialog)
       else open()
     }
   })
@@ -156,14 +160,14 @@ export function wireCmdk() {
     } else if (e.key === "Enter") {
       e.preventDefault()
       results[active]?.go()
-      dialog.close()
+      closeDialog(dialog)
     }
   })
   $("#cmdk-results").addEventListener("click", (e) => {
     const row = e.target.closest("[data-idx]")
     if (!row) return
     results[Number(row.dataset.idx)]?.go()
-    dialog.close()
+    closeDialog(dialog)
   })
   $("#cmdk-results").addEventListener("mouseover", (e) => {
     const row = e.target.closest("[data-idx]")

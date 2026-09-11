@@ -1,5 +1,6 @@
 import { api, clearToken, getToken } from "./api.js"
-import { stopPolling } from "./state.js"
+import { closeDrawers, stopUptimeTicker } from "./render.js"
+import { resetState, stopPolling } from "./state.js"
 
 // Auth gate: challenge–response handshake. The admin secret never crosses the
 // wire — the browser answers a single-use nonce with hex(HMAC-SHA256(secret,
@@ -68,8 +69,12 @@ export function wireAuth({ onAuthed }) {
   })
 
   document.querySelector("#signout-btn").addEventListener("click", () => {
+    api.logout().catch(() => {})
     stopPolling()
+    stopUptimeTicker()
     clearToken()
+    resetState()
+    closeDrawers()
     location.hash = "#/dashboard"
     showLogin()
   })
@@ -77,6 +82,9 @@ export function wireAuth({ onAuthed }) {
   // Emitted by api.js on any 401 — session expired or was evicted server side.
   window.addEventListener("routerllm:unauthorized", () => {
     stopPolling()
+    stopUptimeTicker()
+    resetState()
+    closeDrawers()
     showLoginError("Session expired — sign in again")
     showLogin()
   })

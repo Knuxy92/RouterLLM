@@ -1,5 +1,5 @@
 import { applyAuth, wireAuth } from "./js/auth.js"
-import { initDynamic } from "./js/render.js"
+import { initDynamic, refreshIcons } from "./js/render.js"
 import { wireCmdk } from "./js/search.js"
 import { startPolling } from "./js/state.js"
 import { route, wireRouter } from "./js/router.js"
@@ -25,4 +25,4 @@ applyAuth().then((authed) => {
 })
 
 // Guard so a failed icon bundle never takes the rest of the app down.
-window.lucide?.createIcons()
+refreshIcons()
