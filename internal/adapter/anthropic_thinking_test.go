@@ -69,6 +69,30 @@ func TestTranslateRequestThinkingCanonicalReasoning(t *testing.T) {
 			wantThinking: nil,
 			wantMaxTok:   4096,
 		},
+		{
+			name: "budget-only client emits thinking with budget",
+			body: map[string]any{
+				"messages":        []any{map[string]any{"role": "user", "content": "hi"}},
+				"thinking_budget": 5000.0,
+			},
+			wantThinking: map[string]any{"type": "enabled", "budget_tokens": 5000.0},
+			wantMaxTok:   6024,
+		},
+		{
+			name: "budget-only client with explicit max_tokens clamps",
+			body: map[string]any{
+				"thinking_budget": 32000.0,
+				"max_tokens":      4096.0,
+			},
+			wantThinking: map[string]any{"type": "enabled", "budget_tokens": 4095.0},
+			wantMaxTok:   4096,
+		},
+		{
+			name:         "effort none suppresses a budget",
+			body:         map[string]any{"reasoning_effort": "none", "thinking_budget": 5000.0},
+			wantThinking: nil,
+			wantMaxTok:   4096,
+		},
 	}
 
 	for _, tt := range tests {

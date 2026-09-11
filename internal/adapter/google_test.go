@@ -3,8 +3,10 @@ package adapter
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTranslateGoogleRequestBasic(t *testing.T) {
@@ -263,7 +265,7 @@ func TestStreamGoogleToOpenAI(t *testing.T) {
 	if !strings.Contains(body, `"reasoning_content":" secret plan"`) {
 		t.Fatalf("thought delta missing:\n%s", body)
 	}
-	if !strings.Contains(body, `"tool_calls":[{"id":"call_0","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"BKK\"}"}}]`) {
+	if !strings.Contains(body, `"tool_calls":[{"index":0,"id":"call_0","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"BKK\"}"}}]`) {
 		t.Fatalf("tool_calls delta missing:\n%s", body)
 	}
 	if !strings.Contains(body, `"finish_reason":"stop"`) {
@@ -374,6 +376,41 @@ func TestStreamGoogleToAnthropicSSE(t *testing.T) {
 	}
 	if !strings.Contains(body, "event: message_stop") {
 		t.Fatalf("message_stop missing:\n%s", body)
+	}
+}
+
+const googleFinishWithTrailingChunks = "data: {\"responseId\":\"resp-leak\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"working\"}],\"role\":\"model\"}}]}\n\n" +
+	"data: {\"responseId\":\"resp-leak\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" on it\"}],\"role\":\"model\"}}]}\n\n" +
+	"data: {\"responseId\":\"resp-leak\",\"candidates\":[{\"content\":{\"role\":\"model\"},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":12,\"totalTokenCount\":25,\"thoughtsTokenCount\":3}}\n\n" +
+	"data: {\"responseId\":\"resp-leak\",\"candidates\":[{\"content\":{\"role\":\"model\"}}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":12,\"totalTokenCount\":25,\"thoughtsTokenCount\":3}}\n\n" +
+	"data: [DONE]\n\n"
+
+// TestStreamGoogleToAnthropicSSENoGoroutineLeak guards the pipe lifecycle:
+// the converter stops reading at finish_reason while the producer still has
+// chunks to write, so the pipe reader must be closed to release the producer
+// instead of leaving it blocked on pw.Write forever.
+func TestStreamGoogleToAnthropicSSENoGoroutineLeak(t *testing.T) {
+	runtime.GC()
+	time.Sleep(20 * time.Millisecond)
+
+	before := runtime.NumGoroutine()
+	w := httptest.NewRecorder()
+	if err := StreamGoogleToAnthropicSSE(strings.NewReader(googleFinishWithTrailingChunks), w, "gemini-3.8-flash"); err != nil {
+		t.Fatalf("StreamGoogleToAnthropicSSE: %v", err)
+	}
+	if !strings.Contains(w.Body.String(), "event: message_stop") {
+		t.Fatalf("converter did not reach message_stop:\n%s", w.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if runtime.NumGoroutine() <= before {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("producer goroutine still alive: %d goroutines before, %d afterwards", before, runtime.NumGoroutine())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

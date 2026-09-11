@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,9 +58,11 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 		maxTokens = intValue(mt, maxTokens)
 		explicitMaxTokens = true
 	}
-	if effort, _ := body["reasoning_effort"].(string); effort != "" && effort != "none" {
+	effort, _ := body["reasoning_effort"].(string)
+	budget := intValue(body["thinking_budget"], 0)
+	if effort != "none" && (effort != "" || budget > 0) {
 		thinking := map[string]any{"type": "enabled"}
-		if budget := intValue(body["thinking_budget"], 0); budget > 0 {
+		if budget > 0 {
 			if maxTokens <= budget {
 				if explicitMaxTokens {
 					budget = maxTokens - 1
@@ -120,50 +123,92 @@ func systemText(content any) string {
 	return ""
 }
 
+type anthropicUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type anthropicEvent struct {
+	Type    string `json:"type"`
+	Index   int    `json:"index"`
+	Message *struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+	} `json:"message"`
+	ContentBlock *struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"content_block"`
+	Delta *struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+		StopReason  string `json:"stop_reason"`
+	} `json:"delta"`
+	Usage *anthropicUsage `json:"usage"`
+}
+
+type anthropicToolBlock struct {
+	id   string
+	name string
+	args strings.Builder
+}
+
+func (b *anthropicToolBlock) arguments() string {
+	args := b.args.String()
+	if strings.TrimSpace(args) == "" {
+		return "{}"
+	}
+	return args
+}
+
 func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 	var msgID string
 	var upModel string
 	var contentBuilder strings.Builder
 	var reasoningBuilder strings.Builder
 	var stopReason string
-	var usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	}
+	var usage *anthropicUsage
+	toolBlocks := make(map[int]*anthropicToolBlock)
+	var toolOrder []int
 
 	_, err := util.IterDataLines(src, func(payload string) bool {
-		var event struct {
-			Type    string `json:"type"`
-			Message *struct {
-				ID    string `json:"id"`
-				Model string `json:"model"`
-			} `json:"message"`
-			Delta *struct {
-				Type       string `json:"type"`
-				Text       string `json:"text"`
-				Thinking   string `json:"thinking"`
-				StopReason string `json:"stop_reason"`
-			} `json:"delta"`
-			Usage *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
-		}
+		var event anthropicEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			return true
 		}
+
 		switch event.Type {
 		case "message_start":
 			if event.Message != nil {
 				msgID = event.Message.ID
 				upModel = event.Message.Model
 			}
-		case "content_block_delta":
-			if event.Delta != nil && event.Delta.Type == "text_delta" {
-				contentBuilder.WriteString(event.Delta.Text)
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				if _, exists := toolBlocks[event.Index]; !exists {
+					toolOrder = append(toolOrder, event.Index)
+				}
+				toolBlocks[event.Index] = &anthropicToolBlock{id: event.ContentBlock.ID, name: event.ContentBlock.Name}
 			}
-			if event.Delta != nil && event.Delta.Type == "thinking_delta" {
-				reasoningBuilder.WriteString(event.Delta.Thinking)
+		case "content_block_delta":
+			if event.Delta != nil {
+				switch event.Delta.Type {
+				case "text_delta":
+					contentBuilder.WriteString(event.Delta.Text)
+				case "thinking_delta":
+					reasoningBuilder.WriteString(event.Delta.Thinking)
+				case "input_json_delta":
+					block := toolBlocks[event.Index]
+					if block == nil {
+						block = &anthropicToolBlock{}
+						toolBlocks[event.Index] = block
+						toolOrder = append(toolOrder, event.Index)
+					}
+					block.args.WriteString(event.Delta.PartialJSON)
+				}
 			}
 		case "message_delta":
 			if event.Delta != nil && event.Delta.StopReason != "" {
@@ -181,7 +226,22 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 		return nil, err
 	}
 
-	msg := model.Message{Role: "assistant", Content: contentBuilder.String()}
+	sort.Ints(toolOrder)
+	var toolCalls []model.ToolCall
+	for _, blockIndex := range toolOrder {
+		block := toolBlocks[blockIndex]
+		toolCalls = append(toolCalls, model.ToolCall{
+			Index: len(toolCalls),
+			ID:    block.id,
+			Type:  "function",
+			Function: model.ToolCallFunction{
+				Name:      block.name,
+				Arguments: block.arguments(),
+			},
+		})
+	}
+
+	msg := model.Message{Role: "assistant", Content: contentBuilder.String(), ToolCalls: toolCalls}
 	if reasoning := reasoningBuilder.String(); reasoning != "" {
 		msg.ReasoningContent = reasoning
 	}
@@ -210,6 +270,8 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 	flusher, _ := dst.(http.Flusher)
 	var msgID string
 	created := time.Now().Unix()
+	toolIndexes := make(map[int]int)
+	nextToolIndex := 0
 
 	writeChunk := func(chunk model.StreamChunk) {
 		data, _ := json.Marshal(chunk)
@@ -218,25 +280,28 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 			flusher.Flush()
 		}
 	}
+	writeDelta := func(delta model.Delta, finish *string) {
+		writeChunk(model.StreamChunk{
+			ID:      msgID,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   modelName,
+			Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
+		})
+	}
+	toolIndexFor := func(blockIndex int) int {
+		if idx, ok := toolIndexes[blockIndex]; ok {
+			return idx
+		}
+
+		idx := nextToolIndex
+		nextToolIndex++
+		toolIndexes[blockIndex] = idx
+		return idx
+	}
 
 	_, err := util.IterDataLines(src, func(payload string) bool {
-		var event struct {
-			Type    string `json:"type"`
-			Message *struct {
-				ID    string `json:"id"`
-				Model string `json:"model"`
-			} `json:"message"`
-			Delta *struct {
-				Type       string `json:"type"`
-				Text       string `json:"text"`
-				Thinking   string `json:"thinking"`
-				StopReason string `json:"stop_reason"`
-			} `json:"delta"`
-			Usage *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
-		}
+		var event anthropicEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			return true
 		}
@@ -246,44 +311,32 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 			if event.Message != nil {
 				msgID = event.Message.ID
 			}
-			writeChunk(model.StreamChunk{
-				ID:      msgID,
-				Object:  "chat.completion.chunk",
-				Created: created,
-				Model:   modelName,
-				Choices: []model.StreamChoice{{
-					Index:        0,
-					Delta:        model.Delta{Role: "assistant"},
-					FinishReason: nil,
-				}},
-			})
+			writeDelta(model.Delta{Role: "assistant"}, nil)
+
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
+					Index: toolIndexFor(event.Index),
+					ID:    event.ContentBlock.ID,
+					Type:  "function",
+					Function: model.ToolCallFunction{
+						Name: event.ContentBlock.Name,
+					},
+				}}}, nil)
+			}
 
 		case "content_block_delta":
 			if event.Delta != nil && event.Delta.Type == "text_delta" && event.Delta.Text != "" {
-				writeChunk(model.StreamChunk{
-					ID:      msgID,
-					Object:  "chat.completion.chunk",
-					Created: created,
-					Model:   modelName,
-					Choices: []model.StreamChoice{{
-						Index:        0,
-						Delta:        model.Delta{Content: event.Delta.Text},
-						FinishReason: nil,
-					}},
-				})
+				writeDelta(model.Delta{Content: event.Delta.Text}, nil)
 			}
 			if event.Delta != nil && event.Delta.Type == "thinking_delta" && event.Delta.Thinking != "" {
-				writeChunk(model.StreamChunk{
-					ID:      msgID,
-					Object:  "chat.completion.chunk",
-					Created: created,
-					Model:   modelName,
-					Choices: []model.StreamChoice{{
-						Index:        0,
-						Delta:        model.Delta{ReasoningContent: event.Delta.Thinking},
-						FinishReason: nil,
-					}},
-				})
+				writeDelta(model.Delta{ReasoningContent: event.Delta.Thinking}, nil)
+			}
+			if event.Delta != nil && event.Delta.Type == "input_json_delta" && event.Delta.PartialJSON != "" {
+				writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
+					Index:    toolIndexFor(event.Index),
+					Function: model.ToolCallFunction{Arguments: event.Delta.PartialJSON},
+				}}}, nil)
 			}
 
 		case "message_delta":
@@ -368,6 +421,13 @@ func (ts *toolStreamState) freshArgs() string {
 // StreamOpenAIToAnthropicSSE reads OpenAI SSE chunks from src and writes
 // proper Anthropic SSE events (with event: prefix) to dst.
 func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) {
+	_ = streamOpenAIToAnthropicSSE(src, dst, modelName)
+}
+
+// streamOpenAIToAnthropicSSE is the error-returning form of
+// StreamOpenAIToAnthropicSSE; StreamGoogleToAnthropicSSE uses it so a failed
+// conversion is not silently swallowed.
+func streamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) error {
 	flusher, _ := dst.(http.Flusher)
 	var st anthropicSSEState
 
@@ -411,7 +471,7 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 		})
 	}
 
-	_, _ = util.IterDataLines(src, func(payload string) bool {
+	_, err := util.IterDataLines(src, func(payload string) bool {
 		var chunk struct {
 			ID      string `json:"id"`
 			Object  string `json:"object"`
@@ -605,4 +665,6 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 		}
 		return true
 	})
+
+	return err
 }
