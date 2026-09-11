@@ -105,7 +105,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		eb, _ := io.ReadAll(resp.Body)
+		eb := ReadErrorBody(resp.Body)
 		clamped := telemetry.ClampBody(eb, telemetry.RespBodyCap)
 		result.Status = resp.StatusCode
 		result.Error = fmt.Sprintf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, clamped)

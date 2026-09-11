@@ -248,6 +248,142 @@ func TestCanonicalizeReasoningEnableThinking(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeReasoningThinkingDialect(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     map[string]any
+		defaults model.RequestDefaults
+		wantBody map[string]any
+	}{
+		{
+			name: "thinking budget_tokens folds to thinking_budget",
+			body: map[string]any{
+				"model":    "m",
+				"thinking": map[string]any{"type": "enabled", "budget_tokens": 5000},
+			},
+			wantBody: map[string]any{
+				"model":           "m",
+				"thinking_budget": 5000,
+			},
+		},
+		{
+			name: "thinking budget_tokens beats route default budget",
+			body: map[string]any{
+				"model":    "m",
+				"thinking": map[string]any{"type": "enabled", "budget_tokens": 5000},
+			},
+			defaults: model.RequestDefaults{ThinkingBudget: 4096},
+			wantBody: map[string]any{
+				"model":           "m",
+				"thinking_budget": 5000,
+			},
+		},
+		{
+			name: "thinking disabled forces none",
+			body: map[string]any{
+				"model":    "m",
+				"thinking": map[string]any{"type": "disabled"},
+			},
+			wantBody: map[string]any{
+				"model":            "m",
+				"reasoning_effort": "none",
+			},
+		},
+		{
+			name: "thinking disabled beats route default effort",
+			body: map[string]any{
+				"model":    "m",
+				"thinking": map[string]any{"type": "disabled"},
+			},
+			defaults: model.RequestDefaults{ReasoningEffort: "high"},
+			wantBody: map[string]any{
+				"model":            "m",
+				"reasoning_effort": "none",
+			},
+		},
+		{
+			name: "thinking disabled does not override explicit reasoning_effort",
+			body: map[string]any{
+				"model":            "m",
+				"reasoning_effort": "high",
+				"thinking":         map[string]any{"type": "disabled"},
+			},
+			wantBody: map[string]any{
+				"model":            "m",
+				"reasoning_effort": "high",
+			},
+		},
+		{
+			name: "thinking disabled does not override reasoning map effort",
+			body: map[string]any{
+				"model":     "m",
+				"reasoning": map[string]any{"effort": "low"},
+				"thinking":  map[string]any{"type": "disabled"},
+			},
+			wantBody: map[string]any{
+				"model":            "m",
+				"reasoning_effort": "low",
+			},
+		},
+		{
+			name: "reasoning max_tokens beats thinking budget_tokens",
+			body: map[string]any{
+				"model":     "m",
+				"reasoning": map[string]any{"max_tokens": 2048},
+				"thinking":  map[string]any{"type": "enabled", "budget_tokens": 5000},
+			},
+			wantBody: map[string]any{
+				"model":           "m",
+				"thinking_budget": 2048,
+			},
+		},
+		{
+			name: "top-level thinking_budget beats route default",
+			body: map[string]any{
+				"model":           "m",
+				"thinking_budget": 999,
+			},
+			defaults: model.RequestDefaults{ThinkingBudget: 4096},
+			wantBody: map[string]any{
+				"model":           "m",
+				"thinking_budget": 999,
+			},
+		},
+		{
+			name: "thinking budget_tokens beats top-level thinking_budget",
+			body: map[string]any{
+				"model":           "m",
+				"thinking":        map[string]any{"type": "enabled", "budget_tokens": 5000},
+				"thinking_budget": 999,
+			},
+			wantBody: map[string]any{
+				"model":           "m",
+				"thinking_budget": 5000,
+			},
+		},
+		{
+			name: "thinking enabled without budget adds nothing",
+			body: map[string]any{
+				"model":    "m",
+				"thinking": map[string]any{"type": "enabled"},
+			},
+			wantBody: map[string]any{
+				"model": "m",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			canonicalizeReasoning(tt.body, tt.defaults)
+
+			if got, want := testJSON(t, tt.body), testJSON(t, tt.wantBody); got != want {
+				t.Fatalf("body = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestCanonicalizeReasoningDefaults(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -378,6 +514,7 @@ func TestCanonicalizeReasoningDialectKeysDeleted(t *testing.T) {
 		want := map[string]any{
 			"model":            "m",
 			"reasoning_effort": "none",
+			"thinking_budget":  999,
 		}
 		if got := testJSON(t, body); got != testJSON(t, want) {
 			t.Fatalf("body = %s, want %s", got, testJSON(t, want))

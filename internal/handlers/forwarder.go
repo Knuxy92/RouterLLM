@@ -66,8 +66,8 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 
 		ct := resp.Header.Get("Content-Type")
 		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
-			eb, _ := io.ReadAll(resp.Body)
-			util.WriteUpstreamError(w, resp.StatusCode, eb)
+			eb := services.ReadErrorBody(resp.Body)
+			util.WriteUpstreamError(w, resp.StatusCode, services.TruncateErrorBody(eb))
 
 			note := ""
 			if err != nil {

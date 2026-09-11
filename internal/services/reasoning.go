@@ -17,7 +17,8 @@ import (
 // plus the internal reasoning_exclude marker) and re-emitted in whichever
 // dialect the target provider speaks:
 //
-//	client reasoning map > client reasoning_effort / enable_thinking > route defaults
+//	client reasoning map > client reasoning_effort / enable_thinking / thinking
+//	/ thinking_budget > route defaults
 var reasoningEffortAliases = map[string]string{
 	"none":    "none",
 	"minimal": "minimal",
@@ -82,6 +83,18 @@ func canonicalizeReasoning(body map[string]any, defaults model.RequestDefaults) 
 	}
 	if enabled, ok := body["enable_thinking"].(bool); ok && !enabled {
 		effort = "none"
+	}
+
+	if thinking, ok := body["thinking"].(map[string]any); ok {
+		if t, _ := thinking["type"].(string); t == "disabled" && effort == "" {
+			effort = "none"
+		}
+		if budget == 0 {
+			budget = intValue(thinking["budget_tokens"])
+		}
+	}
+	if budget == 0 {
+		budget = intValue(body["thinking_budget"])
 	}
 
 	if effort == "" {

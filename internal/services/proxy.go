@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -54,16 +55,30 @@ var hopByHopHeaders = map[string]bool{
 	"upgrade":             true,
 }
 
+// clientCredentialHeaders never reach an upstream, even when client header
+// forwarding is on and the allowlist names them: the router picks the upstream
+// credential, and a client's own credentials or session cookies must not ride
+// along to a third-party provider.
+var clientCredentialHeaders = map[string]bool{
+	"authorization":       true,
+	"x-api-key":           true,
+	"x-goog-api-key":      true,
+	"cookie":              true,
+	"cookie2":             true,
+	"proxy-authorization": true,
+	"accept-encoding":     true,
+}
+
 type Proxy struct {
 	registry             atomic.Pointer[provider.Registry]
 	client               *http.Client
 	log                  *log.Logger
 	debug                bool
 	advancedDebug        bool
-	forceStream          bool
+	forceStream          atomic.Bool
 	forceStreamUsage     bool
-	forwardClientHeaders bool
-	allowClientHeaders   []string
+	forwardClientHeaders atomic.Bool
+	allowClientHeaders   atomic.Pointer[[]string]
 	systemPrompt         atomic.Pointer[string]
 	clineMu              sync.Mutex
 	clineManagers        map[string]*cline.Manager
@@ -103,7 +118,10 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStream: forceStream, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", forwardClientHeaders: forwardClientHeaders, allowClientHeaders: allowClientHeaders, clineManagers: make(map[string]*cline.Manager)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager)}
+	p.forceStream.Store(forceStream)
+	p.forwardClientHeaders.Store(forwardClientHeaders)
+	p.storeAllowClientHeaders(allowClientHeaders)
 	p.telemetry.Store(telemetry.NewMemStore())
 	p.registry.Store(reg)
 	p.systemPrompt.Store(&systemPrompt)
@@ -152,6 +170,30 @@ func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
 	p.pruneClineManagers(reg)
 }
 
+// ApplySettings swaps the request-shaping options that hot reload can change.
+// The allowlist is copied so a caller's slice cannot be mutated under a live
+// request; the values are read per request, so a swap applies at once.
+func (p *Proxy) ApplySettings(forceStream, forwardClientHeaders bool, allowClientHeaders []string) {
+	p.forceStream.Store(forceStream)
+	p.forwardClientHeaders.Store(forwardClientHeaders)
+	p.storeAllowClientHeaders(allowClientHeaders)
+}
+
+func (p *Proxy) storeAllowClientHeaders(allow []string) {
+	clone := append([]string(nil), allow...)
+	p.allowClientHeaders.Store(&clone)
+}
+
+// clientHeaderAllowlist returns the configured allowlist, or nil when none was
+// stored — both mean "forward everything not denied".
+func (p *Proxy) clientHeaderAllowlist() []string {
+	if allow := p.allowClientHeaders.Load(); allow != nil {
+		return *allow
+	}
+
+	return nil
+}
+
 func (p *Proxy) pruneClineManagers(reg *provider.Registry) {
 	live := make(map[string]bool)
 	for _, pc := range reg.ProviderConfigs() {
@@ -181,7 +223,7 @@ func copyClientHeaders(dst, src *http.Request, allow []string) {
 	}
 	for key, values := range src.Header {
 		lk := strings.ToLower(key)
-		if hopByHopHeaders[lk] {
+		if hopByHopHeaders[lk] || clientCredentialHeaders[lk] {
 			continue
 		}
 		if len(allow) > 0 && !allowed[lk] {
@@ -192,7 +234,7 @@ func copyClientHeaders(dst, src *http.Request, allow []string) {
 }
 
 func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
-	p.forward(path, w, r, p.forceStream)
+	p.forward(path, w, r, p.forceStream.Load())
 }
 
 func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +359,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			eb, _ := io.ReadAll(resp.Body)
+			eb := ReadErrorBody(resp.Body)
 			resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(eb))
 			if lastResp != nil {
@@ -454,8 +496,8 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			eb, _ := io.ReadAll(resp.Body)
-			util.WriteUpstreamError(w, resp.StatusCode, eb)
+			eb := ReadErrorBody(resp.Body)
+			util.WriteUpstreamError(w, resp.StatusCode, TruncateErrorBody(eb))
 			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0, telemetry.ClampBody(eb, telemetry.RespBodyCap)))
 			return
 		}
@@ -605,13 +647,14 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 		for retry := 0; retry < maxRetries; retry++ {
 			req, err := http.NewRequestWithContext(r.Context(), call.method, pv.BaseURL+call.path+pv.Query, bytes.NewReader(call.body))
 			if err != nil {
-				p.log.Printf("failed to build request for %s: %v", pv.Name, err)
+				safeErr := redactURLError(err)
+				p.log.Printf("failed to build request for %s: %s", pv.Name, safeErr)
 				lastStatus = http.StatusInternalServerError
-				lastErrBody = []byte(err.Error())
+				lastErrBody = []byte(safeErr)
 				break
 			}
-			if p.forwardClientHeaders {
-				copyClientHeaders(req, r, p.allowClientHeaders)
+			if p.forwardClientHeaders.Load() {
+				copyClientHeaders(req, r, p.clientHeaderAllowlist())
 			}
 			for k, v := range pv.Headers {
 				req.Header[k] = []string{v}
@@ -646,9 +689,10 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 
 			r2, err := p.client.Do(req)
 			if err != nil {
-				p.log.Printf("proxy error via %s (retry %d/%d): %v", pv.Name, retry+1, maxRetries, err)
+				safeErr := redactURLError(err)
+				p.log.Printf("proxy error via %s (retry %d/%d): %s", pv.Name, retry+1, maxRetries, safeErr)
 				lastStatus = http.StatusBadGateway
-				lastErrBody = []byte(err.Error())
+				lastErrBody = []byte(safeErr)
 				if retry < maxRetries-1 {
 					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
@@ -659,7 +703,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			}
 
 			if pv.Style == "cline" && r2.StatusCode == http.StatusUnauthorized && !refreshed {
-				eb, _ := io.ReadAll(r2.Body)
+				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("cline token stale via %s, refreshing", pv.Name), r2, eb)
 				lastStatus = r2.StatusCode
@@ -670,7 +714,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			}
 
 			if deadStatuses[r2.StatusCode] {
-				eb, _ := io.ReadAll(r2.Body)
+				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("key %s dead via %s", maskKey(key), pv.Name), r2, eb)
 				lastStatus = r2.StatusCode
@@ -680,7 +724,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			}
 
 			if transientStatuses[r2.StatusCode] {
-				eb, _ := io.ReadAll(r2.Body)
+				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("upstream %s transient (retry %d/%d)", pv.Name, retry+1, maxRetries), r2, eb)
 				lastStatus = r2.StatusCode
@@ -739,6 +783,50 @@ func briefBody(body []byte) string {
 		s = s[:500] + "..."
 	}
 	return s
+}
+
+const (
+	// maxErrorBodyRead bounds how much of an upstream error body is captured.
+	maxErrorBodyRead = 64 << 10
+	// maxClientErrorBytes bounds the upstream error text echoed to a client.
+	maxClientErrorBytes = 16 << 10
+)
+
+// ReadErrorBody drains an error response body for logging and telemetry, capped
+// so a broken or hostile upstream cannot feed the proxy an unbounded stream.
+func ReadErrorBody(r io.Reader) []byte {
+	body, _ := io.ReadAll(io.LimitReader(r, maxErrorBodyRead))
+
+	return body
+}
+
+// TruncateErrorBody caps the upstream error text echoed back to a client.
+func TruncateErrorBody(body []byte) []byte {
+	if len(body) <= maxClientErrorBytes {
+		return body
+	}
+
+	return body[:maxClientErrorBytes]
+}
+
+// redactURLError renders a transport error with the outbound query string
+// masked: the provider's Query can carry credentials (`?key=...`), which must
+// not reach logs, telemetry, or the client. Scheme, host, and path are kept.
+func redactURLError(err error) string {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err.Error()
+	}
+
+	return fmt.Sprintf("%s %q: %s", urlErr.Op, redactQuery(urlErr.URL), urlErr.Err)
+}
+
+func redactQuery(rawURL string) string {
+	if i := strings.IndexByte(rawURL, '?'); i >= 0 {
+		return rawURL[:i] + "?…redacted"
+	}
+
+	return rawURL
 }
 
 func respSummary(r *http.Response) string {
@@ -846,6 +934,7 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
 	finish := make(map[int]string)
+	tools := make(map[int]map[int]*model.ToolCall)
 
 	var usage json.RawMessage
 	var resultID, modelName, systemFP string
@@ -875,6 +964,16 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 			if c.Delta.ReasoningContent != "" {
 				reasoning[idx] += c.Delta.ReasoningContent
 			}
+			if len(c.Delta.ToolCalls) > 0 {
+				calls := tools[idx]
+				if calls == nil {
+					calls = make(map[int]*model.ToolCall)
+					tools[idx] = calls
+				}
+				for _, fragment := range c.Delta.ToolCalls {
+					mergeToolCallFragment(calls, fragment)
+				}
+			}
 			if c.FinishReason != nil {
 				finish[idx] = *c.FinishReason
 			}
@@ -896,6 +995,9 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	for i := range finish {
 		indices[i] = true
 	}
+	for i := range tools {
+		indices[i] = true
+	}
 	keysSorted := make([]int, 0, len(indices))
 	for i := range indices {
 		keysSorted = append(keysSorted, i)
@@ -907,6 +1009,9 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 		msg := model.Message{Role: "assistant", Content: content[idx]}
 		if r := reasoning[idx]; r != "" {
 			msg.ReasoningContent = r
+		}
+		if calls := tools[idx]; len(calls) > 0 {
+			msg.ToolCalls = assembleToolCalls(calls)
 		}
 		fr := finish[idx]
 		if fr == "" {
@@ -928,6 +1033,43 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 		Choices:           choices,
 		Usage:             usage,
 	}
+}
+
+// mergeToolCallFragment folds one streaming tool_call delta into the
+// per-choice accumulator: identity fields are set once, argument fragments
+// concatenate in arrival order.
+func mergeToolCallFragment(calls map[int]*model.ToolCall, fragment model.ToolCall) {
+	existing := calls[fragment.Index]
+	if existing == nil {
+		existing = &model.ToolCall{Index: fragment.Index}
+		calls[fragment.Index] = existing
+	}
+
+	if fragment.ID != "" {
+		existing.ID = fragment.ID
+	}
+	if fragment.Type != "" {
+		existing.Type = fragment.Type
+	}
+	if fragment.Function.Name != "" {
+		existing.Function.Name = fragment.Function.Name
+	}
+	existing.Function.Arguments += fragment.Function.Arguments
+}
+
+func assembleToolCalls(fragments map[int]*model.ToolCall) []model.ToolCall {
+	indexes := make([]int, 0, len(fragments))
+	for i := range fragments {
+		indexes = append(indexes, i)
+	}
+	sort.Ints(indexes)
+
+	calls := make([]model.ToolCall, 0, len(indexes))
+	for _, i := range indexes {
+		calls = append(calls, *fragments[i])
+	}
+
+	return calls
 }
 
 func (p *Proxy) serveForceStream(resp *http.Response, modelName, style string, w http.ResponseWriter) {

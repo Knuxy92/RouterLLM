@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -71,6 +74,10 @@ func main() {
 		overviewLogger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
 	}
 
+	if err := validatePort(cfg.Port); err != nil {
+		overviewLogger.Fatalf("invalid port %q: %v — set ROUTERLLM_PORT (or the port field in routerllm.yaml) to an integer in 1..65535", cfg.Port, err)
+	}
+
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
@@ -100,6 +107,7 @@ func main() {
 	applyConfig := func(next *config.Config) {
 		reloaded := provider.Rebuild(next.Providers, next.Routes, next.Cooldown, proxy.Registry())
 		proxy.Apply(reloaded, next.SystemPrompt)
+		proxy.ApplySettings(next.ForceStream, next.ForwardClientHeaders, next.AllowClientHeaders)
 		logRegistry(overviewLogger, reloaded)
 		reloadTracker.RecordSuccess()
 		overviewLogger.Printf("config reloaded: %d provider(s) (%d active), %d model(s)", reloaded.TotalProviders(), reloaded.ActiveProviders(), len(reloaded.AllModels()))
@@ -228,4 +236,16 @@ func logRegistry(logger *log.Logger, reg *provider.Registry) {
 	for _, skipped := range reg.SkippedRoutes() {
 		logger.Printf("route skipped: %s", skipped)
 	}
+}
+
+func validatePort(port string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(port))
+	if err != nil {
+		return errors.New("not an integer")
+	}
+	if n < 1 || n > 65535 {
+		return errors.New("out of range 1..65535")
+	}
+
+	return nil
 }
