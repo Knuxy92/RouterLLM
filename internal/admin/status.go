@@ -33,6 +33,7 @@ type ProviderStatus struct {
 type RouteLeg struct {
 	Provider         string `json:"provider"`
 	Model            string `json:"model"`
+	StyleCall        string `json:"stylecall,omitempty"`
 	Disabled         bool   `json:"disabled"`
 	Active           bool   `json:"active"`
 	ProviderDisabled bool   `json:"provider_disabled"`
@@ -155,6 +156,7 @@ func (d Deps) buildModels(reg *provider.Registry) []ModelStatus {
 			leg := RouteLeg{
 				Provider:         spec.Provider,
 				Model:            spec.Model,
+				StyleCall:        spec.StyleCall,
 				Disabled:         spec.Disabled,
 				ProviderDisabled: !providerLive,
 			}

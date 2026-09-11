@@ -112,6 +112,7 @@ export function modelBlock(m) {
         <span class="min-w-0 truncate font-mono text-xs">${esc(leg.route)}</span>
         <span class="badge ${NOTE_TONE[leg.tone]}">${esc(leg.note)}</span>
         ${leg.effort ? `<span class="badge tone-info font-mono">effort: ${esc(leg.effort)}</span>` : ""}
+        ${leg.stylecall ? `<span class="badge tone-info font-mono">${esc(leg.stylecall)}</span>` : ""}
         <span class="ml-auto flex items-center gap-1.5">
           <button data-action="move-up" data-model="${esc(m.name)}" data-index="${i}" ${i === 0 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-up" class="size-3"></i></button>
           <button data-action="move-down" data-model="${esc(m.name)}" data-index="${i}" ${i === m.legs.length - 1 ? "disabled" : ""} class="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"><i data-lucide="arrow-down" class="size-3"></i></button>
@@ -641,8 +642,9 @@ export function openProvider(name, onOpened) {
     <div id="pd-test-panel" class="mt-3 hidden">
       <div class="rounded-md border bg-card p-4">
         <div class="grid grid-cols-2 gap-2.5 text-xs">
-          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
+          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Call style</span><div id="pd-test-stylecall" class="dd"></div></div>
           <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc("Say 'pong' and nothing else.")}</textarea></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
@@ -692,6 +694,7 @@ export function openProvider(name, onOpened) {
 
     let testModel = rows[0].modelId;
     let testEffort = "";
+    let testStylecall = "";
     buildDD("pd-test-model", rows.map((r) => r.modelId), testModel, (v) => {
       testModel = v;
     });
@@ -701,6 +704,14 @@ export function openProvider(name, onOpened) {
       "(none)",
       (v) => {
         testEffort = v === "(none)" ? "" : v;
+      },
+    );
+    buildDD(
+      "pd-test-stylecall",
+      ["(auto)", "chat", "responses", "messages"],
+      "(auto)",
+      (v) => {
+        testStylecall = v === "(auto)" ? "" : v;
       },
     );
 
@@ -718,6 +729,7 @@ export function openProvider(name, onOpened) {
         effort: testEffort,
         timeout_seconds: clamp($("#pd-test-timeout").value, 5, 120, 20),
       };
+      if (testStylecall) body.stylecall = testStylecall;
       e.currentTarget.disabled = true;
       e.currentTarget.textContent = "Testing…";
 
@@ -792,6 +804,11 @@ export function openLegDialog(modelName) {
     "leg-dialog-effort",
     ["(none)", "none", "low", "medium", "high", "xhigh", "max"],
     "(none)",
+  );
+  buildDD(
+    "leg-dialog-stylecall",
+    ["(auto)", "chat", "responses", "messages"],
+    "(auto)",
   );
   $("#leg-dialog-upstream").value = "";
   $("#leg-dialog-confirm").disabled = candidates.length === 0;

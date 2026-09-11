@@ -334,6 +334,7 @@ export function addLeg(modelName, provider, opts = {}) {
         disabled: !!opts.disabled,
         active: false,
         provider_disabled: false,
+        stylecall: opts.stylecall || null,
       })
     },
     () => api.addRouteLeg(modelName, {
@@ -341,6 +342,7 @@ export function addLeg(modelName, provider, opts = {}) {
       model: upstream,
       reasoning_effort: opts.effort || undefined,
       disabled: !!opts.disabled,
+      stylecall: opts.stylecall || undefined,
     }),
   )
 }

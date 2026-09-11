@@ -221,6 +221,12 @@ func (s *Store) load(path string) error {
 		s.remember(e)
 	}
 
+	// rewrite() below replaces this file by renaming a temp file over it, and
+	// Windows refuses that rename while any handle on the target is open —
+	// including this one — so close it explicitly (the deferred close is then
+	// a no-op).
+	f.Close()
+
 	if len(kept) == 0 || s.pruneNeeded(kept) {
 		return s.rewrite(kept)
 	}

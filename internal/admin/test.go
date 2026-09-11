@@ -34,6 +34,7 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		Prompt         string `json:"prompt"`
 		MaxTokens      int    `json:"max_tokens"`
 		Effort         string `json:"effort"`
+		StyleCall      string `json:"stylecall"`
 		TimeoutSeconds int    `json:"timeout_seconds"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
@@ -51,6 +52,10 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Effort != "" && !validReasoningEffort[in.Effort] {
 		writeError(w, http.StatusBadRequest, "reasoning effort must be one of: "+effortWhitelist())
+		return
+	}
+	if in.StyleCall != "" && !validStyleCall[in.StyleCall] {
+		writeError(w, http.StatusBadRequest, "stylecall must be one of: "+styleCallWhitelist())
 		return
 	}
 
@@ -76,6 +81,7 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		Prompt:    in.Prompt,
 		MaxTokens: maxTokens,
 		Effort:    in.Effort,
+		StyleCall: in.StyleCall,
 		Timeout:   time.Duration(timeout) * time.Second,
 	})
 

@@ -49,7 +49,7 @@ func writeAddRouteConfig(t *testing.T) string {
 func TestAddRouteAppendsLegPreservingComments(t *testing.T) {
 	path := writeAddRouteConfig(t)
 
-	if err := NewEditor(path).AddRoute("demo-model", "beta", "beta-upstream", "", false); err != nil {
+	if err := NewEditor(path).AddRoute("demo-model", "beta", "beta-upstream", "", "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +77,7 @@ func TestAddRouteWritesDefaultsAndDisabled(t *testing.T) {
 	path := writeAddRouteConfig(t)
 
 	editor := NewEditor(path)
-	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", false); err != nil {
+	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,7 +99,7 @@ func TestAddRouteWritesDefaultsAndDisabled(t *testing.T) {
 
 	// A second leg without an effort must not inherit defaults, and a disabled
 	// leg must be parked from birth.
-	if err := editor.AddRoute("demo-model", "beta", "beta-again", "", true); err != nil {
+	if err := editor.AddRoute("demo-model", "beta", "beta-again", "", "", true); err != nil {
 		t.Fatal(err)
 	}
 	body, _ = os.ReadFile(path)
@@ -117,16 +117,16 @@ func TestAddRouteRejectsUnknownModelAndEmptyFields(t *testing.T) {
 
 	editor := NewEditor(path)
 
-	if err := editor.AddRoute("ghost-model", "beta", "m", "", false); err == nil || !strings.Contains(err.Error(), "not found") {
+	if err := editor.AddRoute("ghost-model", "beta", "m", "", "", false); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("unknown model error = %v, want not found", err)
 	}
-	if err := editor.AddRoute("demo-model", "", "m", "", false); err == nil {
+	if err := editor.AddRoute("demo-model", "", "m", "", "", false); err == nil {
 		t.Error("empty provider accepted")
 	}
-	if err := editor.AddRoute("demo-model", "beta", "", "", false); err == nil {
+	if err := editor.AddRoute("demo-model", "beta", "", "", "", false); err == nil {
 		t.Error("empty model accepted")
 	}
-	if err := editor.AddRoute("demo-model", "beta", "m", "ultra", false); err == nil {
+	if err := editor.AddRoute("demo-model", "beta", "m", "ultra", "", false); err == nil {
 		t.Error("invalid reasoning effort accepted")
 	}
 }
@@ -135,7 +135,7 @@ func TestRemoveRouteDeletesLegAndKeepsFormatting(t *testing.T) {
 	path := writeAddRouteConfig(t)
 
 	editor := NewEditor(path)
-	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", false); err != nil {
+	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", "", false); err != nil {
 		t.Fatal(err)
 	}
 

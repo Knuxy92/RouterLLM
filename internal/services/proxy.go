@@ -298,7 +298,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	if path != "/v1/chat/completions" {
 		var filtered []provider.Route
 		for _, r := range routes {
-			if r.Provider.Style == "openai" {
+			if d := r.Dialect(); d == "openai" || d == "responses" {
 				filtered = append(filtered, r)
 			}
 		}
@@ -381,7 +381,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			lastResp.Body.Close()
 		}
 		if p.debug {
-			p.log.Printf("serving %s via provider=%s upstream_model=%s dialect=%s reasoning=[%s]: %s request_id=%s", path, pv.Name, route.ModelName, reasoningDialectLabel(pv), reasoningSummary(routeBody), respSummary(resp), requestID(r))
+			p.log.Printf("serving %s via provider=%s upstream_model=%s dialect=%s reasoning=[%s]: %s request_id=%s", path, pv.Name, route.ModelName, route.Dialect(), reasoningSummary(routeBody), respSummary(resp), requestID(r))
 		}
 
 		if trace != nil {
@@ -406,17 +406,26 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 
 // translateRoute builds the outbound body and request path for one route leg:
 // it folds the route defaults and the provider's reasoning dialect into
-// routeBody (mutated in place) and translates it into the provider's wire
-// dialect. Shared by ForwardRaw and the admin test runner.
+// routeBody (mutated in place) and translates it into the leg's wire dialect
+// (the explicit stylecall when set, otherwise the provider style's native
+// dialect). Shared by ForwardRaw and the admin test runner.
 func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, err error) {
-	switch {
-	case pv.Style == "anthropic":
+	// The alysis gateway enforces OpenAI's 128-tool cap regardless of which
+	// dialect the leg is emitted in, so the guard runs before the dispatch.
+	if pv.Style == "alysis" {
+		if tools, ok := routeBody["tools"].([]any); ok && len(tools) > maxUpstreamTools {
+			return nil, "", "", fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
+		}
+	}
+
+	switch route.Dialect() {
+	case "messages":
 		applyCanonicalDefaults(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
-	case pv.Style == "google":
+	case "google":
 		applyCanonicalDefaults(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
-	case pv.Style == "cline":
+	case "cline":
 		applyCanonicalDefaults(routeBody, route.Defaults)
 		delete(routeBody, "thinking_budget")
 		delete(routeBody, "reasoning_exclude")
@@ -425,12 +434,32 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		p.injectStreamUsage(routeBody, path)
 		reqBody, err = json.Marshal(routeBody)
 		reqPath = path
-	default:
-		if pv.Style == "alysis" {
-			if tools, ok := routeBody["tools"].([]any); ok && len(tools) > maxUpstreamTools {
-				return nil, "", "", fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
+	case "chat":
+		routeBody["model"] = route.ModelName
+		if pv.ReasoningStyle == "raw" {
+			applyLegacyDefaults(routeBody, route.Defaults)
+		} else {
+			if notice := canonicalizeReasoning(routeBody, route.Defaults); notice != "" {
+				p.log.Printf("route %s/%s: %s — ignored", route.ModelName, pv.Name, notice)
 			}
+			applyReasoningDialect(routeBody, pv.ReasoningStyle)
 		}
+		p.injectStreamUsage(routeBody, path)
+		reqBody, err = json.Marshal(routeBody)
+		reqPath = "/v1/chat/completions"
+	case "responses":
+		if path == "/v1/responses" {
+			// Inbound is already Responses-shaped: passthrough with the
+			// upstream model substituted.
+			routeBody["model"] = route.ModelName
+			applyLegacyDefaults(routeBody, route.Defaults)
+			reqBody, err = json.Marshal(routeBody)
+			reqPath = path
+		} else {
+			applyCanonicalDefaults(routeBody, route.Defaults)
+			reqBody, reqPath, err = adapter.TranslateResponsesRequest(routeBody, route.ModelName)
+		}
+	default:
 		routeBody["model"] = route.ModelName
 		if pv.ReasoningStyle == "raw" || path != "/v1/chat/completions" {
 			applyLegacyDefaults(routeBody, route.Defaults)
@@ -502,20 +531,30 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			return
 		}
 
+		d := route.Dialect()
 		if forceStream && path == "/v1/chat/completions" {
-			p.serveForceStream(resp, route.ModelName, route.Provider.Style, w)
+			p.serveForceStream(resp, route.ModelName, d, w)
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
 			return
 		}
 
-		if route.Provider.Style == "anthropic" {
+		switch d {
+		case "messages":
 			p.serveAnthropic(resp, clientStream, route.ModelName, w)
-		} else if route.Provider.Style == "google" {
+		case "google":
 			p.serveGoogle(resp, clientStream, route.ModelName, w)
-		} else if path == "/v1/responses" {
-			serveResponses(resp, clientStream, w)
-		} else {
-			serveOpenAI(resp, clientStream, w)
+		case "responses":
+			if path == "/v1/responses" {
+				serveResponses(resp, clientStream, w)
+			} else {
+				p.serveResponsesAsChat(resp, clientStream, route.ModelName, w)
+			}
+		default:
+			if path == "/v1/responses" {
+				serveResponses(resp, clientStream, w)
+			} else {
+				serveOpenAI(resp, clientStream, w)
+			}
 		}
 		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
 		return
@@ -930,6 +969,31 @@ func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName st
 	w.Write(openaiBody)
 }
 
+// serveResponsesAsChat serves a Responses-dialect leg to a chat-completions
+// client: the upstream Responses SSE is converted back into chat chunks or
+// buffered into a single chat.completion document.
+func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+	defer resp.Body.Close()
+	if clientStream {
+		writeStreamHeaders(w)
+		w.WriteHeader(http.StatusOK)
+		if err := adapter.StreamResponsesToOpenAI(resp.Body, w, modelName); err != nil {
+			p.log.Printf("responses stream error: %v", err)
+		}
+		return
+	}
+
+	data, err := adapter.BufferResponsesToOpenAI(resp.Body, modelName)
+	if err != nil {
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
+
 func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
@@ -1072,20 +1136,27 @@ func assembleToolCalls(fragments map[int]*model.ToolCall) []model.ToolCall {
 	return calls
 }
 
-func (p *Proxy) serveForceStream(resp *http.Response, modelName, style string, w http.ResponseWriter) {
+func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string, w http.ResponseWriter) {
 	writeStreamHeaders(w)
 	w.WriteHeader(http.StatusOK)
 
-	if style == "anthropic" {
+	if dialect == "messages" {
 		if err := util.StreamRawSSE(resp.Body, w); err != nil {
 			p.log.Printf("anthropic passthrough stream error: %v", err)
 		}
 		return
 	}
 
-	if style == "google" {
+	if dialect == "google" {
 		if err := adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName); err != nil {
 			p.log.Printf("google stream error: %v", err)
+		}
+		return
+	}
+
+	if dialect == "responses" {
+		if err := adapter.StreamResponsesToAnthropicSSE(resp.Body, w, modelName); err != nil {
+			p.log.Printf("responses stream error: %v", err)
 		}
 		return
 	}

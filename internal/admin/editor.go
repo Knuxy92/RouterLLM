@@ -105,14 +105,18 @@ func (e *Editor) MoveRoute(modelID string, index int, up bool) error {
 }
 
 // AddRoute appends a fallback leg {provider, model} to the model's chain.
-// A non-empty reasoningEffort adds a defaults.reasoning_effort entry;
-// disabled=true marks the new leg parked from birth.
-func (e *Editor) AddRoute(modelID, provider, model, reasoningEffort string, disabled bool) error {
+// A non-empty reasoningEffort adds a defaults.reasoning_effort entry; a
+// non-empty styleCall pins the leg's wire dialect; disabled=true marks the
+// new leg parked from birth.
+func (e *Editor) AddRoute(modelID, provider, model, reasoningEffort, styleCall string, disabled bool) error {
 	if provider == "" || model == "" {
 		return fmt.Errorf("provider and model are required to add a route to %q", modelID)
 	}
 	if reasoningEffort != "" && !validReasoningEffort[reasoningEffort] {
 		return fmt.Errorf("invalid reasoning_effort %q", reasoningEffort)
+	}
+	if styleCall != "" && !validStyleCall[styleCall] {
+		return fmt.Errorf("invalid stylecall %q (must be chat, responses, or messages)", styleCall)
 	}
 
 	return e.mutate(func(root *yaml.Node) error {
@@ -129,6 +133,12 @@ func (e *Editor) AddRoute(modelID, provider, model, reasoningEffort string, disa
 				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "model"},
 				{Kind: yaml.ScalarNode, Tag: "!!str", Value: model},
 			},
+		}
+		if styleCall != "" {
+			leg.Content = append(leg.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "stylecall"},
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: styleCall},
+			)
 		}
 		if reasoningEffort != "" {
 			leg.Content = append(leg.Content,
@@ -178,10 +188,24 @@ var validReasoningEffort = map[string]bool{
 	"high": true, "xhigh": true, "max": true,
 }
 
+var validStyleCall = map[string]bool{
+	"chat": true, "responses": true, "messages": true,
+}
+
 func effortWhitelist() string {
 	quoted := make([]string, 0, len(validReasoningEffort))
 	for effort := range validReasoningEffort {
 		quoted = append(quoted, fmt.Sprintf("%q", effort))
+	}
+	sort.Strings(quoted)
+
+	return strings.Join(quoted, ", ")
+}
+
+func styleCallWhitelist() string {
+	quoted := make([]string, 0, len(validStyleCall))
+	for style := range validStyleCall {
+		quoted = append(quoted, fmt.Sprintf("%q", style))
 	}
 	sort.Strings(quoted)
 

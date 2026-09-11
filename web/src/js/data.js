@@ -143,6 +143,7 @@ export function adaptModels(status, metrics) {
         route: `${leg.provider}/${leg.model}`,
         provider: leg.provider,
         model: leg.model,
+        stylecall: leg.stylecall || null,
         active: !!leg.active,
         ...legToneNote(leg),
         on: !leg.disabled,

@@ -51,7 +51,26 @@ func (p *Provider) Stats() *Stats {
 type Route struct {
 	Provider  *Provider
 	ModelName string
+	StyleCall string
 	Defaults  model.RequestDefaults
+}
+
+// Dialect returns the wire dialect this leg speaks: the explicit stylecall
+// when set, otherwise the provider style's native dialect.
+func (r Route) Dialect() string {
+	switch r.StyleCall {
+	case "chat", "responses", "messages":
+		return r.StyleCall
+	}
+
+	switch r.Provider.Style {
+	case "anthropic":
+		return "messages"
+	case "google":
+		return "google"
+	}
+
+	return r.Provider.Style
 }
 
 type Registry struct {
@@ -130,7 +149,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 				continue
 			}
 
-			rts = append(rts, Route{Provider: p, ModelName: spec.Model, Defaults: spec.Defaults})
+			rts = append(rts, Route{Provider: p, ModelName: spec.Model, StyleCall: spec.StyleCall, Defaults: spec.Defaults})
 		}
 		if len(rts) > 0 {
 			routes[rule.ModelID] = rts

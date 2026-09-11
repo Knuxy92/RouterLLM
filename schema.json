@@ -242,6 +242,15 @@
           "type": "boolean",
           "default": false,
           "description": "When true, this upstream route entry is skipped; other entries for the same model_id still serve it."
+        },
+        "stylecall": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "responses",
+            "messages"
+          ],
+          "description": "Upstream API dialect for this leg: chat (/v1/chat/completions), responses (/v1/responses), or messages (/v1/messages). Empty or absent lets the provider style decide."
         }
       }
     },

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"routerllm/internal/model"
-	"routerllm/internal/provider"
 )
 
 // Reasoning settings arrive in several dialects — OpenAI's reasoning_effort
@@ -172,19 +171,6 @@ func applyReasoningDialect(body map[string]any, style string) {
 			body["reasoning_effort"] = effort
 		}
 	}
-}
-
-// reasoningDialectLabel names the reasoning dialect a provider's requests are
-// emitted in — the reasoning_style for openai-style providers, the fixed
-// style dialect otherwise.
-func reasoningDialectLabel(pv *provider.Provider) string {
-	if pv.Style != "openai" {
-		return pv.Style
-	}
-	if pv.ReasoningStyle == "" {
-		return "openai"
-	}
-	return pv.ReasoningStyle
 }
 
 // reasoningSummary renders the reasoning settings carried on an outbound

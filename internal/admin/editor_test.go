@@ -304,7 +304,7 @@ func TestEditorRejectsInvalidMutationWithoutWriting(t *testing.T) {
 	editor, path := newTestEditor(t)
 	before := readFile(t, path)
 
-	err := editor.AddRoute("opus-5", "ghost", "ghost-model", "", false)
+	err := editor.AddRoute("opus-5", "ghost", "ghost-model", "", "", false)
 	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("error = %v, want unknown provider rejection", err)
 	}

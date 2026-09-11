@@ -278,6 +278,16 @@ routes:
         model: gpt-5.6-luna
         disabled: true                      # temporarily out of rotation
 
+  # Per-leg call style — commented out example. `stylecall` overrides the
+  # upstream dialect for a single leg (chat|responses|messages), so one
+  # openai-style provider can also serve Responses-only models. Empty/absent
+  # keeps the provider style; only openai/anthropic/alysis providers accept it.
+  # - model_id: gpt-5.6-responses
+  #   routes:
+  #     - provider: forge
+  #       model: gpt-5.6-responses
+  #       stylecall: responses              # this leg calls /v1/responses
+
 
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:
@@ -287,6 +297,7 @@ routes:
 #   routes:                                 # REQUIRED — list of upstream targets
 #     - provider: string                    # REQUIRED — must match a provider name above
 #       model: string                       # REQUIRED — upstream model name (no fallback to model_id)
+#       stylecall: string                   # OPTIONAL — upstream dialect: chat|responses|messages (empty = provider style)
 #       disabled: bool                      # OPTIONAL — skip just this entry
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # none|minimal|low|medium|high|xhigh|max

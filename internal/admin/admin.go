@@ -330,6 +330,7 @@ func (d Deps) handleRouteAdd(w http.ResponseWriter, r *http.Request) {
 		Provider        string `json:"provider"`
 		Model           string `json:"model"`
 		ReasoningEffort string `json:"reasoning_effort"`
+		StyleCall       string `json:"stylecall"`
 		Disabled        bool   `json:"disabled"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
@@ -343,13 +344,19 @@ func (d Deps) handleRouteAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("reasoning_effort must be one of %s or omitted", effortWhitelist()))
 		return
 	}
+	switch {
+	case body.StyleCall == "", validStyleCall[body.StyleCall]:
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("stylecall must be one of %s or omitted", styleCallWhitelist()))
+		return
+	}
 
 	if !d.providerConfigured(body.Provider) {
 		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("provider %q is not configured", body.Provider))
 		return
 	}
 
-	if err := d.Editor.AddRoute(chi.URLParam(r, "model"), body.Provider, body.Model, body.ReasoningEffort, body.Disabled); err != nil {
+	if err := d.Editor.AddRoute(chi.URLParam(r, "model"), body.Provider, body.Model, body.ReasoningEffort, body.StyleCall, body.Disabled); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

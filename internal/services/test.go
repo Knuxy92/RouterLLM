@@ -29,6 +29,7 @@ type TestRequest struct {
 	Prompt    string        `json:"prompt"`
 	MaxTokens int           `json:"max_tokens"`
 	Effort    string        `json:"effort"`
+	StyleCall string        `json:"stylecall"`
 	Timeout   time.Duration `json:"timeout_seconds"`
 }
 
@@ -72,7 +73,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	route := provider.Route{Provider: pv, ModelName: req.Model}
+	route := provider.Route{Provider: pv, ModelName: req.Model, StyleCall: req.StyleCall}
 	reqBody, reqPath, sessionID, err := p.translateRoute(pv, route, "/v1/chat/completions", testBody(req))
 	if err != nil {
 		result.Status = http.StatusBadRequest
@@ -115,7 +116,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 
 	key := maskKey(servedKey(resp, pv))
 	resp.Body = telemetry.WatchAnchored(resp.Body, start)
-	content, err := bufferedTestContent(resp.Body, pv.Style, req.Model)
+	content, err := bufferedTestContent(resp.Body, route.Dialect(), req.Model)
 	if err != nil {
 		result.Status = http.StatusOK
 		result.Error = "failed to read upstream response: " + err.Error()
@@ -203,10 +204,10 @@ func (p *Proxy) finishTestFailure(start time.Time, ctx context.Context, pv *prov
 }
 
 // bufferedTestContent drains the upstream SSE stream into the assistant text of
-// the assembled chat.completion response, per provider style.
-func bufferedTestContent(body io.Reader, style, modelName string) (string, error) {
-	switch style {
-	case "anthropic":
+// the assembled chat.completion response, per wire dialect.
+func bufferedTestContent(body io.Reader, dialect, modelName string) (string, error) {
+	switch dialect {
+	case "messages":
 		data, err := adapter.BufferAnthropicToOpenAI(body, modelName)
 		if err != nil {
 			return "", err
@@ -214,6 +215,12 @@ func bufferedTestContent(body io.Reader, style, modelName string) (string, error
 		return contentFromOpenAIJSON(data)
 	case "google":
 		data, err := adapter.BufferGoogleToOpenAI(body, modelName)
+		if err != nil {
+			return "", err
+		}
+		return contentFromOpenAIJSON(data)
+	case "responses":
+		data, err := adapter.BufferResponsesToOpenAI(body, modelName)
 		if err != nil {
 			return "", err
 		}

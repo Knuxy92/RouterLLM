@@ -48,8 +48,9 @@ export function wireUi() {
   $("#leg-dialog-confirm").addEventListener("click", () => {
     const provider = $("#leg-dialog-provider .dd-label")?.textContent.trim()
     const effort = $("#leg-dialog-effort .dd-label")?.textContent.trim()
+    const stylecall = $("#leg-dialog-stylecall .dd-label")?.textContent.trim()
     const upstream = $("#leg-dialog-upstream").value.trim()
-    if (provider && !provider.startsWith("—")) addLeg(dialog.dataset.model, provider, { upstreamModel: upstream, effort: effort === "(none)" ? null : effort })
+    if (provider && !provider.startsWith("—")) addLeg(dialog.dataset.model, provider, { upstreamModel: upstream, effort: effort === "(none)" ? null : effort, stylecall: stylecall === "(auto)" ? undefined : stylecall })
     closeDialog(dialog)
   })
   dialog.addEventListener("click", (e) => {

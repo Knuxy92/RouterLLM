@@ -212,7 +212,7 @@ func validateConfig(yc *yamlConfig) error {
 		return fmt.Errorf("at least one provider is required")
 	}
 
-	seenProviders := make(map[string]bool, len(yc.Providers))
+	seenProviders := make(map[string]string, len(yc.Providers))
 	for i, yp := range yc.Providers {
 		if err := validateProvider(yp, i, seenProviders); err != nil {
 			return err
@@ -240,11 +240,24 @@ func validateConfig(yc *yamlConfig) error {
 			if spec.Provider == "" {
 				return fmt.Errorf("route %q has a spec with empty provider", rule.ModelID)
 			}
-			if !seenProviders[spec.Provider] {
+			if _, ok := seenProviders[spec.Provider]; !ok {
 				return fmt.Errorf("route %q references unknown provider %q", rule.ModelID, spec.Provider)
 			}
 			if spec.Model == "" {
 				return fmt.Errorf("route %q provider %q has empty upstream model", rule.ModelID, spec.Provider)
+			}
+
+			switch spec.StyleCall {
+			case "chat", "responses", "messages", "":
+			default:
+				return fmt.Errorf("route %q provider %q: unsupported stylecall %q (must be chat, responses, or messages)", rule.ModelID, spec.Provider, spec.StyleCall)
+			}
+
+			if spec.StyleCall != "" {
+				style := seenProviders[spec.Provider]
+				if style == "google" || style == "cline" {
+					return fmt.Errorf("route %q provider %q: stylecall is not supported on %s-style providers", rule.ModelID, spec.Provider, style)
+				}
 			}
 		}
 	}
@@ -252,14 +265,14 @@ func validateConfig(yc *yamlConfig) error {
 	return nil
 }
 
-func validateProvider(yp yamlProvider, index int, seen map[string]bool) error {
+func validateProvider(yp yamlProvider, index int, seen map[string]string) error {
 	if yp.Name == "" {
 		return fmt.Errorf("provider at index %d has empty name", index)
 	}
-	if seen[yp.Name] {
+	if _, ok := seen[yp.Name]; ok {
 		return fmt.Errorf("duplicate provider name %q", yp.Name)
 	}
-	seen[yp.Name] = true
+	seen[yp.Name] = yp.Style
 
 	if yp.BaseURL == "" {
 		return fmt.Errorf("provider %q has empty base_url", yp.Name)

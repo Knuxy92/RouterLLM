@@ -142,3 +142,47 @@ func TestNewRegistrySkipsDisabledModel(t *testing.T) {
 		t.Fatalf("SkippedRoutes() = %v, want 1 model-disabled entry", skipped)
 	}
 }
+
+func TestRouteDialect(t *testing.T) {
+	cases := []struct {
+		style     string
+		styleCall string
+		want      string
+	}{
+		{style: "openai", want: "openai"},
+		{style: "anthropic", want: "messages"},
+		{style: "google", want: "google"},
+		{style: "alysis", want: "alysis"},
+		{style: "cline", want: "cline"},
+		{style: "openai", styleCall: "chat", want: "chat"},
+		{style: "openai", styleCall: "responses", want: "responses"},
+		{style: "anthropic", styleCall: "chat", want: "chat"},
+		{style: "alysis", styleCall: "messages", want: "messages"},
+	}
+
+	for _, tc := range cases {
+		r := Route{Provider: &Provider{Style: tc.style}, StyleCall: tc.styleCall}
+		if got := r.Dialect(); got != tc.want {
+			t.Errorf("Dialect(style=%q, stylecall=%q) = %q, want %q", tc.style, tc.styleCall, got, tc.want)
+		}
+	}
+}
+
+func TestNewRegistryCopiesStyleCall(t *testing.T) {
+	rules := []model.Rule{{ModelID: "model-a", Routes: []model.Spec{
+		{Provider: "alpha", Model: "upstream-a", StyleCall: "responses"},
+	}}}
+
+	reg := NewRegistry(testConfigs(false), rules, time.Minute)
+
+	routes := reg.Routes("model-a")
+	if len(routes) != 1 {
+		t.Fatalf("Routes() returned %d routes, want 1", len(routes))
+	}
+	if routes[0].StyleCall != "responses" {
+		t.Fatalf("StyleCall = %q, want responses", routes[0].StyleCall)
+	}
+	if got := routes[0].Dialect(); got != "responses" {
+		t.Fatalf("Dialect() = %q, want responses (stylecall must win over style)", got)
+	}
+}

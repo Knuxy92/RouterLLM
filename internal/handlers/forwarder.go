@@ -82,11 +82,14 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 
-		if route.Provider.Style == "anthropic" {
+		switch route.Dialect() {
+		case "messages":
 			_ = util.StreamRawSSE(resp.Body, w)
-		} else if route.Provider.Style == "google" {
+		case "google":
 			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName)
-		} else {
+		case "responses":
+			adapter.StreamResponsesToAnthropicSSE(resp.Body, w, modelName)
+		default:
 			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
 		}
 

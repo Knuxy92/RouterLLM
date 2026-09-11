@@ -734,3 +734,90 @@ routes:
 		t.Fatalf("ValidateBytes() error = %v, want unreadable system_prompt_file", err)
 	}
 }
+
+func TestLoadYAMLStyleCallOnRouteLeg(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+        stylecall: responses
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Routes) != 1 || len(cfg.Routes[0].Routes) != 1 {
+		t.Fatalf("routes = %#v, want one model with one leg", cfg.Routes)
+	}
+	if got := cfg.Routes[0].Routes[0].StyleCall; got != "responses" {
+		t.Fatalf("stylecall = %q, want responses", got)
+	}
+}
+
+func TestLoadYAMLInvalidStyleCall(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+        stylecall: bogus
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), "unsupported stylecall") {
+		t.Fatalf("expected 'unsupported stylecall' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLStyleCallNotSupportedOnGoogle(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: gem
+    style: google
+    base_url: https://generativelanguage.example
+    api_key: g-key
+routes:
+  - model_id: m
+    routes:
+      - provider: gem
+        model: gemini-pro
+        stylecall: chat
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), "not supported on google-style providers") {
+		t.Fatalf("expected 'not supported on google-style providers' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLStyleCallNotSupportedOnCline(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: cline
+    style: cline
+    base_url: https://api.cline.bot/api
+    disabled: true
+routes:
+  - model_id: m
+    routes:
+      - provider: cline
+        model: m
+        stylecall: chat
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), "not supported on cline-style providers") {
+		t.Fatalf("expected 'not supported on cline-style providers' error, got: %v", err)
+	}
+}
