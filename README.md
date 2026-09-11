@@ -75,7 +75,7 @@ providers:
   - name: forge                   # unique name, referenced in routes
     api_key: ${FORGE_API_KEY}     # env var or list: [key1, key2]
     base_url: https://forge-gateway-api.fly.dev
-    style: openai                 # openai | anthropic | cline | google
+    style: openai                 # openai | anthropic | cline | google | alysis
     auth_mode: bearer             # bearer | x-api-key | both (ignored for google)
     headers:                      # optional extra headers
       Content-Type: application/json
@@ -122,6 +122,40 @@ routes:
     routes:
       - provider: cline
         model: cline-free/glm-5.2
+```
+
+### Alysis free models
+
+`style: alysis` authenticates with Alysis gateway accounts instead of API keys. Log in first:
+
+```bash
+routerllm --alysis-login
+```
+
+The command prints a device-authorization URL and user code, waits for approval, then stores the
+issued long-lived gateway key in `alysis-accounts.json` next to the executable (`0600`). Override
+the location with `ALYSIS_ACCOUNTS_FILE`. The key is sent as `Authorization: Bearer` and is never
+refreshed; run the command again to add more keys — RouterLLM rotates them through the normal key
+manager. The gateway is plain OpenAI passthrough, so no `api_key` is needed.
+
+The example config ships the alysis provider **commented out**: an enabled `style: alysis`
+provider refuses to start until at least one account is logged in, so uncomment the provider
+and its route only after `--alysis-login` has created the accounts file.
+
+In Docker, mount `alysis-accounts.json` only after the host file exists — a missing bind-mount
+path is silently auto-created as a directory, which breaks the account loader.
+
+```yaml
+providers:
+  - name: alysis
+    style: alysis
+    base_url: https://vzigujbcjjmpntxhmyvr.supabase.co/functions/v1/llm/v1
+
+routes:
+  - model_id: deepseek-v4-flash
+    routes:
+      - provider: alysis
+        model: deepseek-v4-flash
 ```
 
 ### Google Gemini
@@ -316,7 +350,7 @@ Every proxied request records one **event** — key always masked (`…abcd`), r
 ```
 
 - **`GET /admin/api/requests?since=<seq>`** returns the buffered events (ring of 2000) plus `latest` — the console's request-log table and trace drawer are built from this.
-- **`GET /admin/api/metrics`** returns rolled-up views: per-provider/per-leg/per-model 24h summaries (requests, errors, success %, TTFT p50/p95, uptime %, tok/s), 12×2h hourly windows and 7×24h weekly windows for the dashboard charts.
+- **`GET /admin/api/metrics`** returns rolled-up views: per-provider/per-leg/per-model 24h summaries (requests, errors, success %, TTFT p50/p95, uptime %, tok/s), 24×1h hourly windows and 7×24h daily windows (anchored to local midnight) for the dashboard charts.
 - **Persistence**: events append to `routerllm-telemetry.jsonl` beside the config (override with `ROUTERLLM_TELEMETRY_FILE`) and are replayed on start, so dashboards survive restarts. The file rotates at ~10 MB and events older than 7 days are dropped.
 - **tok/s**: usage is sniffed from the upstream stream (`completion_tokens`/`output_tokens`/`candidatesTokenCount`); for OpenAI-style relays `stream_options.include_usage` is injected on `/v1/chat/completions` so streams carry a usage chunk. Set `ROUTERLLM_TELEMETRY_USAGE=off` to disable the injection.
 - `stream_options` injection can be turned off with `ROUTERLLM_TELEMETRY_USAGE=off` if a relay rejects the field.
@@ -330,7 +364,14 @@ docker compose down
 ```
 
 Mounts `routerllm.yaml` (read-write, so the admin console can persist toggles) and
-`system_prompt.txt` as volumes. Reads secrets from `.env`.
+`system_prompt.txt` as volumes. Reads secrets from `.env` — the file must exist before
+`docker compose up` (compose `env_file`), even though host runs read it too.
+
+The image runs as non-root **UID 65532**, so on Linux the host `./routerllm.yaml` must be
+readable and writable by that UID — otherwise the container cannot read the config and
+admin-console writes fail: `sudo chown 65532:65532 routerllm.yaml`. Create the file before the
+first `docker compose up`: a missing bind-mount source is auto-created as a **directory**, and
+compose then fails on `is a directory`.
 
 ### Docker + hot reload
 

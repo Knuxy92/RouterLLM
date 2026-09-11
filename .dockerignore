@@ -1,17 +1,21 @@
 
-cline connect.git
+# Secrets and local state — never ship into the build context
+.git/
 .gitignore
 .env
 .env.example
+routerllm.yaml
+routerllm.yaml.bak
+*.bak
+cline-accounts.json
+alysis-accounts.json
+routerllm-telemetry.jsonl*
+.zcode/
+data/
 *.md
 Dockerfile
 docker-compose.yml
 .dockerignore
-forwarder.py
-requirements.txt
-venv/
-__pycache__/
-*.pyc
 routerllm
 *.log
 /tmp
@@ -20,4 +24,3 @@ routerllm
 web/node_modules/
 web/.vite/
 internal/admin/dist/
-ui-mockups/
