@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,16 @@ const (
 	retention   = 7 * 24 * time.Hour
 	// Rotate the jsonl once it grows past this (bytes).
 	maxFileSize = 10 << 20
+	// A rewrite keeps only the newest events up to this size, leaving headroom
+	// so fresh records append instead of tripping rotation on every call.
+	maxRewriteBytes = maxFileSize / 2
+	// Longest jsonl line the replay reads; longer lines are skipped whole.
+	maxLineSize = 1 << 20
+	// Free-form identifier fields (model, request id, attempt note) are clamped
+	// to this many bytes.
+	maxFieldSize = 512
+	// Failure detail may embed an upstream error body and gets its own cap.
+	maxErrSize = 4 << 10
 )
 
 type Attempt struct {
@@ -72,6 +83,33 @@ func ClampBody(b []byte, limit int) string {
 	return s
 }
 
+// clampText bounds one stored string field using the same truncation as
+// ClampBody.
+func clampText(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+
+	return ClampBody([]byte(s), limit)
+}
+
+// clampEvent bounds every client-controlled and upstream-derived text field
+// before the event reaches the ring, metrics or the jsonl. Without it one
+// oversized value makes the line unreadable to the replay, which silently
+// disables disk persistence until the file is repaired by hand.
+func clampEvent(e Event) Event {
+	e.Model = clampText(e.Model, maxFieldSize)
+	e.RequestID = clampText(e.RequestID, maxFieldSize)
+	e.Err = clampText(e.Err, maxErrSize)
+	e.RespBody = clampText(e.RespBody, RespBodyCap)
+	for i := range e.Attempts {
+		e.Attempts[i].Note = clampText(e.Attempts[i].Note, maxFieldSize)
+		e.Attempts[i].RespBody = clampText(e.Attempts[i].RespBody, RespBodyCap)
+	}
+
+	return e
+}
+
 // Level derives the UI badge from the final status: a completed relay is
 // info, upstream failures are warn (we retried or failed over) and terminal
 // errors are error.
@@ -107,22 +145,27 @@ func NewStore(path string) (*Store, error) {
 		return s, nil
 	}
 
+	// load may compact the file, which needs s.path; it leaves a fresh append
+	// handle behind when it does.
+	s.path = path
 	if err := s.load(path); err != nil {
 		return nil, err
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return nil, err
+	if s.file == nil {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		s.file = f
 	}
-	info, err := f.Stat()
+
+	info, err := s.file.Stat()
 	if err != nil {
-		f.Close()
+		s.file.Close()
 		return nil, err
 	}
 
-	s.path = path
-	s.file = f
 	s.size = info.Size()
 
 	return s, nil
@@ -137,33 +180,40 @@ func NewMemStore() *Store {
 }
 
 // load replays the tail of an existing jsonl. Events older than the retention
-// window are skipped, and the file is compacted when the majority is stale so
-// restart time stays bounded.
+// window are skipped, lines too long to be one event are discarded whole, and
+// the file is compacted when the majority is stale so restart time stays
+// bounded.
 func (s *Store) load(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return err
 	}
 	defer f.Close()
 
 	now := time.Now()
 	var kept []Event
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for scanner.Scan() {
-		var e Event
-		if json.Unmarshal(scanner.Bytes(), &e) != nil || e.Time.IsZero() {
+	reader := bufio.NewReaderSize(f, maxLineSize)
+	for {
+		line, err := reader.ReadSlice('\n')
+		if err == nil {
+			kept = appendKept(kept, line, now)
 			continue
 		}
-		if now.Sub(e.Time) > retention {
+		if err == bufio.ErrBufferFull {
+			if derr := discardLine(reader); derr != nil && derr != io.EOF {
+				return derr
+			}
 			continue
 		}
-		kept = append(kept, e)
-	}
-	if err := scanner.Err(); err != nil {
+		if err == io.EOF {
+			kept = appendKept(kept, line, now)
+			break
+		}
+
 		return err
 	}
 
@@ -171,31 +221,84 @@ func (s *Store) load(path string) error {
 		s.remember(e)
 	}
 
-	// Compact when more than a quarter of the file is stale or it is oversized;
-	// compaction rewrites only the retained events.
-	stale := len(kept) == 0
-	if info, statErr := os.Stat(path); statErr == nil && info.Size() > maxFileSize {
-		stale = true
-	}
-	if stale || s.pruneNeeded(kept) {
+	if len(kept) == 0 || s.pruneNeeded(kept) {
 		return s.rewrite(kept)
 	}
 
 	return nil
 }
 
-func (s *Store) pruneNeeded(kept []Event) bool {
-	if info, err := os.Stat(s.path); err != nil || info.Size() <= maxFileSize/2 {
-		return false
+// appendKept parses one jsonl line and appends it when it decodes to a valid
+// event inside the retention window. Malformed and expired lines are skipped.
+func appendKept(kept []Event, line []byte, now time.Time) []Event {
+	var e Event
+	if json.Unmarshal(line, &e) != nil || e.Time.IsZero() || now.Sub(e.Time) > retention {
+		return kept
 	}
-	_ = kept
-	return true
+
+	return append(kept, e)
 }
 
-// rewrite atomically replaces the jsonl with the retained events.
+// discardLine consumes the remainder of a line that overflowed the read
+// buffer, so the next ReadSlice starts at the following line.
+func discardLine(r *bufio.Reader) error {
+	for {
+		_, err := r.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+
+		return err
+	}
+}
+
+// pruneNeeded reports whether the jsonl is worth rewriting: more than half of
+// it is stale or unparseable, or it has already grown past half the rotation
+// cap. Compaction then rewrites only the survivors.
+func (s *Store) pruneNeeded(kept []Event) bool {
+	info, err := os.Stat(s.path)
+	if err != nil {
+		return false
+	}
+	if info.Size() > maxFileSize/2 {
+		return true
+	}
+
+	var keptBytes int64
+	for i := range kept {
+		line, err := json.Marshal(kept[i])
+		if err != nil {
+			continue
+		}
+		keptBytes += int64(len(line)) + 1
+	}
+
+	return keptBytes < info.Size()/2
+}
+
+// rewrite atomically replaces the jsonl with the newest retained events that
+// fit maxRewriteBytes, in chronological order. Bounding the rewrite leaves
+// headroom under the rotation cap, so records after it append normally instead
+// of re-serializing a whole oversized ring on every call.
 func (s *Store) rewrite(kept []Event) error {
 	if s.path == "" {
 		return nil
+	}
+
+	start := len(kept)
+	var size int64
+	for start > 0 {
+		line, err := json.Marshal(kept[start-1])
+		if err != nil {
+			start--
+			continue
+		}
+		n := int64(len(line)) + 1
+		if size+n > maxRewriteBytes && start < len(kept) {
+			break
+		}
+		size += n
+		start--
 	}
 
 	tmp := s.path + ".tmp"
@@ -204,8 +307,8 @@ func (s *Store) rewrite(kept []Event) error {
 		return err
 	}
 
-	var size int64
-	for _, e := range kept {
+	size = 0
+	for _, e := range kept[start:] {
 		line, err := json.Marshal(e)
 		if err != nil {
 			continue
@@ -237,6 +340,7 @@ func (s *Store) rewrite(kept []Event) error {
 }
 
 func (s *Store) remember(e Event) Event {
+	e = clampEvent(e)
 	s.next++
 	e.Seq = s.next
 	s.ring = append(s.ring, e)
@@ -292,13 +396,13 @@ func (s *Store) Since(seq uint64) []Event {
 // Zero values mean "no filter". Levels is a set of accepted levels (empty set
 // = all levels).
 type QueryOpts struct {
-	Provider string
-	Model    string
-	Levels   map[string]bool
-	Text     string
+	Provider  string
+	Model     string
+	Levels    map[string]bool
+	Text      string
 	NotBefore time.Time
-	Page     int // 1-based; <=0 treated as 1
-	PerPage  int // <=0 treated as 50, capped at the ring size
+	Page      int // 1-based; <=0 treated as 1
+	PerPage   int // <=0 treated as 50, capped at the ring size
 }
 
 // Page is one slice of Query results, newest events first.

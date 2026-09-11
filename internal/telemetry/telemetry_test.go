@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -384,4 +385,159 @@ func TestSummarySinceSpansBeyondADay(t *testing.T) {
 	if got := m.SummarySince("g", time.Now().Add(-7*24*time.Hour)).Req; got != 1 {
 		t.Fatalf("7d summary req = %d, want 1", got)
 	}
+}
+
+// One oversized client-controlled field must not reach the ring or the jsonl:
+// a line the replay cannot read would silently disable disk persistence until
+// the file is repaired by hand.
+func TestRecordClampsOversizedFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "telemetry.jsonl")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	huge := strings.Repeat("x", 1<<20)
+	s.Record(Event{
+		Time:      time.Now(),
+		Model:     huge,
+		RequestID: huge,
+		Status:    502,
+		Err:       huge,
+		RespBody:  huge,
+		Attempts: []Attempt{
+			{Provider: "alpha", Status: 502, Note: huge, RespBody: huge},
+		},
+	})
+
+	buffered := s.Since(0)
+	if len(buffered) != 1 {
+		t.Fatalf("ring holds %d events, want 1", len(buffered))
+	}
+	assertClampedEvent(t, buffered[0])
+	s.Close()
+
+	reborn, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen after oversized record: %v", err)
+	}
+	defer reborn.Close()
+
+	got := reborn.Since(0)
+	if len(got) != 1 {
+		t.Fatalf("replayed %d events, want 1", len(got))
+	}
+	assertClampedEvent(t, got[0])
+
+	for _, line := range jsonlLines(t, path) {
+		if len(line) >= maxLineSize {
+			t.Fatalf("jsonl line = %d bytes, must stay readable by the replay", len(line))
+		}
+	}
+}
+
+func assertClampedEvent(t *testing.T, e Event) {
+	t.Helper()
+
+	if len(e.Attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(e.Attempts))
+	}
+
+	checks := []struct {
+		field string
+		value string
+		limit int
+	}{
+		{"model", e.Model, maxFieldSize},
+		{"request_id", e.RequestID, maxFieldSize},
+		{"err", e.Err, maxErrSize},
+		{"resp_body", e.RespBody, RespBodyCap},
+		{"attempt note", e.Attempts[0].Note, maxFieldSize},
+		{"attempt resp_body", e.Attempts[0].RespBody, RespBodyCap},
+	}
+	for _, c := range checks {
+		if len(c.value) == 0 || len(c.value) > c.limit+16 {
+			t.Fatalf("%s length = %d, want clamped to (0, %d]", c.field, len(c.value), c.limit+16)
+		}
+	}
+}
+
+// A single unreadable line must not abort the replay: NewStore has to come up,
+// keep the valid events, and compact the garbage away.
+func TestLoadSkipsOversizedLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "telemetry.jsonl")
+
+	valid1, err := json.Marshal(Event{Time: time.Now(), Model: "m1", Status: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid2, err := json.Marshal(Event{Time: time.Now(), Model: "m2", Status: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var file bytes.Buffer
+	file.Write(valid1)
+	file.WriteByte('\n')
+	file.WriteString(strings.Repeat("g", 2<<20))
+	file.WriteByte('\n')
+	file.WriteString("{not json}\n")
+	file.Write(valid2)
+	file.WriteByte('\n')
+	if err := os.WriteFile(path, file.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dirtySize := int64(file.Len())
+
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore with oversized line: %v", err)
+	}
+	defer s.Close()
+
+	got := s.Since(0)
+	if len(got) != 2 || got[0].Model != "m1" || got[1].Model != "m2" {
+		t.Fatalf("replay = %+v, want m1 and m2", got)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() >= dirtySize/2 {
+		t.Fatalf("file not compacted: %d bytes, was %d", info.Size(), dirtySize)
+	}
+	for _, line := range jsonlLines(t, path) {
+		if len(line) >= maxLineSize {
+			t.Fatalf("oversized line survived compaction: %d bytes", len(line))
+		}
+	}
+
+	// The compacted file must replay cleanly.
+	again, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	defer again.Close()
+	if n := len(again.Since(0)); n != 2 {
+		t.Fatalf("second replay = %d events, want 2", n)
+	}
+}
+
+func jsonlLines(t *testing.T, path string) [][]byte {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var lines [][]byte
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		if len(line) > 0 {
+			lines = append(lines, line)
+		}
+	}
+
+	return lines
 }

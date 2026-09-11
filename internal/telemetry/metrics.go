@@ -105,6 +105,9 @@ func (m *Metrics) series(name string) map[int64]*bucketStats {
 	out := make(map[int64]*bucketStats, len(src))
 	for k, v := range src {
 		cp := *v
+		// add() rewrites the reservoir's last slot in place, so the snapshot
+		// must own its slice: readers keep it after the lock is released.
+		cp.ttft = append([]int64(nil), v.ttft...)
 		out[k] = &cp
 	}
 
