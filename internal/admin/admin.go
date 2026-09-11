@@ -195,12 +195,13 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"global":    m.Summary("g"),
-		"providers": providers,
-		"legs":      legs,
-		"models":    models,
-		"hourly":    m.Windows("g", time.Hour, 24),
-		"weekly":    m.Windows("g", 24*time.Hour, 7),
+		"global":        m.Summary("g"),
+		"global_weekly": m.SummarySince("g", time.Now().Add(-7*24*time.Hour)),
+		"providers":     providers,
+		"legs":          legs,
+		"models":        models,
+		"hourly":        m.Windows("g", time.Hour, 24),
+		"weekly":        m.Windows("g", 24*time.Hour, 7),
 	})
 }
 

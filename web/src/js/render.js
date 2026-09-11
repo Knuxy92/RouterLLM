@@ -193,6 +193,12 @@ function renderTrafficChart() {
       chartRange === "7d"
         ? "Requests vs upstream errors · daily buckets · last 7 days"
         : "Requests vs upstream errors · hourly buckets · last 24h";
+  const dashSub = $("#dash-sub");
+  if (dashSub)
+    dashSub.textContent =
+      chartRange === "7d"
+        ? "Live overview of the router — last 7 days."
+        : "Live overview of the router — last 24 hours.";
 
   if (!series.some((s) => s.req > 0)) {
     wrap.innerHTML = `<p class="flex h-56 items-center justify-center text-xs text-muted-foreground">No traffic recorded yet.</p>`;
@@ -217,12 +223,14 @@ function renderTrafficChart() {
 }
 
 function renderKpis() {
-  const g = getMetrics()?.global;
+  const weekly = chartRange === "7d";
+  const g = weekly ? getMetrics()?.global_weekly : getMetrics()?.global;
   const set = (id, html) => {
     const el = $("#" + id);
     if (el) el.innerHTML = html;
   };
   const errPct = g && g.req > 0 ? ((g.err / g.req) * 100).toFixed(2) : null;
+  set("kpi-req-label", `Requests ${weekly ? "7d" : "24h"}`);
   set("kpi-req", fmtInt(g?.req ?? 0));
   set("kpi-req-sub", `${getStatus()?.models_serving ?? 0} models serving`);
   set(
@@ -242,6 +250,7 @@ function renderKpis() {
       : "—",
   );
   set("kpi-tok-sub", g?.tokens ? `${fmtInt(g.tokens)} tokens out` : "");
+  set("kpi-err-label", `Errors ${weekly ? "7d" : "24h"}`);
   set("kpi-err", fmtInt(g?.err ?? 0));
   set("kpi-err-sub", errPct != null ? `${errPct}% of requests` : "");
 }
@@ -941,6 +950,7 @@ export function initDynamic() {
     if (!btn) return;
     chartRange = btn.dataset.range;
     renderTrafficChart();
+    renderKpis();
   });
   $("#reload-btn")?.addEventListener("click", async (e) => {
     e.currentTarget.disabled = true;

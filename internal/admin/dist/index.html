@@ -8,9 +8,9 @@
 <link rel="icon" href="/admin/favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <script src="/admin/vendor/lucide.min.js"></script>
-  <script type="module" crossorigin src="/admin/assets/index-C8AjzksI.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-DYnhQAyS.js"></script>
   <link rel="stylesheet" crossorigin href="/admin/assets/index-B75Samaa.css">
 </head>
 <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
@@ -136,7 +136,7 @@
         <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
-            <p class="text-sm text-muted-foreground">Live overview of the router — last 24 hours.</p>
+            <p id="dash-sub" class="text-sm text-muted-foreground">Live overview of the router — last 24 hours.</p>
           </div>
           <div class="flex items-center gap-2">
             <div class="seg" id="chart-range-seg"><button class="seg-btn active" data-range="24h">24h</button><button class="seg-btn" data-range="7d">7d</button></div>
@@ -146,7 +146,7 @@
 
         <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
           <div class="rounded-lg border bg-card p-4 shadow-sm">
-            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Requests 24h</p><i data-lucide="zap" class="size-3.5 text-muted-foreground"></i></div>
+            <div class="flex items-center justify-between"><p id="kpi-req-label" class="text-xs text-muted-foreground">Requests 24h</p><i data-lucide="zap" class="size-3.5 text-muted-foreground"></i></div>
             <p id="kpi-req" class="mt-1.5 font-mono text-xl font-semibold">—</p>
             <span id="kpi-req-sub" class="badge tone-info mt-1.5">—</span>
           </div>
@@ -166,7 +166,7 @@
             <span id="kpi-tok-sub" class="badge tone-info mt-1.5">—</span>
           </div>
           <div class="col-span-2 rounded-lg border bg-card p-4 shadow-sm lg:col-span-1">
-            <div class="flex items-center justify-between"><p class="text-xs text-muted-foreground">Errors 24h</p><i data-lucide="shield-alert" class="size-3.5 text-muted-foreground"></i></div>
+            <div class="flex items-center justify-between"><p id="kpi-err-label" class="text-xs text-muted-foreground">Errors 24h</p><i data-lucide="shield-alert" class="size-3.5 text-muted-foreground"></i></div>
             <p id="kpi-err" class="mt-1.5 font-mono text-xl font-semibold">—</p>
             <span id="kpi-err-sub" class="badge tone-error mt-1.5">—</span>
           </div>
@@ -329,7 +329,7 @@
     <button id="pd-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
   </div>
   <div id="pd-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
-</aside>
+</aside>
 
 <!-- global search / command palette -->
 <dialog id="cmdk" class="cmdk-dialog">

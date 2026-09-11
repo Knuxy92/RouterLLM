@@ -367,3 +367,21 @@ func TestWeeklyWindowsAnchorToMidnight(t *testing.T) {
 		t.Fatalf("newest daily window = %s, want today %s", last, now.Format("2006-01-02"))
 	}
 }
+
+// The dashboard's 24h/7d toggle needs a real week-long rollup: p50 and tok/s
+// cannot be reconstructed client-side from the daily windows, so the backend
+// serves a second Summary over a wider span.
+func TestSummarySinceSpansBeyondADay(t *testing.T) {
+	m := NewMetrics()
+
+	old := testEvent("alpha", "up-a", 200, 150)
+	old.Time = time.Now().Add(-72 * time.Hour)
+	m.Record(old)
+
+	if got := m.Summary("g").Req; got != 0 {
+		t.Fatalf("24h summary req = %d, want 0 (event is 3 days old)", got)
+	}
+	if got := m.SummarySince("g", time.Now().Add(-7*24*time.Hour)).Req; got != 1 {
+		t.Fatalf("7d summary req = %d, want 1", got)
+	}
+}

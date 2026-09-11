@@ -163,15 +163,20 @@ type Summary struct {
 
 // Summary rolls the series over the trailing 24h.
 func (m *Metrics) Summary(name string) Summary {
+	return m.SummarySince(name, time.Now().Add(-24*time.Hour))
+}
+
+// SummarySince rolls the series over the buckets at or after since (5-minute
+// bucket granularity).
+func (m *Metrics) SummarySince(name string, since time.Time) Summary {
 	src := m.series(name)
-	now := time.Now()
-	dayAgo := bucketStart(now.Add(-24 * time.Hour))
+	cutoff := bucketStart(since)
 
 	var acc bucketStats
 	up := 0
 	total := 0
 	for start, b := range src {
-		if start < dayAgo {
+		if start < cutoff {
 			continue
 		}
 		acc.req += b.req
