@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,21 +60,41 @@ func loadYAML(path string) (*Config, error) {
 		return nil, err
 	}
 
-	return ParseBytes(data)
+	return parseBytesAt(data, path)
 }
 
 // ParseBytes decodes an in-memory config document. Callers that need the
-// content hash of exactly what was parsed read the file once and use this.
+// content hash of exactly what was parsed read the file once and use this. A
+// relative system_prompt_file resolves against the directory of the served
+// config file (ROUTERLLM_CONFIG_FILE), matching LoadFile.
 func ParseBytes(data []byte) (*Config, error) {
+	return parseBytesAt(data, ConfigPath())
+}
+
+// ValidateBytes parses a document exactly like LoadFile does, resolving
+// referenced files (system prompt, account stores) against the served config
+// path. The admin editor rejects a mutation with this before the bytes reach
+// disk, so a rejected edit can never leave an unloadable file behind.
+func ValidateBytes(data []byte) error {
+	_, err := parseBytesAt(data, ConfigPath())
+
+	return err
+}
+
+func parseBytesAt(data []byte, configPath string) (*Config, error) {
 	var yc yamlConfig
 	if err := yaml.Unmarshal(data, &yc); err != nil {
 		return nil, err
 	}
 
-	return yamlToConfig(&yc)
+	return yamlToConfig(&yc, configPath)
 }
 
-func yamlToConfig(yc *yamlConfig) (*Config, error) {
+func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
+	if err := validateConfig(yc); err != nil {
+		return nil, err
+	}
+
 	port := yc.Port
 	if port == "" {
 		port = "1765"
@@ -88,68 +109,21 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		cooldown = d
 	}
 
-	var systemPrompt string
-	if yc.SystemPromptFile != "" {
-		data, err := os.ReadFile(yc.SystemPromptFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read system_prompt_file %q: %w", yc.SystemPromptFile, err)
-		}
-		systemPrompt = strings.TrimSpace(string(data))
+	systemPrompt, err := loadSystemPrompt(yc.SystemPromptFile, configPath)
+	if err != nil {
+		return nil, err
 	}
 
 	var providers []ProviderConfig
-	seenProviders := make(map[string]bool)
-
 	for _, yp := range yc.Providers {
-		if yp.Name == "" {
-			return nil, fmt.Errorf("provider at index %d has empty name", len(providers))
-		}
-		if seenProviders[yp.Name] {
-			return nil, fmt.Errorf("duplicate provider name %q", yp.Name)
-		}
-		seenProviders[yp.Name] = true
-
-		if yp.BaseURL == "" {
-			return nil, fmt.Errorf("provider %q has empty base_url", yp.Name)
-		}
-
-		switch yp.Style {
-		case "openai", "anthropic", "cline", "google", "alysis":
-		case "":
-			return nil, fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, or alysis)", yp.Name)
-		default:
-			return nil, fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, or alysis)", yp.Name, yp.Style)
-		}
-
-		switch yp.AuthMode {
-		case "bearer", "x-api-key", "both":
-		case "":
+		if yp.AuthMode == "" {
 			yp.AuthMode = "bearer"
-		default:
-			return nil, fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
 		}
-
-		switch yp.ReasoningStyle {
-		case "openai", "openrouter", "qwen", "raw":
-		case "":
+		if yp.ReasoningStyle == "" {
 			yp.ReasoningStyle = "openai"
-		default:
-			return nil, fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
-		}
-
-		if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && !yp.Disabled {
-			return nil, fmt.Errorf("provider %q: api_key is required", yp.Name)
 		}
 
 		keys := expandKeys(yp.APIKey)
-		if !yp.Disabled {
-			for _, k := range keys {
-				if strings.HasPrefix(k, "${") && strings.HasSuffix(k, "}") {
-					return nil, fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
-				}
-			}
-		}
-
 		if yp.Style == "cline" && len(keys) == 0 && !yp.Disabled {
 			store, err := cline.LoadAccountStore(cline.DefaultAccountsPath())
 			if err != nil {
@@ -192,34 +166,6 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		providers = append(providers, p)
 	}
 
-	if len(providers) == 0 {
-		return nil, fmt.Errorf("at least one provider is required")
-	}
-
-	if len(yc.Routes) == 0 {
-		return nil, fmt.Errorf("at least one route is required")
-	}
-
-	for _, rule := range yc.Routes {
-		if rule.ModelID == "" {
-			return nil, fmt.Errorf("route has empty model name")
-		}
-		if len(rule.Routes) == 0 {
-			return nil, fmt.Errorf("route %q has no upstream routes", rule.ModelID)
-		}
-		for _, spec := range rule.Routes {
-			if spec.Provider == "" {
-				return nil, fmt.Errorf("route %q has a spec with empty provider", rule.ModelID)
-			}
-			if !seenProviders[spec.Provider] {
-				return nil, fmt.Errorf("route %q references unknown provider %q", rule.ModelID, spec.Provider)
-			}
-			if spec.Model == "" {
-				return nil, fmt.Errorf("route %q provider %q has empty upstream model", rule.ModelID, spec.Provider)
-			}
-		}
-	}
-
 	client := &http.Client{Transport: newTransport()}
 	forwardClientHeaders := true
 	if yc.ForwardClientHeaders != nil {
@@ -237,6 +183,125 @@ func yamlToConfig(yc *yamlConfig) (*Config, error) {
 		Client:               client,
 		Routes:               yc.Routes,
 	}, nil
+}
+
+func loadSystemPrompt(path, configPath string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+
+	resolved := path
+	if !filepath.IsAbs(resolved) && configPath != "" {
+		resolved = filepath.Join(filepath.Dir(configPath), resolved)
+	}
+
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to read system_prompt_file %q: %w", path, err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
+}
+
+func validateConfig(yc *yamlConfig) error {
+	if err := validatePort(yc.Port); err != nil {
+		return err
+	}
+
+	if len(yc.Providers) == 0 {
+		return fmt.Errorf("at least one provider is required")
+	}
+
+	seenProviders := make(map[string]bool, len(yc.Providers))
+	for i, yp := range yc.Providers {
+		if err := validateProvider(yp, i, seenProviders); err != nil {
+			return err
+		}
+	}
+
+	if len(yc.Routes) == 0 {
+		return fmt.Errorf("at least one route is required")
+	}
+
+	seenModels := make(map[string]bool, len(yc.Routes))
+	for _, rule := range yc.Routes {
+		if rule.ModelID == "" {
+			return fmt.Errorf("route has empty model name")
+		}
+		if seenModels[rule.ModelID] {
+			return fmt.Errorf("duplicate route model_id %q", rule.ModelID)
+		}
+		seenModels[rule.ModelID] = true
+
+		if len(rule.Routes) == 0 {
+			return fmt.Errorf("route %q has no upstream routes", rule.ModelID)
+		}
+		for _, spec := range rule.Routes {
+			if spec.Provider == "" {
+				return fmt.Errorf("route %q has a spec with empty provider", rule.ModelID)
+			}
+			if !seenProviders[spec.Provider] {
+				return fmt.Errorf("route %q references unknown provider %q", rule.ModelID, spec.Provider)
+			}
+			if spec.Model == "" {
+				return fmt.Errorf("route %q provider %q has empty upstream model", rule.ModelID, spec.Provider)
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateProvider(yp yamlProvider, index int, seen map[string]bool) error {
+	if yp.Name == "" {
+		return fmt.Errorf("provider at index %d has empty name", index)
+	}
+	if seen[yp.Name] {
+		return fmt.Errorf("duplicate provider name %q", yp.Name)
+	}
+	seen[yp.Name] = true
+
+	if yp.BaseURL == "" {
+		return fmt.Errorf("provider %q has empty base_url", yp.Name)
+	}
+
+	switch yp.Style {
+	case "openai", "anthropic", "cline", "google", "alysis":
+	case "":
+		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, or alysis)", yp.Name)
+	default:
+		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, or alysis)", yp.Name, yp.Style)
+	}
+
+	switch yp.AuthMode {
+	case "bearer", "x-api-key", "both", "":
+	default:
+		return fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
+	}
+
+	switch yp.ReasoningStyle {
+	case "openai", "openrouter", "qwen", "raw", "":
+	default:
+		return fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
+	}
+
+	if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && !yp.Disabled {
+		return fmt.Errorf("provider %q: api_key is required", yp.Name)
+	}
+
+	if !yp.Disabled {
+		keys := expandKeys(yp.APIKey)
+		for _, k := range keys {
+			if strings.HasPrefix(k, "${") && strings.HasSuffix(k, "}") {
+				return fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
+			}
+		}
+		if len(keys) == 0 && yp.Style != "cline" && yp.Style != "alysis" {
+			return fmt.Errorf("provider %q: api_key expanded to zero keys (is the environment variable empty?)", yp.Name)
+		}
+	}
+
+	return nil
 }
 
 func expandKeys(raw []string) []string {

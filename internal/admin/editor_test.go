@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -36,6 +37,11 @@ routes:
 
 func newTestEditor(t *testing.T) (*Editor, string) {
 	t.Helper()
+
+	// The sample config keeps ${ENV} placeholders; the editor validates the
+	// mutated bytes with the config loader, so the variables must resolve.
+	t.Setenv("OPENCODE_API_KEY", "sk-opencode-test")
+	t.Setenv("CRAX_API_KEY", "sk-crax-test")
 
 	path := filepath.Join(t.TempDir(), "routerllm.yaml")
 	if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
@@ -258,5 +264,55 @@ func TestSetModelDisabledUnknownModel(t *testing.T) {
 	}
 	if readFile(t, path) != before {
 		t.Fatal("file was modified despite the error")
+	}
+}
+
+// Two concurrent toggles read-modify-write the same file. Without the editor
+// lock the second write is based on stale bytes and silently drops the first
+// toggle.
+func TestEditorConcurrentTogglesBothLand(t *testing.T) {
+	editor, path := newTestEditor(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, name := range []string{"opencode", "crax"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- editor.SetProviderDisabled(name, true)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent toggle error = %v", err)
+		}
+	}
+
+	out := readFile(t, path)
+	for _, name := range []string{"opencode", "crax"} {
+		if block := providerBlock(out, name); !strings.Contains(block, "disabled: true") {
+			t.Fatalf("%s toggle was lost:\n%s", name, out)
+		}
+	}
+}
+
+// A mutation that would produce an unloadable document is rejected before
+// anything reaches disk: config and backup stay byte-identical.
+func TestEditorRejectsInvalidMutationWithoutWriting(t *testing.T) {
+	editor, path := newTestEditor(t)
+	before := readFile(t, path)
+
+	err := editor.AddRoute("opus-5", "ghost", "ghost-model", "", false)
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("error = %v, want unknown provider rejection", err)
+	}
+
+	if readFile(t, path) != before {
+		t.Fatal("config was rewritten despite the validation error")
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup was written despite the validation error: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -452,5 +453,284 @@ routes:
 	_, err := loadYAML(path)
 	if err == nil || !strings.Contains(err.Error(), "environment variable") {
 		t.Fatalf("expected 'environment variable' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLResolverEmptyEnvVarExpandsToNoKeys(t *testing.T) {
+	t.Setenv("ROUTERLLM_TEST_EMPTY_KEY", "")
+
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: ${ROUTERLLM_TEST_EMPTY_KEY}
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), "zero keys") {
+		t.Fatalf("expected 'zero keys' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLResolverSetEnvVarExpandsKeys(t *testing.T) {
+	t.Setenv("ROUTERLLM_TEST_MULTI_KEY", "sk-a, sk-b")
+
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: ${ROUTERLLM_TEST_MULTI_KEY}
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Providers[0].Keys; len(got) != 2 || got[0] != "sk-a" || got[1] != "sk-b" {
+		t.Fatalf("keys = %#v, want [sk-a sk-b]", got)
+	}
+}
+
+func TestLoadYAMLDisabledProviderEmptyEnvVarIsAllowed(t *testing.T) {
+	t.Setenv("ROUTERLLM_TEST_EMPTY_KEY", "")
+
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: ${ROUTERLLM_TEST_EMPTY_KEY}
+    disabled: true
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+	if _, err := loadYAML(path); err != nil {
+		t.Fatalf("disabled provider error = %v, want nil", err)
+	}
+}
+
+func TestLoadYAMLDuplicateRouteModelIDRejected(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: first
+  - model_id: m
+    routes:
+      - provider: test
+        model: second
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), `duplicate route model_id "m"`) {
+		t.Fatalf("expected 'duplicate route model_id' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLSystemPromptFileRelativeToConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "system_prompt.txt"), []byte("  be nice  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "routerllm.yaml")
+	if err := os.WriteFile(path, []byte(`
+system_prompt_file: system_prompt.txt
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(t.TempDir())
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SystemPrompt != "be nice" {
+		t.Fatalf("system prompt = %q, want %q", cfg.SystemPrompt, "be nice")
+	}
+}
+
+func TestLoadYAMLSystemPromptFileAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("absolute prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path := writeTempYAML(t, fmt.Sprintf(`
+system_prompt_file: %s
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`, promptPath))
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SystemPrompt != "absolute prompt" {
+		t.Fatalf("system prompt = %q, want %q", cfg.SystemPrompt, "absolute prompt")
+	}
+}
+
+func TestLoadYAMLInvalidPortRejected(t *testing.T) {
+	for _, port := range []string{"not-a-port", "0", "-1", "65536"} {
+		path := writeTempYAML(t, fmt.Sprintf(`
+port: %q
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`, port))
+
+		_, err := loadYAML(path)
+		if err == nil || !strings.Contains(err.Error(), "invalid port") {
+			t.Errorf("port %q: error = %v, want invalid port error", port, err)
+		}
+	}
+}
+
+func TestLoadYAMLValidPortAccepted(t *testing.T) {
+	for _, port := range []string{"1", "1765", "65535"} {
+		path := writeTempYAML(t, fmt.Sprintf(`
+port: %q
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`, port))
+
+		cfg, err := loadYAML(path)
+		if err != nil {
+			t.Errorf("port %q: unexpected error: %v", port, err)
+			continue
+		}
+		if cfg.Port != port {
+			t.Errorf("port = %q, want %q", cfg.Port, port)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidPortEnvironment(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+	t.Setenv("ROUTERLLM_CONFIG_FILE", path)
+	t.Setenv("ROUTERLLM_PORT", "not-a-port")
+
+	if cfg := Load(); cfg != nil {
+		t.Fatalf("Load() = %+v, want nil for an invalid ROUTERLLM_PORT", cfg)
+	}
+}
+
+func TestValidateBytesMatchesLoadFileValidation(t *testing.T) {
+	valid := []byte(`
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+	if err := ValidateBytes(valid); err != nil {
+		t.Fatalf("ValidateBytes(valid) error = %v, want nil", err)
+	}
+
+	broken := []byte(`
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: ghost
+        model: m
+`)
+	if err := ValidateBytes(broken); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("ValidateBytes(broken) error = %v, want unknown provider", err)
+	}
+}
+
+func TestValidateBytesRejectsUnreadableSystemPromptFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-prompt.txt")
+	data := []byte(fmt.Sprintf(`
+system_prompt_file: %s
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`, missing))
+
+	if err := ValidateBytes(data); err == nil || !strings.Contains(err.Error(), "system_prompt_file") {
+		t.Fatalf("ValidateBytes() error = %v, want unreadable system_prompt_file", err)
 	}
 }

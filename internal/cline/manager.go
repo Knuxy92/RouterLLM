@@ -3,6 +3,7 @@ package cline
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -52,9 +53,12 @@ func (m *Manager) AccessToken(ctx context.Context, refreshToken string, force bo
 	m.tokens[refreshToken] = token
 	m.mu.Unlock()
 
+	// Persisting the rotated refresh token is best-effort: the account file may
+	// sit on a read-only mount (Docker), and the in-memory token still serves.
+	// Failing the request here would wrongly mark a healthy key dead.
 	if m.store != nil {
 		if err := m.store.Rotate(refreshToken, token.RefreshToken); err != nil {
-			return "", err
+			log.Printf("cline: rotated refresh token not persisted: %v", err)
 		}
 	}
 

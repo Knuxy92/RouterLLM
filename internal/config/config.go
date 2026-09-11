@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,10 +47,30 @@ func Load() *Config {
 		return nil
 	}
 	if port := os.Getenv("ROUTERLLM_PORT"); port != "" {
+		if err := validatePort(port); err != nil {
+			log.Printf("config error: %v", err)
+			return nil
+		}
 		cfg.Port = port
 	}
 
 	return cfg
+}
+
+// validatePort accepts an empty string (caller applies the default) and any
+// integer in the TCP range. Port 0 is rejected on purpose: it binds a random
+// port and silently breaks every client pointing at the configured one.
+func validatePort(port string) error {
+	if port == "" {
+		return nil
+	}
+
+	value, err := strconv.Atoi(port)
+	if err != nil || value < 1 || value > 65535 {
+		return fmt.Errorf("invalid port %q: must be an integer between 1 and 65535", port)
+	}
+
+	return nil
 }
 
 func newTransport() *http.Transport {

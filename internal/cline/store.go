@@ -94,6 +94,9 @@ func (s *AccountStore) Add(account Account) error {
 	return s.persist()
 }
 
+// Rotate rewrites the account entry holding oldToken. The file is re-read
+// first so an account added by another process (a concurrent --cline-login)
+// survives the rewrite instead of being dropped from disk.
 func (s *AccountStore) Rotate(oldToken, newToken string) error {
 	if oldToken == newToken || newToken == "" {
 		return nil
@@ -102,11 +105,51 @@ func (s *AccountStore) Rotate(oldToken, newToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.mergeFileLocked(); err != nil {
+		return err
+	}
+
+	rotated := false
 	for i, account := range s.accounts {
 		if account.RefreshToken == oldToken {
 			s.accounts[i].RefreshToken = newToken
-			return s.persist()
+			rotated = true
 		}
+	}
+	if !rotated {
+		return nil
+	}
+
+	return s.persist()
+}
+
+// mergeFileLocked folds accounts that appeared in the file since it was loaded
+// into memory. A missing file is not an error: the caller may deliberately
+// point the store at a path that does not exist yet. Caller must hold s.mu.
+func (s *AccountStore) mergeFileLocked() error {
+	raw, err := os.ReadFile(s.path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read cline accounts %q: %w", s.path, err)
+	}
+
+	var file accountsFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return fmt.Errorf("parse cline accounts %q: %w", s.path, err)
+	}
+
+	known := make(map[string]bool, len(s.accounts))
+	for _, account := range s.accounts {
+		known[account.RefreshToken] = true
+	}
+	for _, account := range file.Accounts {
+		if account.RefreshToken == "" || known[account.RefreshToken] {
+			continue
+		}
+		s.accounts = append(s.accounts, account)
+		known[account.RefreshToken] = true
 	}
 
 	return nil
@@ -118,8 +161,37 @@ func (s *AccountStore) persist() error {
 		return fmt.Errorf("encode cline accounts: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, raw, 0600); err != nil {
-		return fmt.Errorf("write cline accounts %q: %w", s.path, err)
+	return writeFileAtomic(s.path, raw, 0600)
+}
+
+// writeFileAtomic writes through a temp file in the same directory and renames
+// it over the target, so a crash mid-write cannot leave a truncated account
+// file behind.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("write cline accounts %q: %w", path, err)
+	}
+
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write cline accounts %q: %w", path, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write cline accounts %q: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write cline accounts %q: %w", path, err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write cline accounts %q: %w", path, err)
 	}
 
 	return nil

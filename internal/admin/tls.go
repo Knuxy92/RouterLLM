@@ -25,10 +25,25 @@ var maxSerial = new(big.Int).Lsh(big.NewInt(1), 128)
 // is cheaper than running one. Restart keeps the same cert, so the warning is
 // a once-per-cert event; delete the files to mint a fresh one.
 func EnsureCertificate(certPath, keyPath string) (tls.Certificate, error) {
-	if _, err := os.Stat(certPath); err == nil {
-		if _, err := os.Stat(keyPath); err == nil {
-			return tls.LoadX509KeyPair(certPath, keyPath)
+	certExists, err := fileExists(certPath)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("cannot check certificate %q: %w", certPath, err)
+	}
+
+	keyExists, err := fileExists(keyPath)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("cannot check key %q: %w", keyPath, err)
+	}
+
+	switch {
+	case certExists && keyExists:
+		return tls.LoadX509KeyPair(certPath, keyPath)
+	case certExists || keyExists:
+		missing := keyPath
+		if keyExists {
+			missing = certPath
 		}
+		return tls.Certificate{}, fmt.Errorf("admin TLS: %q and %q must both exist or both be absent (%q is missing) — restore it or delete the other file to regenerate a self-signed pair", certPath, keyPath, missing)
 	}
 
 	cert, key, err := generateSelfSigned()
@@ -43,6 +58,18 @@ func EnsureCertificate(certPath, keyPath string) (tls.Certificate, error) {
 	}
 
 	return tls.X509KeyPair(cert, key)
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+
+	return false, err
 }
 
 func generateSelfSigned() (certPEM, keyPEM []byte, err error) {

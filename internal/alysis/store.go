@@ -101,8 +101,37 @@ func (s *AccountStore) persist() error {
 		return fmt.Errorf("encode alysis accounts: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, raw, 0600); err != nil {
-		return fmt.Errorf("write alysis accounts %q: %w", s.path, err)
+	return writeFileAtomic(s.path, raw, 0600)
+}
+
+// writeFileAtomic writes through a temp file in the same directory and renames
+// it over the target, so a crash mid-write cannot leave a truncated account
+// file behind.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("write alysis accounts %q: %w", path, err)
+	}
+
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write alysis accounts %q: %w", path, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write alysis accounts %q: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write alysis accounts %q: %w", path, err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write alysis accounts %q: %w", path, err)
 	}
 
 	return nil

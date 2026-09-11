@@ -23,3 +23,27 @@ func TestLoadDotenvRemovesInlineComment(t *testing.T) {
 		t.Fatalf("ROUTERLLM_LOG_FILE = %q, want routerllm.log", got)
 	}
 }
+
+func TestLoadDotenvStripsBOMAndExportPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	content := "\uFEFFexport ROUTERLLM_TEST_BOM_KEY=bom-value\nROUTERLLM_TEST_PLAIN_KEY=plain-value\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"ROUTERLLM_TEST_BOM_KEY", "ROUTERLLM_TEST_PLAIN_KEY"} {
+		t.Setenv(key, "seed")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := LoadDotenv(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("ROUTERLLM_TEST_BOM_KEY"); got != "bom-value" {
+		t.Fatalf("ROUTERLLM_TEST_BOM_KEY = %q, want bom-value", got)
+	}
+	if got := os.Getenv("ROUTERLLM_TEST_PLAIN_KEY"); got != "plain-value" {
+		t.Fatalf("ROUTERLLM_TEST_PLAIN_KEY = %q, want plain-value", got)
+	}
+}

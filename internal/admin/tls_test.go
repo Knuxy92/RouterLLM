@@ -94,3 +94,39 @@ func mustFile(t *testing.T, path string) []byte {
 
 	return data
 }
+
+// A half-present pair means someone pointed the config at one user-supplied
+// file: regenerating would silently overwrite it, so it must be an error.
+func TestEnsureCertificateRejectsPartialPair(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "admin-tls.crt")
+	keyPath := filepath.Join(dir, "admin-tls.key")
+
+	original := []byte("user certificate, must not be overwritten")
+	if err := os.WriteFile(certPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := EnsureCertificate(certPath, keyPath); err == nil {
+		t.Fatal("expected an error when only the certificate exists")
+	}
+	if got := mustFile(t, certPath); string(got) != string(original) {
+		t.Fatal("existing certificate was overwritten")
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("key file should not have been created: %v", err)
+	}
+
+	if err := os.Remove(certPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("user key, must not be overwritten"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureCertificate(certPath, keyPath); err == nil {
+		t.Fatal("expected an error when only the key exists")
+	}
+	if _, err := os.Stat(certPath); !os.IsNotExist(err) {
+		t.Fatalf("certificate file should not have been created: %v", err)
+	}
+}

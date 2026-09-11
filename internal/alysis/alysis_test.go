@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,29 @@ func TestLoadAccountStoreMissingFileIsEmpty(t *testing.T) {
 	}
 	if len(store.GatewayKeys()) != 0 {
 		t.Fatal("expected no gateway keys")
+	}
+}
+
+func TestAccountStorePersistLeavesNoTempFilesBehind(t *testing.T) {
+	store := testStore(t, "slk_one")
+
+	dir := filepath.Dir(store.Path())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(store.Path()) {
+		t.Fatalf("directory entries = %v, want only the accounts file", entries)
+	}
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(store.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("accounts file mode = %o, want 600", perm)
+		}
 	}
 }
 

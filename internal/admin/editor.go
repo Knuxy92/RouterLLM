@@ -6,12 +6,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"routerllm/internal/config"
 )
 
 type Editor struct {
 	path string
+	mu   sync.Mutex
 }
 
 func NewEditor(path string) *Editor {
@@ -185,6 +189,9 @@ func effortWhitelist() string {
 }
 
 func (e *Editor) mutate(edit func(*yaml.Node) error) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	original, err := os.ReadFile(e.path)
 	if err != nil {
 		return err
@@ -205,6 +212,10 @@ func (e *Editor) mutate(edit func(*yaml.Node) error) error {
 	encoded, err := encodeDocument(&doc)
 	if err != nil {
 		return err
+	}
+
+	if err := config.ValidateBytes(encoded); err != nil {
+		return fmt.Errorf("edited config would not load, file left unchanged: %w", err)
 	}
 
 	if err := os.WriteFile(e.path+".bak", original, 0o600); err != nil {

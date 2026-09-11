@@ -15,10 +15,11 @@ func LoadDotenv(path string) error {
 
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+		line := strings.TrimSpace(strings.TrimPrefix(sc.Text(), "\uFEFF"))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
 		key, val, found := strings.Cut(line, "=")
 		if !found {
 			continue

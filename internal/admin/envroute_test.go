@@ -30,11 +30,24 @@ routes:
         model: alpha-upstream
 `
 
-func TestAddRouteAppendsLegPreservingComments(t *testing.T) {
+func writeAddRouteConfig(t *testing.T) string {
+	t.Helper()
+
+	// addRouteConfig keeps ${ENV} placeholders and Editor mutations run through
+	// the config validator, so the referenced variables must resolve.
+	t.Setenv("ALPHA_KEY", "sk-alpha")
+	t.Setenv("BETA_KEY", "sk-beta")
+
 	path := filepath.Join(t.TempDir(), "routerllm.yaml")
 	if err := os.WriteFile(path, []byte(addRouteConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
+	return path
+}
+
+func TestAddRouteAppendsLegPreservingComments(t *testing.T) {
+	path := writeAddRouteConfig(t)
 
 	if err := NewEditor(path).AddRoute("demo-model", "beta", "beta-upstream", "", false); err != nil {
 		t.Fatal(err)
@@ -61,10 +74,7 @@ func TestAddRouteAppendsLegPreservingComments(t *testing.T) {
 }
 
 func TestAddRouteWritesDefaultsAndDisabled(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "routerllm.yaml")
-	if err := os.WriteFile(path, []byte(addRouteConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeAddRouteConfig(t)
 
 	editor := NewEditor(path)
 	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", false); err != nil {
@@ -103,10 +113,8 @@ func TestAddRouteWritesDefaultsAndDisabled(t *testing.T) {
 }
 
 func TestAddRouteRejectsUnknownModelAndEmptyFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "routerllm.yaml")
-	if err := os.WriteFile(path, []byte(addRouteConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeAddRouteConfig(t)
+
 	editor := NewEditor(path)
 
 	if err := editor.AddRoute("ghost-model", "beta", "m", "", false); err == nil || !strings.Contains(err.Error(), "not found") {
@@ -124,10 +132,8 @@ func TestAddRouteRejectsUnknownModelAndEmptyFields(t *testing.T) {
 }
 
 func TestRemoveRouteDeletesLegAndKeepsFormatting(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "routerllm.yaml")
-	if err := os.WriteFile(path, []byte(addRouteConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeAddRouteConfig(t)
+
 	editor := NewEditor(path)
 	if err := editor.AddRoute("demo-model", "beta", "beta-upstream", "high", false); err != nil {
 		t.Fatal(err)
@@ -160,10 +166,8 @@ func TestRemoveRouteDeletesLegAndKeepsFormatting(t *testing.T) {
 }
 
 func TestRemoveRouteGuards(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "routerllm.yaml")
-	if err := os.WriteFile(path, []byte(addRouteConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeAddRouteConfig(t)
+
 	editor := NewEditor(path)
 
 	if err := editor.RemoveRoute("demo-model", 0); err == nil || !strings.Contains(err.Error(), "last leg") {
