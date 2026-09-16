@@ -31,13 +31,15 @@ type ProviderStatus struct {
 }
 
 type RouteLeg struct {
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	StyleCall        string `json:"stylecall,omitempty"`
-	Disabled         bool   `json:"disabled"`
-	Active           bool   `json:"active"`
-	ProviderDisabled bool   `json:"provider_disabled"`
-	Note             string `json:"note,omitempty"`
+	Provider          string `json:"provider"`
+	Model             string `json:"model"`
+	StyleCall         string `json:"stylecall,omitempty"`
+	SanitizeToolNames bool   `json:"sanitize_tool_names,omitempty"`
+	DedupeTools       bool   `json:"dedupe_tools,omitempty"`
+	Disabled          bool   `json:"disabled"`
+	Active            bool   `json:"active"`
+	ProviderDisabled  bool   `json:"provider_disabled"`
+	Note              string `json:"note,omitempty"`
 }
 
 type ModelStatus struct {
@@ -154,11 +156,13 @@ func (d Deps) buildModels(reg *provider.Registry) []ModelStatus {
 		for _, spec := range rule.Routes {
 			_, providerLive := reg.Provider(spec.Provider)
 			leg := RouteLeg{
-				Provider:         spec.Provider,
-				Model:            spec.Model,
-				StyleCall:        spec.StyleCall,
-				Disabled:         spec.Disabled,
-				ProviderDisabled: !providerLive,
+				Provider:          spec.Provider,
+				Model:             spec.Model,
+				StyleCall:         spec.StyleCall,
+				SanitizeToolNames: spec.SanitizeToolNames,
+				DedupeTools:       spec.DedupeTools,
+				Disabled:          spec.Disabled,
+				ProviderDisabled:  !providerLive,
 			}
 
 			if !spec.Disabled && providerLive && !activeAssigned {

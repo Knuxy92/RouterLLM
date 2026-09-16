@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"routerllm/internal/model"
 )
 
 func writeTempYAML(t *testing.T, content string) string {
@@ -759,6 +763,74 @@ routes:
 	}
 	if got := cfg.Routes[0].Routes[0].StyleCall; got != "responses" {
 		t.Fatalf("stylecall = %q, want responses", got)
+	}
+}
+
+func TestLoadYAMLToolHygieneFlagsRoundTrip(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream-model
+        sanitize_tool_names: true
+        dedupe_tools: true
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec := cfg.Routes[0].Routes[0]
+	if !spec.SanitizeToolNames || !spec.DedupeTools {
+		t.Fatalf("flags = (%v, %v), want (true, true)", spec.SanitizeToolNames, spec.DedupeTools)
+	}
+
+	raw, err := yaml.Marshal(model.Rule{
+		ModelID: "test-model",
+		Routes:  []model.Spec{{Provider: "test", Model: "upstream-model", SanitizeToolNames: true, DedupeTools: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded model.Rule
+	if err := yaml.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Routes[0].SanitizeToolNames || !decoded.Routes[0].DedupeTools {
+		t.Fatalf("round-trip flags = (%v, %v), want (true, true)", decoded.Routes[0].SanitizeToolNames, decoded.Routes[0].DedupeTools)
+	}
+}
+
+func TestLoadYAMLToolHygieneFlagsDefaultFalse(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec := cfg.Routes[0].Routes[0]
+	if spec.SanitizeToolNames || spec.DedupeTools {
+		t.Fatalf("flags = (%v, %v), want (false, false)", spec.SanitizeToolNames, spec.DedupeTools)
 	}
 }
 

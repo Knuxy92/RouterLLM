@@ -49,10 +49,12 @@ func (p *Provider) Stats() *Stats {
 }
 
 type Route struct {
-	Provider  *Provider
-	ModelName string
-	StyleCall string
-	Defaults  model.RequestDefaults
+	Provider          *Provider
+	ModelName         string
+	StyleCall         string
+	SanitizeToolNames bool
+	DedupeTools       bool
+	Defaults          model.RequestDefaults
 }
 
 // Dialect returns the wire dialect this leg speaks: the explicit stylecall
@@ -149,7 +151,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 				continue
 			}
 
-			rts = append(rts, Route{Provider: p, ModelName: spec.Model, StyleCall: spec.StyleCall, Defaults: spec.Defaults})
+			rts = append(rts, Route{Provider: p, ModelName: spec.Model, StyleCall: spec.StyleCall, SanitizeToolNames: spec.SanitizeToolNames, DedupeTools: spec.DedupeTools, Defaults: spec.Defaults})
 		}
 		if len(rts) > 0 {
 			routes[rule.ModelID] = rts

@@ -288,6 +288,15 @@ routes:
   #       model: gpt-5.6-responses
   #       stylecall: responses              # this leg calls /v1/responses
 
+  # Tool hygiene toggles — commented out example. Both are per-leg bools
+  # (default false) applied to outbound tool definitions before sending.
+  # - model_id: gpt-5.6-tools
+  #   routes:
+  #     - provider: forge
+  #       model: gpt-5.6-tools
+  #       sanitize_tool_names: true         # normalize tool names for strict upstreams
+  #       dedupe_tools: true                # drop duplicate tool definitions
+
 
 # --- Route spec reference ----------------------------------------------------
 # Each entry under `routes:` supports:
@@ -298,6 +307,8 @@ routes:
 #     - provider: string                    # REQUIRED — must match a provider name above
 #       model: string                       # REQUIRED — upstream model name (no fallback to model_id)
 #       stylecall: string                   # OPTIONAL — upstream dialect: chat|responses|messages (empty = provider style)
+#       sanitize_tool_names: bool           # OPTIONAL — normalize outbound tool names on this leg (default false)
+#       dedupe_tools: bool                  # OPTIONAL — drop duplicate outbound tool definitions (default false)
 #       disabled: bool                      # OPTIONAL — skip just this entry
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # none|minimal|low|medium|high|xhigh|max

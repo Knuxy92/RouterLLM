@@ -12,6 +12,10 @@ func hasChoices(payload string) bool {
 	return strings.Contains(payload, `"choices"`)
 }
 
+func hasError(payload string) bool {
+	return strings.Contains(payload, `"error"`)
+}
+
 func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err error) {
 	br := bufio.NewReader(r)
 	for {
@@ -38,10 +42,20 @@ func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err
 }
 
 func StreamSSE(src io.Reader, dst http.ResponseWriter, filterChoices bool) error {
+	return StreamSSETransform(src, dst, filterChoices, nil)
+}
+
+// StreamSSETransform forwards data frames exactly like StreamSSE and passes
+// every payload through transform (nil keeps the payload verbatim) before it is
+// written, which lets callers rewrite response fields per frame.
+func StreamSSETransform(src io.Reader, dst http.ResponseWriter, filterChoices bool, transform func(payload string) string) error {
 	flusher, _ := dst.(http.Flusher)
 	sawDone, err := IterDataLines(src, func(payload string) bool {
-		if filterChoices && !hasChoices(payload) {
+		if filterChoices && !hasChoices(payload) && !hasError(payload) {
 			return true
+		}
+		if transform != nil {
+			payload = transform(payload)
 		}
 		fmt.Fprintf(dst, "data: %s\n\n", payload)
 		if flusher != nil {

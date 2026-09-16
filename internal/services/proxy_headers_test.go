@@ -60,7 +60,7 @@ func TestForwardRawClientHeaders(t *testing.T) {
 			req.Header.Set("X-Client-Header", "client-value")
 			req.Header.Set("Authorization", "Bearer client-token")
 
-			resp, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
+			resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
 				"model":    "test-model",
 				"messages": []any{},
 			})
@@ -137,7 +137,7 @@ func TestForwardRawClientCredentialsDenied(t *testing.T) {
 			req.Header.Set("Accept-Encoding", "identity")
 			req.Header.Set("X-Client-Header", "client-value")
 
-			resp, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
+			resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
 				"model":    "test-model",
 				"messages": []any{},
 			})
@@ -177,7 +177,7 @@ func TestApplySettingsHotReload(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		req.Header.Set("X-Client-Header", "client-value")
 		req.Header.Set("X-Other-Header", "other-value")
-		resp, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
+		resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
 			"model":    "test-model",
 			"messages": []any{},
 		})

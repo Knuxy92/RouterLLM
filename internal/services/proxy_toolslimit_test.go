@@ -75,7 +75,7 @@ func TestAlysisRejectsRequestsOverToolLimit(t *testing.T) {
 func TestAlysisAllowsRequestsAtToolLimit(t *testing.T) {
 	proxy, captured := alysisToolProxy(t, "alysis")
 
-	_, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(128)}))
+	_, _, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(128)}))
 	if err != nil {
 		t.Fatalf("ForwardRaw: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestAlysisAllowsRequestsAtToolLimit(t *testing.T) {
 func TestAlysisToolLimitErrorIsSentinel(t *testing.T) {
 	proxy, _ := alysisToolProxy(t, "alysis")
 
-	_, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(131)}))
+	_, _, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(131)}))
 	if !errors.Is(err, errTooManyTools) {
 		t.Fatalf("err = %v, want errTooManyTools", err)
 	}
@@ -102,7 +102,7 @@ func TestAlysisToolLimitErrorIsSentinel(t *testing.T) {
 func TestOpenAIStyleHasNoToolLimit(t *testing.T) {
 	proxy, captured := alysisToolProxy(t, "openai")
 
-	_, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(129)}))
+	_, _, _, err := proxy.ForwardRaw("/v1/chat/completions", httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), baseClientBody(map[string]any{"tools": chatTools(129)}))
 	if err != nil {
 		t.Fatalf("ForwardRaw: %v", err)
 	}

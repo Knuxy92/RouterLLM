@@ -186,3 +186,23 @@ func TestNewRegistryCopiesStyleCall(t *testing.T) {
 		t.Fatalf("Dialect() = %q, want responses (stylecall must win over style)", got)
 	}
 }
+
+func TestNewRegistryCopiesToolHygieneFlags(t *testing.T) {
+	rules := []model.Rule{{ModelID: "model-a", Routes: []model.Spec{
+		{Provider: "alpha", Model: "upstream-a", SanitizeToolNames: true, DedupeTools: true},
+		{Provider: "alpha", Model: "upstream-b"},
+	}}}
+
+	reg := NewRegistry(testConfigs(false), rules, time.Minute)
+
+	routes := reg.Routes("model-a")
+	if len(routes) != 2 {
+		t.Fatalf("Routes() returned %d routes, want 2", len(routes))
+	}
+	if !routes[0].SanitizeToolNames || !routes[0].DedupeTools {
+		t.Fatalf("flags = (%v, %v), want (true, true)", routes[0].SanitizeToolNames, routes[0].DedupeTools)
+	}
+	if routes[1].SanitizeToolNames || routes[1].DedupeTools {
+		t.Fatalf("flags = (%v, %v), want (false, false)", routes[1].SanitizeToolNames, routes[1].DedupeTools)
+	}
+}

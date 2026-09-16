@@ -217,7 +217,7 @@ func TestResponsesInboundFiltering(t *testing.T) {
 
 	t.Run("chat dialect leg is skipped", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-		resp, _, err := proxy.ForwardRaw("/v1/responses", req, map[string]any{
+		resp, _, _, err := proxy.ForwardRaw("/v1/responses", req, map[string]any{
 			"model": "chat-only",
 			"input": "hi",
 		})

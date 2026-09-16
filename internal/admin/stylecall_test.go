@@ -176,6 +176,52 @@ func assertLegStyleCalls(t *testing.T, body string, want []string) {
 	}
 }
 
+func TestStatusLegsCarryToolHygieneFlags(t *testing.T) {
+	t.Setenv("ROUTERLLM_ADMIN_TOKEN", "secret")
+	t.Setenv("ALPHA_KEY", "sk-alpha")
+	t.Setenv("BETA_KEY", "sk-beta")
+
+	path := filepath.Join(t.TempDir(), "routerllm.yaml")
+	body := strings.Replace(addRouteConfig,
+		"      - provider: alpha\n        model: alpha-upstream\n",
+		"      - provider: alpha\n        model: first\n        sanitize_tool_names: true\n        dedupe_tools: true\n      - provider: beta\n        model: second\n",
+		1)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, _ := testDeps(t, path)
+	srv := adminServer(t, deps)
+	session := login(t, srv, "secret")
+
+	w := request(t, srv, http.MethodGet, "/admin/api/status", session, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var status struct {
+		Models []struct {
+			ModelID string           `json:"model_id"`
+			Chain   []map[string]any `json:"chain"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Models) != 1 || len(status.Models[0].Chain) != 2 {
+		t.Fatalf("models = %+v, want 1 model with 2 legs", status.Models)
+	}
+	if status.Models[0].Chain[0]["sanitize_tool_names"] != true || status.Models[0].Chain[0]["dedupe_tools"] != true {
+		t.Fatalf("leg 0 = %v, want both flags true", status.Models[0].Chain[0])
+	}
+	if _, ok := status.Models[0].Chain[1]["sanitize_tool_names"]; ok {
+		t.Errorf("leg 1 carries sanitize_tool_names, want key omitted: %v", status.Models[0].Chain[1])
+	}
+	if _, ok := status.Models[0].Chain[1]["dedupe_tools"]; ok {
+		t.Errorf("leg 1 carries dedupe_tools, want key omitted: %v", status.Models[0].Chain[1])
+	}
+}
+
 func TestProviderTestEndpointStyleCall(t *testing.T) {
 	t.Setenv("ROUTERLLM_ADMIN_TOKEN", "secret")
 	deps, _ := testDeps(t, seedConfig(t))

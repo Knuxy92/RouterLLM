@@ -52,7 +52,7 @@ func TestForwardRawSendsClineHeadersAndSession(t *testing.T) {
 	defer upstream.Close()
 
 	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "")
-	resp, route, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
+	resp, route, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	})
@@ -116,7 +116,7 @@ func TestForwardRawRefreshesClineTokenOnUnauthorized(t *testing.T) {
 	defer upstream.Close()
 
 	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "")
-	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
+	resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	})
@@ -162,7 +162,7 @@ func TestForwardRawRotatesClineAccountsAfterUnauthorized(t *testing.T) {
 	defer upstream.Close()
 
 	proxy := NewProxy(clineRegistry(upstream.URL, "refresh-1", "refresh-2"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "")
-	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
+	resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", clineRequest(), map[string]any{
 		"model":    "cline-free/glm-5.2",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	})

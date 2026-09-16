@@ -286,13 +286,13 @@ func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
 // Returns (resp, route, nil) when any upstream responds (even non-2xx).
 // Returns (nil, nil, error) for pre-request failures (model not found,
 // keys exhausted, cancelled).
-func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*http.Response, *provider.Route, error) {
+func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*http.Response, *provider.Route, map[string]string, error) {
 	p.injectSystemPrompt(body)
 
 	modelName, _ := body["model"].(string)
 	routes := p.registry.Load().Routes(modelName)
 	if len(routes) == 0 {
-		return nil, nil, fmt.Errorf("model %q not found", modelName)
+		return nil, nil, nil, fmt.Errorf("model %q not found", modelName)
 	}
 
 	if path != "/v1/chat/completions" {
@@ -304,7 +304,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 		routes = filtered
 		if len(routes) == 0 {
-			return nil, nil, fmt.Errorf("model %q not found for %s", modelName, path)
+			return nil, nil, nil, fmt.Errorf("model %q not found for %s", modelName, path)
 		}
 	}
 
@@ -318,13 +318,14 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 
 	var lastResp *http.Response
 	var lastRoute *provider.Route
+	var lastRestore map[string]string
 	var lastErr error
 
 	for _, route := range routes {
 		pv := route.Provider
 		routeBody := cloneBody(body)
 
-		reqBody, reqPath, sessionID, err := p.translateRoute(pv, route, path, routeBody)
+		reqBody, reqPath, sessionID, toolNameRestore, err := p.translateRoute(pv, route, path, routeBody)
 		if err != nil {
 			if !errors.Is(err, errTooManyTools) {
 				err = fmt.Errorf("failed to encode body for %s: %w", pv.Name, err)
@@ -345,7 +346,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			if lastResp != nil {
 				lastResp.Body.Close()
 			}
-			return nil, nil, fmt.Errorf("request cancelled")
+			return nil, nil, nil, fmt.Errorf("request cancelled")
 		}
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
@@ -367,6 +368,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			}
 			lastResp = resp
 			lastRoute = &route
+			lastRestore = toolNameRestore
 			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
 			lastErr = fmt.Errorf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, briefBody(eb))
 			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200", RespBody: telemetry.ClampBody(eb, telemetry.RespBodyCap)}
@@ -392,29 +394,41 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if trace != nil {
 			trace.ttftMS = time.Since(started).Milliseconds()
 		}
-		return resp, &route, nil
+		return resp, &route, toolNameRestore, nil
 	}
 
 	if trace != nil {
 		trace.attempts = attempts
 	}
 	if lastResp != nil {
-		return lastResp, lastRoute, lastErr
+		return lastResp, lastRoute, lastRestore, lastErr
 	}
-	return nil, nil, lastErr
+	return nil, nil, nil, lastErr
 }
 
 // translateRoute builds the outbound body and request path for one route leg:
 // it folds the route defaults and the provider's reasoning dialect into
 // routeBody (mutated in place) and translates it into the leg's wire dialect
 // (the explicit stylecall when set, otherwise the provider style's native
-// dialect). Shared by ForwardRaw and the admin test runner.
-func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, err error) {
+// dialect). Shared by ForwardRaw and the admin test runner. The returned
+// reverse map restores sanitized tool names on the way back; it is nil when the
+// leg leaves tool names untouched.
+func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, toolNameRestore map[string]string, err error) {
+	if route.DedupeTools || route.SanitizeToolNames {
+		restore, dropped := processToolNames(routeBody, route.DedupeTools, route.SanitizeToolNames)
+		if dropped > 0 {
+			p.log.Printf("route %s/%s: dropped %d duplicate tool definition(s)", route.ModelName, pv.Name, dropped)
+		}
+		if route.SanitizeToolNames {
+			toolNameRestore = restore
+		}
+	}
+
 	// The alysis gateway enforces OpenAI's 128-tool cap regardless of which
 	// dialect the leg is emitted in, so the guard runs before the dispatch.
 	if pv.Style == "alysis" {
 		if tools, ok := routeBody["tools"].([]any); ok && len(tools) > maxUpstreamTools {
-			return nil, "", "", fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
+			return nil, "", "", nil, fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
 		}
 	}
 
@@ -474,7 +488,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		reqPath = path
 	}
 
-	return reqBody, reqPath, sessionID, err
+	return reqBody, reqPath, sessionID, toolNameRestore, err
 }
 
 // servedKey extracts the credential actually used from the completed request
@@ -520,7 +534,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 	modelName, _ := body["model"].(string)
 	reqID := requestID(r)
 
-	resp, route, err := p.ForwardRaw(path, r, body)
+	resp, route, toolNameRestore, err := p.ForwardRaw(path, r, body)
 	if resp != nil {
 		defer resp.Body.Close()
 
@@ -533,7 +547,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 
 		d := route.Dialect()
 		if forceStream && path == "/v1/chat/completions" {
-			p.serveForceStream(resp, route.ModelName, d, w)
+			p.serveForceStream(resp, route.ModelName, d, w, toolNameRestore)
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
 			return
 		}
@@ -547,13 +561,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			if path == "/v1/responses" {
 				serveResponses(resp, clientStream, w)
 			} else {
-				p.serveResponsesAsChat(resp, clientStream, route.ModelName, w)
+				p.serveResponsesAsChat(resp, clientStream, route.ModelName, w, toolNameRestore)
 			}
 		default:
 			if path == "/v1/responses" {
 				serveResponses(resp, clientStream, w)
 			} else {
-				serveOpenAI(resp, clientStream, w)
+				serveOpenAI(resp, clientStream, w, toolNameRestore)
 			}
 		}
 		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
@@ -893,19 +907,19 @@ func writeStreamHeaders(w http.ResponseWriter) {
 	w.Header().Set("Connection", "keep-alive")
 }
 
-func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter) {
+func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) {
 	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
-		if err := util.StreamSSE(resp.Body, w, true); err != nil {
+		if err := util.StreamSSETransform(resp.Body, w, true, streamRestoreTransform(toolNameRestore)); err != nil {
 			log.Printf("stream error: %v", err)
 		}
 		return
 	}
 
 	result := bufferStream(resp.Body)
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
 }
 
 func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter) {
@@ -972,12 +986,12 @@ func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName st
 // serveResponsesAsChat serves a Responses-dialect leg to a chat-completions
 // client: the upstream Responses SSE is converted back into chat chunks or
 // buffered into a single chat.completion document.
-func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter, toolNameRestore map[string]string) {
 	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
-		if err := adapter.StreamResponsesToOpenAI(resp.Body, w, modelName); err != nil {
+		if err := adapter.StreamResponsesToOpenAI(resp.Body, newRestoringWriter(w, toolNameRestore), modelName); err != nil {
 			p.log.Printf("responses stream error: %v", err)
 		}
 		return
@@ -989,9 +1003,11 @@ func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, mod
 		return
 	}
 
+	restored := restoreToolCallNamesJSON(data, toolNameRestore)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	w.Write(restored)
 }
 
 func bufferStream(body io.Reader) *model.ChatCompletionResponse {
@@ -1136,7 +1152,7 @@ func assembleToolCalls(fragments map[int]*model.ToolCall) []model.ToolCall {
 	return calls
 }
 
-func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string, w http.ResponseWriter) {
+func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string, w http.ResponseWriter, toolNameRestore map[string]string) {
 	writeStreamHeaders(w)
 	w.WriteHeader(http.StatusOK)
 
@@ -1161,7 +1177,7 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 		return
 	}
 
-	adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
+	adapter.StreamOpenAIToAnthropicSSE(resp.Body, newRestoringWriter(w, toolNameRestore), modelName)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

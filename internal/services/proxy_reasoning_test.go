@@ -82,7 +82,7 @@ func forwardReasoningRequest(t *testing.T, reasoningStyle string, defaults model
 	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", req, clientBody)
+	resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", req, clientBody)
 	if err != nil {
 		t.Fatalf("ForwardRaw: %v", err)
 	}

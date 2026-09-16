@@ -68,7 +68,7 @@ func TestGoogleUpstreamRequestShape(t *testing.T) {
 	proxy := NewProxy(newGoogleRegistry(upstream, []string{"gkey"}), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
-	resp, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
+	resp, _, _, err := proxy.ForwardRaw("/v1/chat/completions", req, map[string]any{
 		"model":    "test-model",
 		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
 		"stream":   true,

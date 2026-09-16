@@ -74,7 +74,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 	defer cancel()
 
 	route := provider.Route{Provider: pv, ModelName: req.Model, StyleCall: req.StyleCall}
-	reqBody, reqPath, sessionID, err := p.translateRoute(pv, route, "/v1/chat/completions", testBody(req))
+	reqBody, reqPath, sessionID, _, err := p.translateRoute(pv, route, "/v1/chat/completions", testBody(req))
 	if err != nil {
 		result.Status = http.StatusBadRequest
 		result.Error = "failed to build test request: " + err.Error()

@@ -251,6 +251,16 @@
             "messages"
           ],
           "description": "Upstream API dialect for this leg: chat (/v1/chat/completions), responses (/v1/responses), or messages (/v1/messages). Empty or absent lets the provider style decide."
+        },
+        "sanitize_tool_names": {
+          "type": "boolean",
+          "default": false,
+          "description": "Normalize outbound tool/function names on this leg so strict upstreams accept them."
+        },
+        "dedupe_tools": {
+          "type": "boolean",
+          "default": false,
+          "description": "Drop duplicate outbound tool definitions on this leg, keeping the first occurrence."
         }
       }
     },

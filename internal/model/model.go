@@ -79,11 +79,13 @@ type RequestDefaults struct {
 }
 
 type Spec struct {
-	Provider  string          `yaml:"provider" json:"provider"`
-	Model     string          `yaml:"model" json:"model"`
-	Disabled  bool            `yaml:"disabled,omitempty" json:"disabled,omitempty"`
-	StyleCall string          `yaml:"stylecall,omitempty" json:"stylecall,omitempty"`
-	Defaults  RequestDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Provider          string          `yaml:"provider" json:"provider"`
+	Model             string          `yaml:"model" json:"model"`
+	Disabled          bool            `yaml:"disabled,omitempty" json:"disabled,omitempty"`
+	StyleCall         string          `yaml:"stylecall,omitempty" json:"stylecall,omitempty"`
+	SanitizeToolNames bool            `yaml:"sanitize_tool_names,omitempty" json:"sanitize_tool_names,omitempty"`
+	DedupeTools       bool            `yaml:"dedupe_tools,omitempty" json:"dedupe_tools,omitempty"`
+	Defaults          RequestDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
 }
 
 type Rule struct {

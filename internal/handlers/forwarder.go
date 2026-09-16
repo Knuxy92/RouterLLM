@@ -60,7 +60,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	modelName := extractModel(raw)
 	reqID := r.Header.Get("X-Request-Id")
 
-	resp, route, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
+	resp, route, toolNameRestore, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
 	if resp != nil {
 		defer resp.Body.Close()
 
@@ -88,9 +88,9 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		case "google":
 			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName)
 		case "responses":
-			adapter.StreamResponsesToAnthropicSSE(resp.Body, w, modelName)
+			adapter.StreamResponsesToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
 		default:
-			adapter.StreamOpenAIToAnthropicSSE(resp.Body, w, modelName)
+			adapter.StreamOpenAIToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
 		}
 
 		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", respTokens(resp), ""))
