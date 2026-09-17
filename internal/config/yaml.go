@@ -30,6 +30,7 @@ type yamlConfig struct {
 	Port                 string         `yaml:"port,omitempty"`
 	Cooldown             string         `yaml:"cooldown,omitempty"`
 	ForceStream          bool           `yaml:"force_stream,omitempty"`
+	DedupeTools          bool           `yaml:"dedupe_tools,omitempty"`
 	ForwardClientHeaders *bool          `yaml:"forward_client_headers,omitempty"`
 	AllowClientHeaders   []string       `yaml:"allow_client_headers,omitempty"`
 	SystemPromptFile     string         `yaml:"system_prompt_file,omitempty"`
@@ -176,6 +177,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		Port:                 port,
 		Cooldown:             cooldown,
 		ForceStream:          yc.ForceStream,
+		DedupeTools:          yc.DedupeTools,
 		ForwardClientHeaders: forwardClientHeaders,
 		AllowClientHeaders:   yc.AllowClientHeaders,
 		SystemPrompt:         systemPrompt,

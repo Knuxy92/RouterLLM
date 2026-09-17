@@ -77,6 +77,7 @@ type Proxy struct {
 	advancedDebug        bool
 	forceStream          atomic.Bool
 	forceStreamUsage     bool
+	dedupeTools          atomic.Bool
 	forwardClientHeaders atomic.Bool
 	allowClientHeaders   atomic.Pointer[[]string]
 	systemPrompt         atomic.Pointer[string]
@@ -177,6 +178,13 @@ func (p *Proxy) ApplySettings(forceStream, forwardClientHeaders bool, allowClien
 	p.forceStream.Store(forceStream)
 	p.forwardClientHeaders.Store(forwardClientHeaders)
 	p.storeAllowClientHeaders(allowClientHeaders)
+}
+
+// SetDedupeTools turns the global tool-dedupe switch on or off. A leg's own
+// dedupe_tools still works when this is off; when this is on, every leg
+// dedupes.
+func (p *Proxy) SetDedupeTools(enabled bool) {
+	p.dedupeTools.Store(enabled)
 }
 
 func (p *Proxy) storeAllowClientHeaders(allow []string) {
@@ -414,8 +422,8 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 // reverse map restores sanitized tool names on the way back; it is nil when the
 // leg leaves tool names untouched.
 func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, toolNameRestore map[string]string, err error) {
-	if route.DedupeTools || route.SanitizeToolNames {
-		restore, dropped := processToolNames(routeBody, route.DedupeTools, route.SanitizeToolNames)
+	if dedupe := route.DedupeTools || p.dedupeTools.Load(); dedupe || route.SanitizeToolNames {
+		restore, dropped := processToolNames(routeBody, dedupe, route.SanitizeToolNames)
 		if dropped > 0 {
 			p.log.Printf("route %s/%s: dropped %d duplicate tool definition(s)", route.ModelName, pv.Name, dropped)
 		}

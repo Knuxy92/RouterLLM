@@ -32,6 +32,11 @@
       "default": false,
       "description": "Always serve /v1/chat/completions responses as Anthropic-style SSE, regardless of the client's stream flag."
     },
+    "dedupe_tools": {
+      "type": "boolean",
+      "default": false,
+      "description": "Drop duplicate outbound tool definitions (same function name, first wins) on every leg. A leg's own dedupe_tools still works when this is off."
+    },
     "forward_client_headers": {
       "type": "boolean",
       "default": true,

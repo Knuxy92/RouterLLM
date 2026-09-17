@@ -893,3 +893,53 @@ routes:
 		t.Fatalf("expected 'not supported on cline-style providers' error, got: %v", err)
 	}
 }
+
+func TestLoadYAMLGlobalDedupeTools(t *testing.T) {
+	path := writeTempYAML(t, `
+dedupe_tools: true
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DedupeTools {
+		t.Fatal("global dedupe_tools did not reach Config")
+	}
+	if cfg.Routes[0].Routes[0].DedupeTools {
+		t.Fatal("global flag must not be copied onto the leg")
+	}
+}
+
+func TestLoadYAMLGlobalDedupeToolsDefaultOff(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DedupeTools {
+		t.Fatal("dedupe_tools must default to false")
+	}
+}

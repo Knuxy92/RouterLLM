@@ -82,6 +82,7 @@ func main() {
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
 	proxy := services.NewProxy(registry, cfg.Client, operationalLogger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt)
+	proxy.SetDedupeTools(cfg.DedupeTools)
 	logRegistry(overviewLogger, registry)
 	overviewLogger.Printf("loaded %d provider(s) (%d active), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", registry.TotalProviders(), registry.ActiveProviders(), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
 
@@ -108,6 +109,7 @@ func main() {
 		reloaded := provider.Rebuild(next.Providers, next.Routes, next.Cooldown, proxy.Registry())
 		proxy.Apply(reloaded, next.SystemPrompt)
 		proxy.ApplySettings(next.ForceStream, next.ForwardClientHeaders, next.AllowClientHeaders)
+		proxy.SetDedupeTools(next.DedupeTools)
 		logRegistry(overviewLogger, reloaded)
 		reloadTracker.RecordSuccess()
 		overviewLogger.Printf("config reloaded: %d provider(s) (%d active), %d model(s)", reloaded.TotalProviders(), reloaded.ActiveProviders(), len(reloaded.AllModels()))

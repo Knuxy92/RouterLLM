@@ -149,3 +149,49 @@ func TestForwardDedupesTools(t *testing.T) {
 		t.Fatalf("upstream saw %d tools, want 2 (duplicate dropped)", seen)
 	}
 }
+
+func TestSetDedupeToolsAppliesGlobally(t *testing.T) {
+	var seen int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		tools, _ := body["tools"].([]any)
+		seen = len(tools)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	registry := toolNameTestRegistry(upstream, model.Spec{Provider: "openai-test", Model: "gpt-upstream"})
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	body := `{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tools":[` +
+		`{"type":"function","function":{"name":"dup","parameters":{"type":"object"}}},` +
+		`{"type":"function","function":{"name":"dup","parameters":{"type":"object"}}}]}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	proxy.Forward("/v1/chat/completions", httptest.NewRecorder(), req)
+	if seen != 2 {
+		t.Fatalf("global off: upstream saw %d tools, want 2 (nothing dropped)", seen)
+	}
+
+	proxy.SetDedupeTools(true)
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	proxy.Forward("/v1/chat/completions", httptest.NewRecorder(), req)
+	if seen != 1 {
+		t.Fatalf("global on: upstream saw %d tools, want 1 (duplicate dropped)", seen)
+	}
+
+	proxy.SetDedupeTools(false)
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	proxy.Forward("/v1/chat/completions", httptest.NewRecorder(), req)
+	if seen != 2 {
+		t.Fatalf("global off again: upstream saw %d tools, want 2", seen)
+	}
+}

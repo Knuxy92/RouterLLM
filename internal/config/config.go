@@ -30,6 +30,7 @@ type Config struct {
 	Port                 string
 	Cooldown             time.Duration
 	ForceStream          bool
+	DedupeTools          bool
 	ForwardClientHeaders bool
 	AllowClientHeaders   []string
 	SystemPrompt         string

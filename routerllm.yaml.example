@@ -22,6 +22,7 @@
 port: 1765                          # listen port (default: 1765)
 cooldown: 60s                       # key cooldown duration (default: 60s)
 force_stream: false                 # force Anthropic SSE format on all responses (default: false)
+dedupe_tools: false                 # drop duplicate tool definitions on every leg (default: false)
 forward_client_headers: true        # forward safe client headers upstream (default: true)
 # allow_client_headers:             # if set, ONLY these client headers pass through
 #   - X-Request-ID                  # (case-insensitive; hop-by-hop headers always blocked)
@@ -290,6 +291,8 @@ routes:
 
   # Tool hygiene toggles — commented out example. Both are per-leg bools
   # (default false) applied to outbound tool definitions before sending.
+  # `dedupe_tools` also has a global switch at the top of this file that turns
+  # it on for every leg; the per-leg flag below still works when that is off.
   # - model_id: gpt-5.6-tools
   #   routes:
   #     - provider: forge
@@ -308,7 +311,7 @@ routes:
 #       model: string                       # REQUIRED — upstream model name (no fallback to model_id)
 #       stylecall: string                   # OPTIONAL — upstream dialect: chat|responses|messages (empty = provider style)
 #       sanitize_tool_names: bool           # OPTIONAL — normalize outbound tool names on this leg (default false)
-#       dedupe_tools: bool                  # OPTIONAL — drop duplicate outbound tool definitions (default false)
+#       dedupe_tools: bool                  # OPTIONAL — drop duplicate outbound tool definitions (the top-level dedupe_tools turns this on for every leg)
 #       disabled: bool                      # OPTIONAL — skip just this entry
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # none|minimal|low|medium|high|xhigh|max
