@@ -10,6 +10,7 @@ import (
 
 	"routerllm/internal/alysis"
 	"routerllm/internal/cline"
+	"routerllm/internal/codex"
 	"routerllm/internal/model"
 
 	"gopkg.in/yaml.v3"
@@ -147,6 +148,17 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 			}
 		}
 
+		if yp.Style == "codex" && len(keys) == 0 && !yp.Disabled {
+			store, err := codex.LoadAccountStore(codex.DefaultAccountsPath())
+			if err != nil {
+				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
+			}
+			keys = store.RefreshTokens()
+			if len(keys) == 0 {
+				return nil, fmt.Errorf("provider %q: no codex accounts found in %s — run `routerllm --codex-login`", yp.Name, store.Path())
+			}
+		}
+
 		p := ProviderConfig{
 			Name:           yp.Name,
 			BaseURL:        strings.TrimRight(yp.BaseURL, "/"),
@@ -281,11 +293,11 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 	}
 
 	switch yp.Style {
-	case "openai", "anthropic", "cline", "google", "alysis":
+	case "openai", "anthropic", "cline", "google", "alysis", "codex":
 	case "":
-		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, or alysis)", yp.Name)
+		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, or codex)", yp.Name)
 	default:
-		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, or alysis)", yp.Name, yp.Style)
+		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, or codex)", yp.Name, yp.Style)
 	}
 
 	switch yp.AuthMode {
@@ -300,7 +312,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 		return fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
 	}
 
-	if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && !yp.Disabled {
+	if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && yp.Style != "codex" && !yp.Disabled {
 		return fmt.Errorf("provider %q: api_key is required", yp.Name)
 	}
 
@@ -311,7 +323,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 				return fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
 			}
 		}
-		if len(keys) == 0 && yp.Style != "cline" && yp.Style != "alysis" {
+		if len(keys) == 0 && yp.Style != "cline" && yp.Style != "alysis" && yp.Style != "codex" {
 			return fmt.Errorf("provider %q: api_key expanded to zero keys (is the environment variable empty?)", yp.Name)
 		}
 	}

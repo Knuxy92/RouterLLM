@@ -446,15 +446,15 @@ func TestCanonicalizeReasoningAliasesAndUnknown(t *testing.T) {
 		wantNotice string
 	}{
 		{
-			name:     "ultra alias maps to max from client",
+			name:     "ultra passes through from client",
 			body:     map[string]any{"model": "m", "reasoning_effort": "ultra"},
-			wantBody: map[string]any{"model": "m", "reasoning_effort": "max"},
+			wantBody: map[string]any{"model": "m", "reasoning_effort": "ultra"},
 		},
 		{
-			name:     "ultra alias maps to max from defaults",
+			name:     "ultra passes through from defaults",
 			body:     map[string]any{"model": "m"},
 			defaults: model.RequestDefaults{ReasoningEffort: "ultra"},
-			wantBody: map[string]any{"model": "m", "reasoning_effort": "max"},
+			wantBody: map[string]any{"model": "m", "reasoning_effort": "ultra"},
 		},
 		{
 			name:       "unknown defaults effort injects nothing and returns notice",
@@ -554,7 +554,7 @@ func TestReasoningNormalizeEffortAliases(t *testing.T) {
 		{name: "high", value: "high", want: "high"},
 		{name: "xhigh", value: "xhigh", want: "xhigh"},
 		{name: "max", value: "max", want: "max"},
-		{name: "ultra alias", value: "ultra", want: "max"},
+		{name: "ultra", value: "ultra", want: "ultra"},
 		{name: "unknown", value: "mega", want: ""},
 		{name: "non string", value: 42, want: ""},
 		{name: "nil", value: nil, want: ""},

@@ -70,6 +70,7 @@ export function adaptProviders(status, metrics) {
       cooldown: k.cooldown_left_seconds || 0,
       err: null,
       on: !k.disabled,
+      quota: k.quota || null,
     }))
 
     const req = sum ? sum.req : p.requests || 0

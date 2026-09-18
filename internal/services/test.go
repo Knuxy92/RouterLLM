@@ -225,6 +225,12 @@ func bufferedTestContent(body io.Reader, dialect, modelName string) (string, err
 			return "", err
 		}
 		return contentFromOpenAIJSON(data)
+	case "codex":
+		data, err := adapter.BufferCodexToOpenAI(body, modelName)
+		if err != nil {
+			return "", err
+		}
+		return contentFromOpenAIJSON(data)
 	}
 
 	completion := bufferStream(body)

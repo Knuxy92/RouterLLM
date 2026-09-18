@@ -19,6 +19,7 @@ import (
 	"os"
 	"routerllm/internal/adapter"
 	"routerllm/internal/cline"
+	"routerllm/internal/codex"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
 	"routerllm/internal/telemetry"
@@ -83,6 +84,10 @@ type Proxy struct {
 	systemPrompt         atomic.Pointer[string]
 	clineMu              sync.Mutex
 	clineManagers        map[string]*cline.Manager
+	codexMu              sync.Mutex
+	codexManager         *codex.Manager
+	quotaMu              sync.Mutex
+	quotas               map[string]map[string]QuotaSnapshot
 	telemetry            atomic.Pointer[telemetry.Store]
 }
 
@@ -114,12 +119,32 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 	return manager.AccessToken(ctx, refreshToken, force)
 }
 
+// codexAccessToken mints (or reuses) the Codex access token backing one account
+// refresh token. Unlike cline, every codex provider refreshes against the same
+// auth host, so one shared manager serves them all.
+func (p *Proxy) codexAccessToken(ctx context.Context, refreshToken string, force bool) (string, error) {
+	p.codexMu.Lock()
+	manager := p.codexManager
+	if manager == nil {
+		store, err := codex.LoadAccountStore(codex.DefaultAccountsPath())
+		if err != nil {
+			p.log.Printf("codex accounts unavailable: %v", err)
+			store = nil
+		}
+		manager = codex.NewManager(&codex.Client{HTTPClient: p.client}, store)
+		p.codexManager = manager
+	}
+	p.codexMu.Unlock()
+
+	return manager.AccessToken(ctx, refreshToken, force)
+}
+
 // debug controls the per-request routing trace (which model, which provider
 // served it). advancedDebug additionally logs response bodies. Failure lines —
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), quotas: make(map[string]map[string]QuotaSnapshot)}
 	p.forceStream.Store(forceStream)
 	p.forwardClientHeaders.Store(forwardClientHeaders)
 	p.storeAllowClientHeaders(allowClientHeaders)
@@ -169,6 +194,8 @@ func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
 	p.registry.Store(reg)
 	p.systemPrompt.Store(&systemPrompt)
 	p.pruneClineManagers(reg)
+	p.pruneCodexManager(reg)
+	p.pruneQuotas(reg)
 }
 
 // ApplySettings swaps the request-shaping options that hot reload can change.
@@ -216,6 +243,87 @@ func (p *Proxy) pruneClineManagers(reg *provider.Registry) {
 	for baseURL := range p.clineManagers {
 		if !live[baseURL] {
 			delete(p.clineManagers, baseURL)
+		}
+	}
+}
+
+// pruneCodexManager drops the shared codex manager once no codex provider is
+// configured, so its account store and token cache do not outlive the config
+// that referenced them.
+func (p *Proxy) pruneCodexManager(reg *provider.Registry) {
+	for _, pc := range reg.ProviderConfigs() {
+		if pc.Style == "codex" && !pc.Disabled {
+			return
+		}
+	}
+
+	p.codexMu.Lock()
+	p.codexManager = nil
+	p.codexMu.Unlock()
+}
+
+// captureQuota records the Codex rate-limit headers carried on one upstream
+// response. Every response repeats them, so the snapshot stays current without
+// any extra request; the warn line fires once per upward crossing of the
+// threshold and re-arms after the value drops back below it.
+func (p *Proxy) captureQuota(providerName, key string, header http.Header) {
+	snapshot, ok := parseQuotaHeaders(header)
+	if !ok {
+		return
+	}
+
+	p.quotaMu.Lock()
+	byKey := p.quotas[providerName]
+	if byKey == nil {
+		byKey = make(map[string]QuotaSnapshot)
+		p.quotas[providerName] = byKey
+	}
+	previous, had := byKey[key]
+	byKey[key] = snapshot
+	p.quotaMu.Unlock()
+
+	if snapshot.Primary == nil {
+		return
+	}
+	wasAbove := had && previous.Primary != nil && previous.Primary.UsedPercent >= quotaWarnPercent
+	if snapshot.Primary.UsedPercent >= quotaWarnPercent && !wasAbove {
+		p.log.Printf("codex quota: provider=%s key=%s primary=%d%% window=%dm resets_at=%s", providerName, maskKey(key), snapshot.Primary.UsedPercent, snapshot.Primary.WindowMinutes, quotaResetLabel(snapshot.Primary.ResetAt))
+	}
+}
+
+func quotaResetLabel(resetAt int64) string {
+	if resetAt == 0 {
+		return "unknown"
+	}
+
+	return time.Unix(resetAt, 0).Format(time.RFC3339)
+}
+
+// Quota returns the last Codex rate-limit snapshot observed for one provider key.
+func (p *Proxy) Quota(providerName, key string) (QuotaSnapshot, bool) {
+	p.quotaMu.Lock()
+	defer p.quotaMu.Unlock()
+
+	snapshot, ok := p.quotas[providerName][key]
+
+	return snapshot, ok
+}
+
+// pruneQuotas drops quota state for providers that are no longer configured.
+func (p *Proxy) pruneQuotas(reg *provider.Registry) {
+	live := make(map[string]bool)
+	for _, pc := range reg.ProviderConfigs() {
+		if !pc.Disabled {
+			live[pc.Name] = true
+		}
+	}
+
+	p.quotaMu.Lock()
+	defer p.quotaMu.Unlock()
+
+	for name := range p.quotas {
+		if !live[name] {
+			delete(p.quotas, name)
 		}
 	}
 }
@@ -469,6 +577,9 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		p.injectStreamUsage(routeBody, path)
 		reqBody, err = json.Marshal(routeBody)
 		reqPath = "/v1/chat/completions"
+	case "codex":
+		applyCanonicalDefaults(routeBody, route.Defaults)
+		reqBody, reqPath, err = adapter.TranslateCodexRequest(routeBody, route.ModelName)
 	case "responses":
 		if path == "/v1/responses" {
 			// Inbound is already Responses-shaped: passthrough with the
@@ -561,6 +672,8 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		}
 
 		switch d {
+		case "codex":
+			p.serveCodex(resp, clientStream, route.ModelName, w)
 		case "messages":
 			p.serveAnthropic(resp, clientStream, route.ModelName, w)
 		case "google":
@@ -734,6 +847,16 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					break
 				}
 				cline.SetHeaders(req.Header, token, call.sessionID)
+			} else if pv.Style == "codex" {
+				token, err := p.codexAccessToken(r.Context(), key, forceRefresh)
+				if err != nil {
+					p.log.Printf("codex token refresh failed via %s: %v", pv.Name, err)
+					lastStatus = http.StatusUnauthorized
+					lastErrBody = []byte(err.Error())
+					pv.Keys.MarkDead(key)
+					break
+				}
+				codex.SetHeaders(req.Header, token)
 			} else if pv.Style == "google" {
 				req.Header.Set("x-goog-api-key", key)
 			} else {
@@ -763,10 +886,12 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				break
 			}
 
-			if pv.Style == "cline" && r2.StatusCode == http.StatusUnauthorized && !refreshed {
+			p.captureQuota(pv.Name, key, r2.Header)
+
+			if (pv.Style == "cline" || pv.Style == "codex") && r2.StatusCode == http.StatusUnauthorized && !refreshed {
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
-				p.logResp(fmt.Sprintf("cline token stale via %s, refreshing", pv.Name), r2, eb)
+				p.logResp(fmt.Sprintf("%s token stale via %s, refreshing", pv.Style, pv.Name), r2, eb)
 				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				forceRefresh = true
@@ -1018,6 +1143,28 @@ func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, mod
 	w.Write(restored)
 }
 
+func (p *Proxy) serveCodex(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+	defer resp.Body.Close()
+	if clientStream {
+		writeStreamHeaders(w)
+		w.WriteHeader(http.StatusOK)
+		if err := adapter.StreamCodexToOpenAI(resp.Body, w, modelName); err != nil {
+			p.log.Printf("codex stream error: %v", err)
+		}
+		return
+	}
+
+	openaiBody, err := adapter.BufferCodexToOpenAI(resp.Body, modelName)
+	if err != nil {
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(openaiBody)
+}
+
 func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
@@ -1182,6 +1329,11 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 		if err := adapter.StreamResponsesToAnthropicSSE(resp.Body, w, modelName); err != nil {
 			p.log.Printf("responses stream error: %v", err)
 		}
+		return
+	}
+
+	if dialect == "codex" {
+		adapter.StreamCodexToAnthropicSSE(resp.Body, w, modelName)
 		return
 	}
 

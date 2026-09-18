@@ -26,7 +26,7 @@ var reasoningEffortAliases = map[string]string{
 	"high":    "high",
 	"xhigh":   "xhigh",
 	"max":     "max",
-	"ultra":   "max",
+	"ultra":   "ultra",
 }
 
 func normalizeReasoningEffort(v any) string {

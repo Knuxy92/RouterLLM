@@ -28,6 +28,9 @@ type Deps struct {
 	StartedAt time.Time
 	// Test drives the provider test feature; nil disables the endpoint.
 	Test func(r *http.Request, req services.TestRequest) *services.TestResult
+	// Quota reports the last Codex rate-limit snapshot for one provider key;
+	// nil simply omits quota display.
+	Quota func(provider, key string) (services.QuotaSnapshot, bool)
 }
 
 func Mount(r chi.Router, deps Deps) {

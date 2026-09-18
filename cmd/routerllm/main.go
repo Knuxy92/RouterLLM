@@ -44,6 +44,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "--codex-login" {
+		if err := runCodexLogin(); err != nil {
+			log.Fatalf("codex login failed: %v", err)
+		}
+		return
+	}
+
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
 	logBuffer := admin.NewLogBuffer()
@@ -126,6 +133,7 @@ func main() {
 		Telemetry: teleStore,
 		StartedAt: time.Now(),
 		Reload:    reloader.Reload,
+		Quota:     proxy.Quota,
 		Test: func(r *http.Request, req services.TestRequest) *services.TestResult {
 			return proxy.RunTest(r.Context(), req)
 		},

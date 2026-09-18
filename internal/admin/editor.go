@@ -185,7 +185,7 @@ func (e *Editor) RemoveRoute(modelID string, index int) error {
 
 var validReasoningEffort = map[string]bool{
 	"none": true, "minimal": true, "low": true, "medium": true,
-	"high": true, "xhigh": true, "max": true,
+	"high": true, "xhigh": true, "max": true, "ultra": true,
 }
 
 var validStyleCall = map[string]bool{

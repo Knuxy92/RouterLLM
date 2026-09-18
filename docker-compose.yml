@@ -26,6 +26,10 @@ services:
       # `routerllm --alysis-login` on the host (the file must exist first —
       # a missing bind-mount host path is auto-created as a directory).
       # - ./alysis-accounts.json:/app/alysis-accounts.json:ro
+      # Codex providers only: mount codex-accounts.json AFTER running
+      # `routerllm --codex-login` on the host (the file must exist first —
+      # a missing host path is auto-created as a directory by Docker).
+      # - ./codex-accounts.json:/app/codex-accounts.json:ro
     environment:
       # Keep the request-event jsonl on the persistent volume, not beside the
       # config (a single-file bind mount is backed by the container layer).

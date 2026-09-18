@@ -96,7 +96,7 @@ func TestProviderTestRejectsBadInput(t *testing.T) {
 		want int
 	}{
 		{"missing model", `{"prompt":"hi"}`, http.StatusBadRequest},
-		{"bad effort", `{"model":"m","effort":"ultra"}`, http.StatusBadRequest},
+		{"bad effort", `{"model":"m","effort":"turbo"}`, http.StatusBadRequest},
 		{"prompt too long", `{"model":"m","prompt":"` + strings.Repeat("x", testPromptCap+1) + `"}`, http.StatusBadRequest},
 	}
 	for _, tc := range cases {

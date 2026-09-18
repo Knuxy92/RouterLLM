@@ -278,6 +278,104 @@ routes:
 	}
 }
 
+func TestLoadYAMLCodexProviderReadsAccountsFile(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "codex-accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"accounts":[{"accountId":"acc_1","email":"a@example.test","refreshToken":"refresh-1","createdAt":"2026-01-01T00:00:00Z"},{"accountId":"acc_2","email":"b@example.test","refreshToken":"refresh-2","createdAt":"2026-01-02T00:00:00Z"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_ACCOUNTS_FILE", accounts)
+
+	path := writeTempYAML(t, `
+providers:
+  - name: codex
+    style: codex
+    base_url: https://chatgpt.com/backend-api
+routes:
+  - model_id: gpt-5-codex
+    routes:
+      - provider: codex
+        model: gpt-5-codex
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 2 || cfg.Providers[0].Keys[0] != "refresh-1" || cfg.Providers[0].Keys[1] != "refresh-2" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLCodexProviderWithoutAccountsFails(t *testing.T) {
+	t.Setenv("CODEX_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: codex
+    style: codex
+    base_url: https://chatgpt.com/backend-api
+routes:
+  - model_id: gpt-5-codex
+    routes:
+      - provider: codex
+        model: gpt-5-codex
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "no codex accounts found") || !strings.Contains(err.Error(), "--codex-login") {
+		t.Fatalf("error = %v, want 'no codex accounts found' and codex-login hint", err)
+	}
+}
+
+func TestLoadYAMLCodexProviderAPIKeyWins(t *testing.T) {
+	t.Setenv("CODEX_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: codex
+    style: codex
+    base_url: https://chatgpt.com/backend-api
+    api_key: sk_explicit
+routes:
+  - model_id: gpt-5-codex
+    routes:
+      - provider: codex
+        model: gpt-5-codex
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 1 || cfg.Providers[0].Keys[0] != "sk_explicit" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLDisabledCodexProviderWithoutAPIKey(t *testing.T) {
+	t.Setenv("CODEX_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: codex
+    style: codex
+    base_url: https://chatgpt.com/backend-api
+    disabled: true
+routes:
+  - model_id: gpt-5-codex
+    routes:
+      - provider: codex
+        model: gpt-5-codex
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || !cfg.Providers[0].Disabled || len(cfg.Providers[0].Keys) != 0 {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
 func TestLoadYAMLAutoModelKeyIsIgnored(t *testing.T) {
 	path := writeTempYAML(t, `
 auto_model:

@@ -87,6 +87,8 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 			_ = util.StreamRawSSE(resp.Body, w)
 		case "google":
 			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName)
+		case "codex":
+			adapter.StreamCodexToAnthropicSSE(resp.Body, w, modelName)
 		case "responses":
 			adapter.StreamResponsesToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
 		default:

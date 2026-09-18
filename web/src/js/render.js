@@ -554,6 +554,43 @@ function buildAnalytics(name) {
 
 let currentProvider = null;
 
+// Codex quota arrives per key from the backend (captured from upstream response
+// headers); the row stays silent until a key has its first snapshot.
+
+function quotaTone(pct) {
+  if (pct >= 80) return "bg-destructive";
+  if (pct >= 60) return "bg-amber-500";
+  return "bg-primary";
+}
+
+function fmtResetIn(resetAt) {
+  if (!resetAt) return "";
+  const secs = resetAt - Math.floor(Date.now() / 1000);
+  if (secs <= 0) return "resetting";
+  if (secs >= 86400) return `${Math.round(secs / 86400)}d`;
+  if (secs >= 3600) return `${Math.round(secs / 3600)}h`;
+  return `${Math.max(1, Math.round(secs / 60))}m`;
+}
+
+function quotaCell(quota) {
+  const win = quota?.primary;
+  if (!win) return "";
+  const reset = fmtResetIn(win.reset_at);
+  const hours = win.window_minutes ? Math.round(win.window_minutes / 60) : null;
+  const title = [
+    quota.plan_type ? `plan ${quota.plan_type}` : "",
+    hours ? `window ${hours}h` : "",
+    reset ? `resets in ${reset}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `<span class="inline-flex items-center gap-1.5"${title ? ` title="${esc(title)}"` : ""}>
+    <span class="inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-1.5 rounded-full ${quotaTone(win.used_percent)}" style="width:${Math.min(100, win.used_percent)}%"></span></span>
+    <span class="font-mono">${win.used_percent}%</span>
+    ${reset ? `<span class="text-muted-foreground">reset ${reset}</span>` : ""}
+  </span>`;
+}
+
 export function openProvider(name, onOpened) {
   currentProvider = name;
   const p = getState().providers.find((x) => x.name === name);
@@ -614,8 +651,18 @@ export function openProvider(name, onOpened) {
     </div>
     <p class="mt-2 text-[11px] leading-relaxed text-muted-foreground">Aggregate p50 is request-weighted across the models above — heavy models pull the provider average. Bar = relative to the slowest model.</p>`;
 
+  const quotaWins = p.keyList.map((k) => k.quota?.primary).filter(Boolean);
+  const worstQuota = quotaWins.length ? Math.max(...quotaWins.map((q) => q.used_percent)) : null;
+  const quotaChip =
+    worstQuota == null
+      ? ""
+      : `<span class="badge ${worstQuota >= 80 ? "tone-error" : worstQuota >= 60 ? "tone-warn" : "tone-ok"}">quota worst ${worstQuota}% · ${quotaWins.length}/${p.keyList.length} keys</span>`;
+
   const keysSection = `
-    <p class="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Manage keys</p>
+    <div class="mb-2 mt-4 flex items-center justify-between">
+      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Manage keys</p>
+      ${quotaChip}
+    </div>
     <div class="overflow-hidden rounded-md border">
       ${p.keyList
         .map(
@@ -623,6 +670,7 @@ export function openProvider(name, onOpened) {
         <div class="flex items-center gap-3 px-3 py-2.5 text-xs${i > 0 ? " border-t" : ""}${k.on ? "" : " opacity-50"}">
           <span class="font-mono">${esc(k.masked)}</span>
           <span class="badge ${KEY_TONE[k.status]}">${k.status}</span>
+          ${quotaCell(k.quota)}
           <span class="ml-auto text-muted-foreground">${k.status === "cooldown" ? `cooldown <span class="font-mono text-foreground">${k.cooldown}s</span>` : k.status === "disabled" ? "manually disabled" : ""}</span>
           <input type="checkbox" class="sw" data-action="key-toggle" data-provider="${esc(p.name)}" data-index="${i}" ${k.on ? "checked" : ""} />
         </div>`,
@@ -700,7 +748,7 @@ export function openProvider(name, onOpened) {
     });
     buildDD(
       "pd-test-effort",
-      ["(none)", "none", "low", "medium", "high", "xhigh", "max"],
+      ["(none)", "none", "low", "medium", "high", "xhigh", "max", "ultra"],
       "(none)",
       (v) => {
         testEffort = v === "(none)" ? "" : v;

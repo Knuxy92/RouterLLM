@@ -75,7 +75,7 @@ providers:
   - name: forge                   # unique name, referenced in routes
     api_key: ${FORGE_API_KEY}     # env var or list: [key1, key2]
     base_url: https://forge-gateway-api.fly.dev
-    style: openai                 # openai | anthropic | cline | google | alysis
+    style: openai                 # openai | anthropic | cline | google | alysis | codex
     auth_mode: bearer             # bearer | x-api-key | both (ignored for google)
     headers:                      # optional extra headers
       Content-Type: application/json
@@ -156,6 +156,47 @@ routes:
     routes:
       - provider: alysis
         model: deepseek-v4-flash
+```
+
+### Codex (ChatGPT) accounts
+
+`style: codex` authenticates with Codex/ChatGPT accounts instead of API keys, via OpenAI's
+OAuth device flow. Log in first:
+
+```bash
+routerllm --codex-login
+```
+
+The command prints a verification URL and user code, waits for authorization, then stores the
+account refresh token in `codex-accounts.json` next to the executable (`0600`). Override the
+location with `CODEX_ACCOUNTS_FILE`. Access tokens are refreshed automatically and kept in
+memory only. Run the command again to add more accounts — RouterLLM rotates them and fails over
+when one is rejected.
+
+The example config ships the codex provider **commented out**: an enabled `style: codex`
+provider refuses to start until at least one account is logged in, so uncomment the provider
+and its route only after `--codex-login` has created the accounts file.
+
+In Docker, run `--codex-login` on the host first, then uncomment the `codex-accounts.json`
+mount in `docker-compose.yml` — the host file must exist before the container starts, because
+Docker silently auto-creates a missing bind-mount path as a directory, which then breaks the
+account loader.
+
+Requests are stateless per turn — no conversation chaining, prompt-cache reuse or WebSocket
+transport — so very long agentic sessions may behave differently than with OpenAI-style
+providers.
+
+```yaml
+providers:
+  - name: codex
+    style: codex
+    base_url: https://chatgpt.com/backend-api
+
+routes:
+  - model_id: gpt-5.6-codex
+    routes:
+      - provider: codex
+        model: gpt-5.6-codex
 ```
 
 ### Google Gemini

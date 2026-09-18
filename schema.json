@@ -123,6 +123,16 @@
           },
           {
             "properties": {
+              "style": {
+                "const": "codex"
+              }
+            },
+            "required": [
+              "style"
+            ]
+          },
+          {
+            "properties": {
               "disabled": {
                 "const": true
               }
@@ -155,9 +165,10 @@
             "anthropic",
             "cline",
             "google",
-            "alysis"
+            "alysis",
+            "codex"
           ],
-          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth)."
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth)."
         },
         "base_url": {
           "type": "string",

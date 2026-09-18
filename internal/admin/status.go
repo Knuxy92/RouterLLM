@@ -5,13 +5,15 @@ import (
 	"time"
 
 	"routerllm/internal/provider"
+	"routerllm/internal/services"
 )
 
 type KeyState struct {
-	Masked       string `json:"masked"`
-	Alive        bool   `json:"alive"`
-	CooldownLeft int    `json:"cooldown_left_seconds"`
-	Disabled     bool   `json:"disabled"`
+	Masked       string                  `json:"masked"`
+	Alive        bool                    `json:"alive"`
+	CooldownLeft int                     `json:"cooldown_left_seconds"`
+	Disabled     bool                    `json:"disabled"`
+	Quota        *services.QuotaSnapshot `json:"quota,omitempty"`
 }
 
 type ProviderStatus struct {
@@ -63,7 +65,7 @@ type Status struct {
 
 func (d Deps) buildStatus() Status {
 	reg := d.Registry()
-	providers := buildProviders(reg)
+	providers := buildProviders(reg, d.Quota)
 	models := d.buildModels(reg)
 
 	serving := 0
@@ -88,7 +90,7 @@ func (d Deps) buildStatus() Status {
 	}
 }
 
-func buildProviders(reg *provider.Registry) []ProviderStatus {
+func buildProviders(reg *provider.Registry, quota func(provider, key string) (services.QuotaSnapshot, bool)) []ProviderStatus {
 	out := make([]ProviderStatus, 0, reg.TotalProviders())
 
 	for _, pc := range reg.ProviderConfigs() {
@@ -107,7 +109,7 @@ func buildProviders(reg *provider.Registry) []ProviderStatus {
 			status.KeysAlive = live.Keys.AliveCount()
 			status.Requests = live.Stats().Requests()
 			status.Errors = live.Stats().Errors()
-			status.Keys = keyStates(live)
+			status.Keys = keyStates(live, pc.Keys, quota)
 		}
 		status.KeysTotal = len(pc.Keys)
 
@@ -117,23 +119,30 @@ func buildProviders(reg *provider.Registry) []ProviderStatus {
 	return out
 }
 
-func keyStates(p *provider.Provider) []KeyState {
+func keyStates(p *provider.Provider, rawKeys []string, quota func(provider, key string) (services.QuotaSnapshot, bool)) []KeyState {
 	states := p.Keys.States()
 	out := make([]KeyState, 0, len(states))
 
-	for _, s := range states {
-		left := 0
-		if !s.Alive {
-			if s.Manual {
-				out = append(out, KeyState{Masked: s.Masked, Alive: false, CooldownLeft: 0, Disabled: true})
-				continue
-			}
-			left = int(time.Until(s.DeadUntil).Seconds()) + 1
-			if left < 0 {
-				left = 0
+	for i, s := range states {
+		state := KeyState{Masked: s.Masked, Alive: s.Alive}
+		if quota != nil && i < len(rawKeys) {
+			if snapshot, ok := quota(p.Name, rawKeys[i]); ok {
+				state.Quota = &snapshot
 			}
 		}
-		out = append(out, KeyState{Masked: s.Masked, Alive: s.Alive, CooldownLeft: left})
+
+		if !s.Alive {
+			if s.Manual {
+				state.Disabled = true
+			} else {
+				left := int(time.Until(s.DeadUntil).Seconds()) + 1
+				if left < 0 {
+					left = 0
+				}
+				state.CooldownLeft = left
+			}
+		}
+		out = append(out, state)
 	}
 
 	return out

@@ -126,7 +126,7 @@ func TestAddRouteRejectsUnknownModelAndEmptyFields(t *testing.T) {
 	if err := editor.AddRoute("demo-model", "beta", "", "", "", false); err == nil {
 		t.Error("empty model accepted")
 	}
-	if err := editor.AddRoute("demo-model", "beta", "m", "ultra", "", false); err == nil {
+	if err := editor.AddRoute("demo-model", "beta", "m", "turbo", "", false); err == nil {
 		t.Error("invalid reasoning effort accepted")
 	}
 }
@@ -228,7 +228,7 @@ func TestRouteAddEndpointValidatesAndPersists(t *testing.T) {
 	}
 
 	// Invalid reasoning_effort is rejected before the yaml is touched.
-	w = request(t, srv, http.MethodPost, "/admin/api/routes/demo-model/add", session, `{"provider":"beta","model":"m","reasoning_effort":"ultra"}`)
+	w = request(t, srv, http.MethodPost, "/admin/api/routes/demo-model/add", session, `{"provider":"beta","model":"m","reasoning_effort":"turbo"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("bad effort status = %d, want 400", w.Code)
 	}

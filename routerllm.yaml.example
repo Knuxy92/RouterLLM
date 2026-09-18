@@ -117,11 +117,12 @@ providers:
 
   # --- Parked provider ---
   # `disabled: true` skips the provider at startup and on every reload, and
-  # relaxes its validation: no api_key needed (and a disabled `style: cline`
-  # provider needs no logged-in cline accounts). Park a provider whose key died
-  # instead of deleting the block — deleting it breaks startup while routes
-  # still reference it. Route entries pointing at a disabled provider are
-  # silently dropped from the routing table (logged as a notice).
+  # relaxes its validation: no api_key needed (and a disabled account-based
+  # provider — `style: cline` or `style: codex` — needs no logged-in accounts).
+  # Park a provider whose key died instead of deleting the block — deleting it
+  # breaks startup while routes still reference it. Route entries pointing at a
+  # disabled provider are silently dropped from the routing table (logged as a
+  # notice).
 
   - name: retired-gateway
     disabled: true
@@ -149,6 +150,17 @@ providers:
   # - name: alysis
   #   style: alysis
   #   base_url: https://vzigujbcjjmpntxhmyvr.supabase.co/functions/v1/llm/v1
+
+  # --- Codex (ChatGPT) accounts ---
+  # Commented out on purpose: an ENABLED codex provider refuses to start until
+  # `routerllm --codex-login` has created codex-accounts.json next to the
+  # executable (override with CODEX_ACCOUNTS_FILE). Uncomment BOTH this block
+  # and the codex route below after logging in. No api_key is needed — keys
+  # come from the accounts file — and the adapter appends /codex/responses.
+  #
+  # - name: codex
+  #   style: codex
+  #   base_url: https://chatgpt.com/backend-api
 
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these
@@ -267,6 +279,13 @@ routes:
   #   routes:
   #     - provider: alysis
   #       model: deepseek-v4-flash
+
+  # Codex (ChatGPT) account model — uncomment together with the codex provider
+  # above (requires `routerllm --codex-login` first).
+  # - model_id: gpt-5.6-codex
+  #   routes:
+  #     - provider: codex
+  #       model: gpt-5.6-codex
 
   # Disabled fallback entry: skipped, the remaining entries still serve the
   # model. If every entry for a model_id is disabled the model disappears from
