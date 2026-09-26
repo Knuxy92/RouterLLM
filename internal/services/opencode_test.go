@@ -49,11 +49,15 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("User-Agent"); got != opencode.UserAgent {
 		t.Errorf("User-Agent = %q, want %q", got, opencode.UserAgent)
 	}
-	if got := r.Header.Get("x-opencode-session"); !strings.HasPrefix(got, "ses_") || len(got) != len("ses_")+26 {
-		t.Errorf("x-opencode-session = %q, want ses_ + 26 chars", got)
-	}
-	if got := r.Header.Get("x-opencode-request"); !strings.HasPrefix(got, "msg_") || len(got) != len("msg_")+26 {
-		t.Errorf("x-opencode-request = %q, want msg_ + 26 chars", got)
+	for _, h := range []struct{ name, prefix string }{
+		{"x-opencode-session", "ses_"},
+		{"x-opencode-request", "msg_"},
+	} {
+		got := r.Header.Get(h.name)
+		body := strings.TrimPrefix(got, h.prefix)
+		if !strings.HasPrefix(got, h.prefix) || len(body) != 26 || strings.ToLower(body) != body || !isHex(body) {
+			t.Errorf("%s = %q, want %s + 26 lowercase hex chars", h.name, got, h.prefix)
+		}
 	}
 	if got := r.Header.Get("x-opencode-project"); got != "global" {
 		t.Errorf("x-opencode-project = %q, want global", got)
@@ -67,6 +71,16 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("x-api-key"); got != "" {
 		t.Errorf("x-api-key = %q, want empty (opencode auth is Bearer-only)", got)
 	}
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+
+	return len(s) > 0
 }
 
 func assertRequiredToolsPresent(t *testing.T, tools []any) {

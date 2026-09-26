@@ -8,14 +8,12 @@ import (
 const UserAgent = "opencode/1.18.32 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14"
 
 const (
+	// The gateway validates the session/request id shape: 26 lowercase hex
+	// characters after the prefix. Anything else (mixed case, dashes) fails
+	// the free-tier client check with a 403.
 	idLength = 26
 
-	// Accept only bytes below this so each of the 62 charset symbols maps
-	// from an equal number of byte values; 256 % 62 == 8, so the top 8
-	// values are redrawn instead of biasing the modulo.
-	maxRandByte = 256 - (256 % 62)
-
-	idCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	idCharset = "0123456789abcdef"
 )
 
 func RequiredToolNames() []string {
@@ -61,16 +59,13 @@ func SetHeaders(header http.Header, sessionID, requestID string) {
 
 func newID(prefix string) string {
 	buf := make([]byte, idLength)
-	for i := 0; i < idLength; {
-		var b [1]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			panic("crypto/rand failed: " + err.Error())
-		}
-		if b[0] >= maxRandByte {
-			continue
-		}
-		buf[i] = idCharset[b[0]%62]
-		i++
+	if _, err := rand.Read(buf); err != nil {
+		panic("crypto/rand failed: " + err.Error())
 	}
+	// 256 % 16 == 0, so the modulo stays unbiased.
+	for i := range buf {
+		buf[i] = idCharset[int(buf[i])%len(idCharset)]
+	}
+
 	return prefix + string(buf)
 }
