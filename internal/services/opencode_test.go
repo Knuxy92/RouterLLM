@@ -381,3 +381,32 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 		t.Fatalf("client must not see the renamed tool:\n%s", body)
 	}
 }
+
+func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		if got, _ := body["max_output_tokens"].(float64); got < 16 {
+			t.Errorf("upstream max_output_tokens = %v, want >= 16", body["max_output_tokens"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\"}}\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}

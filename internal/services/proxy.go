@@ -553,6 +553,9 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	// responses and messages models), with the required-tool injection and
 	// reserved-name rename applied on every dialect.
 	if pv.Style == "opencode" {
+		// The gateway rejects token caps below 16, which the admin test panel
+		// happily lets through.
+		clampOpenCodeMaxTokens(routeBody, "max_tokens", "max_completion_tokens", "max_output_tokens")
 		switch route.Dialect() {
 		case "chat":
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
@@ -733,6 +736,20 @@ func openCodeAnthropicTools() []map[string]any {
 	}
 
 	return anthropic
+}
+
+// openCodeMinMaxTokens is the gateway's floor: max token caps below it are
+// rejected with "The number must be `>= 16`" (the admin test panel's clamp
+// happily lets 1-15 through).
+const openCodeMinMaxTokens = 16
+
+// clampOpenCodeMaxTokens raises any present token-cap key to the gateway floor.
+func clampOpenCodeMaxTokens(body map[string]any, keys ...string) {
+	for _, key := range keys {
+		if v, ok := body[key].(float64); ok && v < openCodeMinMaxTokens {
+			body[key] = float64(openCodeMinMaxTokens)
+		}
+	}
 }
 
 // mergeToolNameRestore folds a second reverse map into the accumulated one.
