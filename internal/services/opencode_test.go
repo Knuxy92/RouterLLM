@@ -49,11 +49,11 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("User-Agent"); got != opencode.UserAgent {
 		t.Errorf("User-Agent = %q, want %q", got, opencode.UserAgent)
 	}
-	if got := r.Header.Get("x-opencode-session"); !strings.HasPrefix(got, "ses_") || len(got) != len("ses_")+24 {
-		t.Errorf("x-opencode-session = %q, want ses_ + 24 chars", got)
+	if got := r.Header.Get("x-opencode-session"); !strings.HasPrefix(got, "ses_") || len(got) != len("ses_")+26 {
+		t.Errorf("x-opencode-session = %q, want ses_ + 26 chars", got)
 	}
-	if got := r.Header.Get("x-opencode-request"); !strings.HasPrefix(got, "msg_") || len(got) != len("msg_")+24 {
-		t.Errorf("x-opencode-request = %q, want msg_ + 24 chars", got)
+	if got := r.Header.Get("x-opencode-request"); !strings.HasPrefix(got, "msg_") || len(got) != len("msg_")+26 {
+		t.Errorf("x-opencode-request = %q, want msg_ + 26 chars", got)
 	}
 	if got := r.Header.Get("x-opencode-project"); got != "global" {
 		t.Errorf("x-opencode-project = %q, want global", got)

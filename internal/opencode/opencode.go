@@ -8,7 +8,7 @@ import (
 const UserAgent = "opencode/1.18.32 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14"
 
 const (
-	idLength = 24
+	idLength = 26
 
 	// Accept only bytes below this so each of the 62 charset symbols maps
 	// from an equal number of byte values; 256 % 62 == 8, so the top 8
