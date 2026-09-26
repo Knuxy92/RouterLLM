@@ -420,14 +420,7 @@ func (ts *toolStreamState) freshArgs() string {
 
 // StreamOpenAIToAnthropicSSE reads OpenAI SSE chunks from src and writes
 // proper Anthropic SSE events (with event: prefix) to dst.
-func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) {
-	_ = streamOpenAIToAnthropicSSE(src, dst, modelName)
-}
-
-// streamOpenAIToAnthropicSSE is the error-returning form of
-// StreamOpenAIToAnthropicSSE; StreamGoogleToAnthropicSSE uses it so a failed
-// conversion is not silently swallowed.
-func streamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) error {
+func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) error {
 	flusher, _ := dst.(http.Flusher)
 	var st anthropicSSEState
 

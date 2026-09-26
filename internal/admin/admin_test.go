@@ -36,7 +36,6 @@ func testDeps(t *testing.T, path string) (Deps, *int) {
 		Registry:  func() *provider.Registry { return reg },
 		Editor:    NewEditor(path),
 		Sessions:  NewSessionStore(func() string { return os.Getenv("ROUTERLLM_ADMIN_TOKEN") }),
-		Logs:      NewLogBuffer(),
 		Reloads:   NewReloadTracker(),
 		StartedAt: time.Now(),
 	}
@@ -505,40 +504,6 @@ func TestReloadEndpointReportsRejection(t *testing.T) {
 	}
 	if last := deps.Reloads.Last(); last.OK || last.Error == "" {
 		t.Fatalf("last reload = %+v, want failure with an error", last)
-	}
-}
-
-func TestLogsEndpointReturnsBufferedLines(t *testing.T) {
-	t.Setenv("ROUTERLLM_ADMIN_TOKEN", "secret")
-	deps, _ := testDeps(t, seedConfig(t))
-	deps.Logs.Write([]byte("first line\nsecond line\n"))
-	srv := adminServer(t, deps)
-	session := login(t, srv, "secret")
-
-	w := request(t, srv, http.MethodGet, "/admin/api/logs", session, "")
-	var payload struct {
-		Entries []LogEntry `json:"entries"`
-	}
-	json.Unmarshal(w.Body.Bytes(), &payload)
-	if len(payload.Entries) != 2 {
-		t.Fatalf("entries = %+v, want 2", payload.Entries)
-	}
-
-	w = request(t, srv, http.MethodGet, "/admin/api/logs?since=1", session, "")
-	json.Unmarshal(w.Body.Bytes(), &payload)
-	if len(payload.Entries) != 1 || payload.Entries[0].Line != "second line" {
-		t.Fatalf("since filter broken: %+v", payload.Entries)
-	}
-}
-
-func TestLogBufferCapsAtCapacity(t *testing.T) {
-	buf := NewLogBuffer()
-	for i := 0; i < defaultLogCapacity+50; i++ {
-		buf.Write([]byte("line\n"))
-	}
-
-	if got := len(buf.Since(0)); got != defaultLogCapacity {
-		t.Fatalf("buffered = %d, want %d", got, defaultLogCapacity)
 	}
 }
 

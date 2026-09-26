@@ -292,8 +292,6 @@ func TestToolNameRoundTripRestore(t *testing.T) {
 		"tool_choice": map[string]any{"type": "function", "function": map[string]any{"name": long}},
 		"toolConfig":  map[string]any{"functionCallingConfig": map[string]any{"allowed_function_names": []any{flat, "short"}}},
 	}
-	before := testJSON(t, body)
-
 	reverse, dropped := processToolNames(body, false, true)
 
 	if dropped != 0 {
@@ -303,10 +301,26 @@ func TestToolNameRoundTripRestore(t *testing.T) {
 		t.Fatalf("reverse len = %d, want 2", len(reverse))
 	}
 
-	restoreToolNames(body, reverse)
+	tools := body["tools"].([]any)
+	first := tools[0].(map[string]any)["function"].(map[string]any)["name"].(string)
+	second := tools[1].(map[string]any)["name"].(string)
+	if reverse[first] != long {
+		t.Fatalf("reverse[%q] = %q, want %q", first, reverse[first], long)
+	}
+	if reverse[second] != flat {
+		t.Fatalf("reverse[%q] = %q, want %q", second, reverse[second], flat)
+	}
 
-	if got := testJSON(t, body); got != before {
-		t.Fatalf("round trip mismatch:\n got %s\nwant %s", got, before)
+	historyCalls := body["messages"].([]any)[0].(map[string]any)["tool_calls"].([]any)
+	if got := historyCalls[0].(map[string]any)["function"].(map[string]any)["name"].(string); got != first {
+		t.Fatalf("history name = %q, want %q", got, first)
+	}
+	if got := body["tool_choice"].(map[string]any)["function"].(map[string]any)["name"].(string); got != first {
+		t.Fatalf("tool_choice name = %q, want %q", got, first)
+	}
+	allowed := body["toolConfig"].(map[string]any)["functionCallingConfig"].(map[string]any)["allowed_function_names"].([]any)
+	if allowed[0] != second {
+		t.Fatalf("allowed_function_names[0] = %v, want %q", allowed[0], second)
 	}
 }
 

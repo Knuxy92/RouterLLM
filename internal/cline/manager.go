@@ -11,11 +11,8 @@ import (
 )
 
 const (
-	clientUserAgent  = "Cline/3.0.47"
-	clientVersion    = "3.0.47"
-	defaultModel     = "cline-free/glm-5.2"
-	defaultMaxTokens = 128000
-	defaultEffort    = "high"
+	clientUserAgent = "Cline/3.0.47"
+	clientVersion   = "3.0.47"
 )
 
 type Manager struct {
@@ -123,16 +120,6 @@ func PrepareBody(body map[string]any) string {
 	if sessionID == "" {
 		sessionID = "sess_" + strconv.FormatInt(time.Now().UnixMilli(), 10)
 		body["session_id"] = sessionID
-	}
-
-	if model, _ := body["model"].(string); model == "" {
-		body["model"] = defaultModel
-	}
-	if _, ok := body["max_tokens"]; !ok {
-		body["max_tokens"] = defaultMaxTokens
-	}
-	if effort, _ := body["reasoning_effort"].(string); effort == "" {
-		body["reasoning_effort"] = defaultEffort
 	}
 
 	return sessionID

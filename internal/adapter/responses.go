@@ -588,6 +588,5 @@ func StreamResponsesToAnthropicSSE(src io.Reader, dst http.ResponseWriter, model
 		pw.CloseWithError(err)
 	}()
 
-	StreamOpenAIToAnthropicSSE(pr, dst, modelName)
-	return nil
+	return StreamOpenAIToAnthropicSSE(pr, dst, modelName)
 }

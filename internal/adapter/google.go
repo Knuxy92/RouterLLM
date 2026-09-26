@@ -707,5 +707,5 @@ func StreamGoogleToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 	}()
 
 	defer pr.Close()
-	return streamOpenAIToAnthropicSSE(pr, dst, modelName)
+	return StreamOpenAIToAnthropicSSE(pr, dst, modelName)
 }

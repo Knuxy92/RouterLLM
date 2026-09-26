@@ -40,7 +40,6 @@ const (
 type Attempt struct {
 	Provider  string `json:"provider"`
 	Model     string `json:"model,omitempty"`
-	Key       string `json:"key,omitempty"`
 	Status    int    `json:"status"`
 	LatencyMS int64  `json:"latency_ms"`
 	Note      string `json:"note,omitempty"`

@@ -224,8 +224,8 @@ func TestPrepareBodyAndHeaders(t *testing.T) {
 	if sessionID == "" || body["session_id"] != sessionID {
 		t.Fatalf("session id = %q, body = %#v", sessionID, body)
 	}
-	if body["model"] != defaultModel || body["max_tokens"] != defaultMaxTokens || body["reasoning_effort"] != defaultEffort {
-		t.Fatalf("body defaults = %#v", body)
+	if _, ok := body["model"]; ok {
+		t.Fatalf("PrepareBody must not inject a model default, got %v", body["model"])
 	}
 
 	header := http.Header{}

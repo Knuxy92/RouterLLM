@@ -18,10 +18,10 @@ import (
 
 	"os"
 	"routerllm/internal/adapter"
-	"routerllm/internal/opencode"
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
+	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
@@ -163,12 +163,6 @@ func (p *Proxy) SetTelemetry(s *telemetry.Store) {
 		s = telemetry.NewMemStore()
 	}
 	p.telemetry.Store(s)
-}
-
-// TelemetryStore exposes the event sink so handlers outside services can read
-// buffered events and metrics.
-func (p *Proxy) TelemetryStore() *telemetry.Store {
-	return p.telemetry.Load()
 }
 
 // recordTelemetry fills the common fields and hands the event to the store.
@@ -1509,7 +1503,9 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 		return
 	}
 
-	adapter.StreamOpenAIToAnthropicSSE(resp.Body, newRestoringWriter(w, toolNameRestore), modelName)
+	if err := adapter.StreamOpenAIToAnthropicSSE(resp.Body, newRestoringWriter(w, toolNameRestore), modelName); err != nil {
+		p.log.Printf("openai stream error: %v", err)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

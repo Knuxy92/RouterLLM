@@ -73,23 +73,23 @@ type Message struct {
 }
 
 type RequestDefaults struct {
-	ReasoningEffort string `yaml:"reasoning_effort" json:"reasoning_effort"`
-	EnableThinking  *bool  `yaml:"enable_thinking,omitempty" json:"enable_thinking,omitempty"`
-	ThinkingBudget  int    `yaml:"thinking_budget" json:"thinking_budget"`
+	ReasoningEffort string `yaml:"reasoning_effort"`
+	EnableThinking  *bool  `yaml:"enable_thinking,omitempty"`
+	ThinkingBudget  int    `yaml:"thinking_budget"`
 }
 
 type Spec struct {
-	Provider          string          `yaml:"provider" json:"provider"`
-	Model             string          `yaml:"model" json:"model"`
-	Disabled          bool            `yaml:"disabled,omitempty" json:"disabled,omitempty"`
-	StyleCall         string          `yaml:"stylecall,omitempty" json:"stylecall,omitempty"`
-	SanitizeToolNames bool            `yaml:"sanitize_tool_names,omitempty" json:"sanitize_tool_names,omitempty"`
-	DedupeTools       bool            `yaml:"dedupe_tools,omitempty" json:"dedupe_tools,omitempty"`
-	Defaults          RequestDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Provider          string          `yaml:"provider"`
+	Model             string          `yaml:"model"`
+	Disabled          bool            `yaml:"disabled,omitempty"`
+	StyleCall         string          `yaml:"stylecall,omitempty"`
+	SanitizeToolNames bool            `yaml:"sanitize_tool_names,omitempty"`
+	DedupeTools       bool            `yaml:"dedupe_tools,omitempty"`
+	Defaults          RequestDefaults `yaml:"defaults,omitempty"`
 }
 
 type Rule struct {
-	ModelID  string `yaml:"model_id" json:"model_id"`
-	Disabled bool   `yaml:"disabled,omitempty" json:"disabled,omitempty"`
-	Routes   []Spec `yaml:"routes" json:"routes"`
+	ModelID  string `yaml:"model_id"`
+	Disabled bool   `yaml:"disabled,omitempty"`
+	Routes   []Spec `yaml:"routes"`
 }

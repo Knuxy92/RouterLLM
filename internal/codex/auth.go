@@ -52,7 +52,6 @@ type DeviceAuth struct {
 	DeviceAuthID            string
 	UserCode                string
 	VerificationURI         string
-	VerificationURIComplete string
 	Interval                int
 	ExpiresAt               time.Time
 }

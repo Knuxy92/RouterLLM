@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"routerllm/internal/model"
-	"routerllm/internal/util"
 )
 
 type ProviderConfig struct {
@@ -40,8 +39,6 @@ type Config struct {
 }
 
 func Load() *Config {
-	_ = util.LoadDotenv(".env")
-
 	cfg, err := loadYAML(ConfigPath())
 	if err != nil {
 		log.Printf("config error: %v", err)

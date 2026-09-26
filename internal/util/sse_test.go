@@ -11,8 +11,8 @@ func streamBody(t *testing.T, src string, filter bool) string {
 
 	rec := httptest.NewRecorder()
 
-	if err := StreamSSE(strings.NewReader(src), rec, filter); err != nil {
-		t.Fatalf("StreamSSE returned error: %v", err)
+	if err := StreamSSETransform(strings.NewReader(src), rec, filter, nil); err != nil {
+		t.Fatalf("StreamSSETransform returned error: %v", err)
 	}
 
 	return rec.Body.String()

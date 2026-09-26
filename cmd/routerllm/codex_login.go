@@ -21,10 +21,7 @@ func runCodexLogin() error {
 	defer cancel()
 
 	account, err := manager.Login(ctx, func(device codex.DeviceAuth) {
-		url := device.VerificationURIComplete
-		if url == "" {
-			url = device.VerificationURI
-		}
+		url := device.VerificationURI
 
 		fmt.Println("open this URL to authorize RouterLLM:")
 		fmt.Println("  " + url)

@@ -80,8 +80,8 @@ func TestForwardRawSendsClineHeadersAndSession(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
-	if gotBody["max_tokens"] == nil || gotBody["reasoning_effort"] != "high" {
-		t.Fatalf("body defaults = %#v", gotBody)
+	if _, ok := gotBody["max_tokens"]; ok {
+		t.Fatalf("PrepareBody must not inject token defaults, body = %#v", gotBody)
 	}
 }
 

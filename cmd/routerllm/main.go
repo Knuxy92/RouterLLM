@@ -3,15 +3,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -53,7 +50,6 @@ func main() {
 
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
-	logBuffer := admin.NewLogBuffer()
 	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {
 		f, err := os.OpenFile(lf, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
@@ -61,37 +57,30 @@ func main() {
 		}
 		defer f.Close()
 		logFile = f
-		operationalOut = io.MultiWriter(os.Stdout, f, logBuffer)
-	} else {
-		operationalOut = io.MultiWriter(os.Stdout, logBuffer)
+		operationalOut = io.MultiWriter(os.Stdout, f)
 	}
 	log.SetOutput(operationalOut)
-	overviewLogger := log.New(operationalOut, "", log.LstdFlags)
-	operationalLogger := log.New(operationalOut, "", log.LstdFlags)
+	logger := log.New(operationalOut, "", log.LstdFlags)
 	cfg := config.Load()
 
 	if cfg == nil {
 		if logFile != nil {
-			overviewLogger.Fatal("failed to load routerllm.yaml — see log file for details")
+			logger.Fatal("failed to load routerllm.yaml — see log file for details")
 		}
-		overviewLogger.Fatal("failed to load routerllm.yaml — see the `config error` line above")
+		logger.Fatal("failed to load routerllm.yaml — see the `config error` line above")
 	}
 
 	if len(cfg.Providers) == 0 {
-		overviewLogger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
-	}
-
-	if err := validatePort(cfg.Port); err != nil {
-		overviewLogger.Fatalf("invalid port %q: %v — set ROUTERLLM_PORT (or the port field in routerllm.yaml) to an integer in 1..65535", cfg.Port, err)
+		logger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
 	}
 
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
-	proxy := services.NewProxy(registry, cfg.Client, operationalLogger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt)
+	proxy := services.NewProxy(registry, cfg.Client, logger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt)
 	proxy.SetDedupeTools(cfg.DedupeTools)
-	logRegistry(overviewLogger, registry)
-	overviewLogger.Printf("loaded %d provider(s) (%d active), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", registry.TotalProviders(), registry.ActiveProviders(), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
+	logRegistry(logger, registry)
+	logger.Printf("loaded %d provider(s) (%d active), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", registry.TotalProviders(), registry.ActiveProviders(), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
 
 	h := handlers.New(proxy)
 	var auditLogger *log.Logger
@@ -107,7 +96,7 @@ func main() {
 	}
 	teleStore, err := telemetry.NewStore(telePath)
 	if err != nil {
-		overviewLogger.Printf("telemetry store unavailable (%v) — falling back to in-memory", err)
+		logger.Printf("telemetry store unavailable (%v) — falling back to in-memory", err)
 		teleStore = telemetry.NewMemStore()
 	}
 	proxy.SetTelemetry(teleStore)
@@ -117,18 +106,17 @@ func main() {
 		proxy.Apply(reloaded, next.SystemPrompt)
 		proxy.ApplySettings(next.ForceStream, next.ForwardClientHeaders, next.AllowClientHeaders)
 		proxy.SetDedupeTools(next.DedupeTools)
-		logRegistry(overviewLogger, reloaded)
+		logRegistry(logger, reloaded)
 		reloadTracker.RecordSuccess()
-		overviewLogger.Printf("config reloaded: %d provider(s) (%d active), %d model(s)", reloaded.TotalProviders(), reloaded.ActiveProviders(), len(reloaded.AllModels()))
+		logger.Printf("config reloaded: %d provider(s) (%d active), %d model(s)", reloaded.TotalProviders(), reloaded.ActiveProviders(), len(reloaded.AllModels()))
 	}
 
-	reloader := config.NewReloader(configPath, config.Hash(configPath), overviewLogger, applyConfig, reloadTracker.RecordFailure)
+	reloader := config.NewReloader(configPath, config.Hash(configPath), logger, applyConfig, reloadTracker.RecordFailure)
 
 	adminDeps := admin.Deps{
 		Registry:  proxy.Registry,
 		Editor:    admin.NewEditor(configPath),
 		Sessions:  admin.NewSessionStore(func() string { return os.Getenv("ROUTERLLM_ADMIN_TOKEN") }),
-		Logs:      logBuffer,
 		Reloads:   reloadTracker,
 		Telemetry: teleStore,
 		StartedAt: time.Now(),
@@ -158,7 +146,7 @@ func main() {
 		}
 		cert, err := admin.EnsureCertificate(certPath, keyPath)
 		if err != nil {
-			overviewLogger.Fatalf("admin TLS certificate: %v", err)
+			logger.Fatalf("admin TLS certificate: %v", err)
 		}
 
 		adminMux := chi.NewRouter()
@@ -172,9 +160,9 @@ func main() {
 			IdleTimeout:       120 * time.Second,
 		}
 		go func() {
-			overviewLogger.Printf("admin console (TLS) on :%s — cert %s, key %s", port, certPath, keyPath)
+			logger.Printf("admin console (TLS) on :%s — cert %s, key %s", port, certPath, keyPath)
 			if err := adminTLS.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-				overviewLogger.Fatal(err)
+				logger.Fatal(err)
 			}
 		}()
 	} else {
@@ -185,7 +173,7 @@ func main() {
 	}
 
 	if os.Getenv("AUTHTOKEN") == "" {
-		overviewLogger.Printf("v1 auth is disabled (AUTHTOKEN unset) — /v1 write endpoints accept anyone")
+		logger.Printf("v1 auth is disabled (AUTHTOKEN unset) — /v1 write endpoints accept anyone")
 	}
 
 	handler := routers.New(h, auditLogger, func() string { return os.Getenv("AUTHTOKEN") }, mountAdmin)
@@ -215,47 +203,35 @@ func main() {
 	}
 
 	go func() {
-		overviewLogger.Printf("listening on :%s", cfg.Port)
+		logger.Printf("listening on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			overviewLogger.Fatal(err)
+			logger.Fatal(err)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	overviewLogger.Println("shutting down server...")
+	logger.Println("shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		overviewLogger.Fatal("server forced to shutdown:", err)
+		logger.Fatal("server forced to shutdown:", err)
 	}
 	if adminTLS != nil {
 		if err := adminTLS.Shutdown(ctx); err != nil {
-			overviewLogger.Fatal("admin TLS server forced to shutdown:", err)
+			logger.Fatal("admin TLS server forced to shutdown:", err)
 		}
 	}
 	if err := teleStore.Close(); err != nil {
-		overviewLogger.Printf("telemetry close failed: %v", err)
+		logger.Printf("telemetry close failed: %v", err)
 	}
-	overviewLogger.Println("server stopped")
+	logger.Println("server stopped")
 }
 
 func logRegistry(logger *log.Logger, reg *provider.Registry) {
 	for _, skipped := range reg.SkippedRoutes() {
 		logger.Printf("route skipped: %s", skipped)
 	}
-}
-
-func validatePort(port string) error {
-	n, err := strconv.Atoi(strings.TrimSpace(port))
-	if err != nil {
-		return errors.New("not an integer")
-	}
-	if n < 1 || n > 65535 {
-		return errors.New("out of range 1..65535")
-	}
-
-	return nil
 }

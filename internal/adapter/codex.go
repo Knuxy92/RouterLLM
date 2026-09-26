@@ -724,14 +724,9 @@ func (s *codexBufferSink) failure(message, code string) {
 }
 
 // StreamCodexToOpenAI converts a Codex SSE stream into OpenAI
-// chat.completion.chunk frames, always terminating with data: [DONE].
-func StreamCodexToOpenAI(src io.Reader, dst http.ResponseWriter, modelName string) error {
-	return streamCodexToOpenAI(src, dst, modelName)
-}
-
-// streamCodexToOpenAI is the io.Writer form used by the Anthropic pipe;
-// flusher support is asserted, not required.
-func streamCodexToOpenAI(src io.Reader, dst io.Writer, modelName string) error {
+// chat.completion.chunk frames, always terminating with data: [DONE]. The
+// destination is any io.Writer; flusher support is asserted, not required.
+func StreamCodexToOpenAI(src io.Reader, dst io.Writer, modelName string) error {
 	sink := newCodexStreamSink(dst, modelName)
 	err := emitCodexAsOpenAI(src, sink)
 	sink.closeStream()
@@ -789,12 +784,12 @@ func BufferCodexToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 func StreamCodexToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) {
 	pr, pw := io.Pipe()
 	go func() {
-		err := streamCodexToOpenAI(src, pw, modelName)
+		err := StreamCodexToOpenAI(src, pw, modelName)
 		pw.CloseWithError(err)
 	}()
 
 	defer pr.Close()
-	_ = streamOpenAIToAnthropicSSE(pr, dst, modelName)
+	_ = StreamOpenAIToAnthropicSSE(pr, dst, modelName)
 }
 
 func newCodexChatID() string {

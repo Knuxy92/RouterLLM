@@ -21,7 +21,6 @@ type Endpoints struct {
 	Authenticate string
 	Register     string
 	Refresh      string
-	Completions  string
 }
 
 func DefaultEndpoints() Endpoints {
@@ -30,7 +29,6 @@ func DefaultEndpoints() Endpoints {
 		Authenticate: "https://api.workos.com/user_management/authenticate",
 		Register:     "https://api.cline.bot/api/v1/auth/register",
 		Refresh:      "https://api.cline.bot/api/v1/auth/refresh",
-		Completions:  "https://api.cline.bot/api/v1/chat/completions",
 	}
 }
 
@@ -77,9 +75,6 @@ func (c *Client) endpoints() Endpoints {
 	}
 	if e.Refresh == "" {
 		e.Refresh = defaults.Refresh
-	}
-	if e.Completions == "" {
-		e.Completions = defaults.Completions
 	}
 
 	return e

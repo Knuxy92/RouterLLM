@@ -92,7 +92,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		case "responses":
 			adapter.StreamResponsesToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
 		default:
-			adapter.StreamOpenAIToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
+			_ = adapter.StreamOpenAIToAnthropicSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore), modelName)
 		}
 
 		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", respTokens(resp), ""))

@@ -41,12 +41,9 @@ func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err
 	}
 }
 
-func StreamSSE(src io.Reader, dst http.ResponseWriter, filterChoices bool) error {
-	return StreamSSETransform(src, dst, filterChoices, nil)
-}
-
-// StreamSSETransform forwards data frames exactly like StreamSSE and passes
-// every payload through transform (nil keeps the payload verbatim) before it is
+// StreamSSETransform forwards data frames, skipping non-choice frames when
+// filterChoices is set (frames carrying "error" always pass), and passes every
+// payload through transform (nil keeps the payload verbatim) before it is
 // written, which lets callers rewrite response fields per frame.
 func StreamSSETransform(src io.Reader, dst http.ResponseWriter, filterChoices bool, transform func(payload string) string) error {
 	flusher, _ := dst.(http.Flusher)

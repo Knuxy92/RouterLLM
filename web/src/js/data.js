@@ -12,7 +12,6 @@ export const NOTE_TONE = { ok: "tone-ok", warn: "tone-warn", error: "tone-error"
 
 export const KEY_TONE = {
   healthy: "tone-ok",
-  "rate-limited": "tone-warn",
   cooldown: "tone-warn",
   invalid: "tone-error",
   disabled: "tone-info",

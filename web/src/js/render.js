@@ -411,7 +411,7 @@ export function openTrace(e) {
   $("#trace-timeline").innerHTML = attempts
     .map(
       (a, i) => `
-    <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full ${a.status && a.status < 400 ? "bg-primary" : "bg-amber-500"}"></span><p class="font-mono">attempt ${i + 1}/${attempts.length} → ${esc(a.provider)}${a.model ? "/" + esc(a.model) : ""}${a.key ? " · key " + esc(a.key) : ""} · <span class="${a.status && a.status < 400 ? "" : "text-destructive font-semibold"}">${a.status || "—"}</span> · ${fmtDur(a.latency_ms)}${a.note ? " · " + esc(a.note) : ""}</p></li>`,
+    <li class="relative py-1.5"><span class="absolute -left-[21px] top-3 size-2 rounded-full ${a.status && a.status < 400 ? "bg-primary" : "bg-amber-500"}"></span><p class="font-mono">attempt ${i + 1}/${attempts.length} → ${esc(a.provider)}${a.model ? "/" + esc(a.model) : ""} · <span class="${a.status && a.status < 400 ? "" : "text-destructive font-semibold"}">${a.status || "—"}</span> · ${fmtDur(a.latency_ms)}${a.note ? " · " + esc(a.note) : ""}</p></li>`,
     )
     .join("");
 
@@ -936,14 +936,7 @@ export function renderLogs() {
     : `Rows <span class="font-mono text-foreground">0</span> of <span class="font-mono text-foreground">0</span>`;
 
   const errBtn = $("#log-level-seg [data-level='error']");
-  let errCount = errBtn?.querySelector("#log-error-count");
-  if (errBtn && !errCount) {
-    errCount = document.createElement("span");
-    errCount.id = "log-error-count";
-    errCount.className =
-      "ml-1 rounded-full bg-destructive/15 px-1.5 text-[10px] font-semibold text-destructive";
-    errBtn.appendChild(errCount);
-  }
+  const errCount = errBtn?.querySelector("#log-error-count");
   if (errCount) errCount.textContent = meta.error_total ?? 0;
 
   // Windowed pagination: Prev/Next plus at most 5 page buttons centred on the

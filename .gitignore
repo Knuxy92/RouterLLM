@@ -44,3 +44,4 @@ memory-bank/
 
 # ZCode session metadata
 .zcode/
+.zcodeignore

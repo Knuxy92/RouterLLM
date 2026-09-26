@@ -22,7 +22,6 @@ type Deps struct {
 	Reload    func() error
 	Editor    *Editor
 	Sessions  *SessionStore
-	Logs      *LogBuffer
 	Reloads   *ReloadTracker
 	Telemetry *telemetry.Store
 	StartedAt time.Time
@@ -34,7 +33,7 @@ type Deps struct {
 }
 
 func Mount(r chi.Router, deps Deps) {
-	if deps.Reload == nil || deps.Registry == nil || deps.Editor == nil || deps.Sessions == nil || deps.Logs == nil || deps.Reloads == nil {
+	if deps.Reload == nil || deps.Registry == nil || deps.Editor == nil || deps.Sessions == nil || deps.Reloads == nil {
 		panic("admin.Mount: Deps is missing a required field")
 	}
 
@@ -51,7 +50,6 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Post("/auth/logout", deps.handleAuthLogout)
 			authed.Get("/pulse", deps.handlePulse)
 			authed.Get("/status", deps.handleStatus)
-			authed.Get("/logs", deps.handleLogs)
 			authed.Get("/requests", deps.handleRequests)
 			authed.Get("/metrics", deps.handleMetrics)
 			authed.Post("/reload", deps.handleReload)
@@ -127,12 +125,6 @@ func (d Deps) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d.buildStatus())
-}
-
-func (d Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
-	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
-
-	writeJSON(w, http.StatusOK, map[string]any{"entries": d.Logs.Since(since)})
 }
 
 // handleRequests serves the request log two ways: ?since=<seq> returns the raw
