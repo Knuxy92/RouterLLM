@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -221,8 +222,11 @@ func TestPrepareBodyAndHeaders(t *testing.T) {
 	body := map[string]any{}
 	sessionID := PrepareBody(body)
 
-	if sessionID == "" || body["session_id"] != sessionID {
-		t.Fatalf("session id = %q, body = %#v", sessionID, body)
+	if !regexp.MustCompile(`^\d{13}_[a-z0-9]{5}$`).MatchString(sessionID) {
+		t.Fatalf("task id = %q, want <unix-millis>_<5 lowercase alphanumerics>", sessionID)
+	}
+	if _, ok := body["session_id"]; ok {
+		t.Fatalf("PrepareBody must not inject session_id into the body (the CLI does not), body = %#v", body)
 	}
 	if _, ok := body["model"]; ok {
 		t.Fatalf("PrepareBody must not inject a model default, got %v", body["model"])
@@ -231,14 +235,17 @@ func TestPrepareBodyAndHeaders(t *testing.T) {
 	header := http.Header{}
 	SetHeaders(header, "access-1", sessionID)
 	for key, want := range map[string]string{
-		"Authorization":    "Bearer workos:access-1",
-		"X-Task-ID":        sessionID,
-		"X-CLIENT-TYPE":    "cline-sdk",
-		"X-CLIENT-VERSION": clientVersion,
-		"X-PLATFORM":       "terminal",
-		"User-Agent":       clientUserAgent,
-		"HTTP-Referer":     "https://cline.bot",
-		"X-Title":          "Cline",
+		"Authorization":      "Bearer workos:access-1",
+		"X-Task-ID":          sessionID,
+		"X-CLIENT-TYPE":      "cline-cli",
+		"X-CLIENT-VERSION":   clientVersion,
+		"X-PLATFORM":         "cli",
+		"X-PLATFORM-VERSION": clientVersion,
+		"X-CORE-VERSION":     coreVersion,
+		"X-IS-MULTIROOT":     "false",
+		"User-Agent":         clientUserAgent,
+		"HTTP-Referer":       "https://cline.bot",
+		"X-Title":            "Cline",
 	} {
 		if got := header.Get(key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)

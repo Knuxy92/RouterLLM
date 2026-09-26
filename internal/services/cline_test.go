@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -67,14 +68,19 @@ func TestForwardRawSendsClineHeadersAndSession(t *testing.T) {
 	if got := gotHeader.Get("Authorization"); got != "Bearer workos:access-1" {
 		t.Fatalf("authorization = %q", got)
 	}
-	sessionID, _ := gotBody["session_id"].(string)
-	if sessionID == "" || gotHeader.Get("X-Task-ID") != sessionID {
-		t.Fatalf("session id = %q, task id = %q", sessionID, gotHeader.Get("X-Task-ID"))
+	taskID := gotHeader.Get("X-Task-ID")
+	if !regexp.MustCompile(`^\d{13}_[a-z0-9]{5}$`).MatchString(taskID) {
+		t.Fatalf("task id = %q, want <unix-millis>_<5 lowercase alphanumerics>", taskID)
+	}
+	if _, ok := gotBody["session_id"]; ok {
+		t.Fatalf("body must not carry session_id (the CLI does not), body = %#v", gotBody)
 	}
 	for key, want := range map[string]string{
-		"X-CLIENT-TYPE":    "cline-sdk",
-		"X-PLATFORM":       "terminal",
-		"X-CLIENT-VERSION": "3.0.47",
+		"X-CLIENT-TYPE":      "cline-cli",
+		"X-PLATFORM":         "cli",
+		"X-CLIENT-VERSION":   "3.0.60",
+		"X-PLATFORM-VERSION": "3.0.60",
+		"X-CORE-VERSION":     "0.0.81",
 	} {
 		if got := gotHeader.Get(key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)

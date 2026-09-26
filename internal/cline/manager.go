@@ -2,6 +2,7 @@ package cline
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,8 +12,12 @@ import (
 )
 
 const (
-	clientVersion   = "3.0.47"
-	clientUserAgent = "Cline/" + clientVersion
+	clientVersion   = "3.0.60"
+	coreVersion     = "0.0.81"
+	clientUserAgent = "Cline/" + clientVersion + " ai-sdk/openai-compatible/3.0.30 ai-sdk/provider-utils/5.0.27 runtime/bun/1.3.13"
+
+	// taskIDAlphabet is the CLI's lowercase-alphanumeric suffix alphabet.
+	taskIDAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 )
 
 type Manager struct {
@@ -115,14 +120,28 @@ func (m *Manager) Login(ctx context.Context, notify func(DeviceAuth)) (Account, 
 	return account, nil
 }
 
-func PrepareBody(body map[string]any) string {
-	sessionID, _ := body["session_id"].(string)
-	if sessionID == "" {
-		sessionID = "sess_" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-		body["session_id"] = sessionID
+// newTaskID mimics the CLI's X-Task-ID: <unix-millis>_<5 lowercase alphanumerics>.
+func newTaskID() string {
+	b := make([]byte, 5)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixMilli(), 10) + "_aaaaa"
+	}
+	for i := range b {
+		b[i] = taskIDAlphabet[int(b[i])%len(taskIDAlphabet)]
 	}
 
-	return sessionID
+	return strconv.FormatInt(time.Now().UnixMilli(), 10) + "_" + string(b)
+}
+
+// PrepareBody returns the task id for the X-Task-ID header. The official CLI
+// sends no session_id field in the body, so client-supplied values are left
+// untouched and none is injected.
+func PrepareBody(body map[string]any) string {
+	if sessionID, _ := body["session_id"].(string); sessionID != "" {
+		return sessionID
+	}
+
+	return newTaskID()
 }
 
 func SetHeaders(header http.Header, accessToken, sessionID string) {
@@ -131,8 +150,11 @@ func SetHeaders(header http.Header, accessToken, sessionID string) {
 	header.Set("User-Agent", clientUserAgent)
 	header.Set("HTTP-Referer", "https://cline.bot")
 	header.Set("X-Title", "Cline")
-	header.Set("X-CLIENT-TYPE", "cline-sdk")
+	header.Set("X-CLIENT-TYPE", "cline-cli")
 	header.Set("X-CLIENT-VERSION", clientVersion)
-	header.Set("X-PLATFORM", "terminal")
+	header.Set("X-PLATFORM", "cli")
+	header.Set("X-PLATFORM-VERSION", clientVersion)
+	header.Set("X-CORE-VERSION", coreVersion)
+	header.Set("X-IS-MULTIROOT", "false")
 	header.Set("X-Task-ID", sessionID)
 }
