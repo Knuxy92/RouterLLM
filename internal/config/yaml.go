@@ -269,7 +269,7 @@ func validateConfig(yc *yamlConfig) error {
 
 			if spec.StyleCall != "" {
 				style := seenProviders[spec.Provider]
-				if style == "google" || style == "cline" {
+				if style == "google" || style == "cline" || style == "opencode" {
 					return fmt.Errorf("route %q provider %q: stylecall is not supported on %s-style providers", rule.ModelID, spec.Provider, style)
 				}
 			}
@@ -293,11 +293,11 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 	}
 
 	switch yp.Style {
-	case "openai", "anthropic", "cline", "google", "alysis", "codex":
+	case "openai", "anthropic", "cline", "google", "alysis", "codex", "opencode":
 	case "":
-		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, or codex)", yp.Name)
+		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, codex, or opencode)", yp.Name)
 	default:
-		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, or codex)", yp.Name, yp.Style)
+		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, codex, or opencode)", yp.Name, yp.Style)
 	}
 
 	switch yp.AuthMode {

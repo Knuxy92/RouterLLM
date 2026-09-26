@@ -166,9 +166,10 @@
             "cline",
             "google",
             "alysis",
-            "codex"
+            "codex",
+            "opencode"
           ],
-          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth)."
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth), opencode (OpenCode Zen: Responses dialect, required-tool injection, rotating session/request headers)."
         },
         "base_url": {
           "type": "string",

@@ -55,6 +55,33 @@ routes:
 	}
 }
 
+func TestLoadYAMLOpencodeProviderAccepted(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: oc
+    style: opencode
+    base_url: https://opencode.example
+    api_key: sk-opencode
+routes:
+  - model_id: m
+    routes:
+      - provider: oc
+        model: m
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("providers = %#v, want one provider", cfg.Providers)
+	}
+	if got := cfg.Providers[0].Style; got != "opencode" {
+		t.Errorf("style = %q, want opencode", got)
+	}
+}
+
 func TestLoadYAMLForwardClientHeadersCanBeDisabled(t *testing.T) {
 	path := writeTempYAML(t, `
 forward_client_headers: false
@@ -457,8 +484,8 @@ routes:
         model: m
 `)
 	_, err := loadYAML(path)
-	if err == nil || !strings.Contains(err.Error(), "unsupported style") {
-		t.Fatalf("expected 'unsupported style' error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unsupported style") || !strings.Contains(err.Error(), "opencode") {
+		t.Fatalf("expected 'unsupported style' error mentioning opencode, got: %v", err)
 	}
 }
 
@@ -989,6 +1016,26 @@ routes:
 	_, err := loadYAML(path)
 	if err == nil || !strings.Contains(err.Error(), "not supported on cline-style providers") {
 		t.Fatalf("expected 'not supported on cline-style providers' error, got: %v", err)
+	}
+}
+
+func TestLoadYAMLStyleCallNotSupportedOnOpencode(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: oc
+    style: opencode
+    base_url: https://opencode.example
+    api_key: sk-opencode
+routes:
+  - model_id: m
+    routes:
+      - provider: oc
+        model: m
+        stylecall: chat
+`)
+	_, err := loadYAML(path)
+	if err == nil || !strings.Contains(err.Error(), "not supported on opencode-style providers") {
+		t.Fatalf("expected 'not supported on opencode-style providers' error, got: %v", err)
 	}
 }
 

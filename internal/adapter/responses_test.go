@@ -181,6 +181,31 @@ func TestTranslateResponsesRequestContentParts(t *testing.T) {
 	}
 }
 
+func TestResponsesToolsStrict(t *testing.T) {
+	tools := []any{
+		map[string]any{"type": "function", "function": map[string]any{
+			"name": "get_weather", "strict": true,
+			"parameters": map[string]any{"type": "object"},
+		}},
+		map[string]any{"type": "function", "function": map[string]any{
+			"name": "get_time",
+		}},
+	}
+
+	flat := responsesTools(tools)
+	if len(flat) != 2 {
+		t.Fatalf("responsesTools = %s", mustJSON(t, tools))
+	}
+	first, _ := flat[0].(map[string]any)
+	if first["strict"] != true {
+		t.Fatalf("tools[0] strict = %v: %s", first["strict"], mustJSON(t, first))
+	}
+	second, _ := flat[1].(map[string]any)
+	if _, has := second["strict"]; has {
+		t.Fatalf("tools[1] must omit strict: %s", mustJSON(t, second))
+	}
+}
+
 const responsesStreamFixture = `data: {"type":"response.created","response":{"id":"resp_123","created_at":1700000000}}
 
 data: {"type":"response.output_text.delta","delta":"Hello"}

@@ -246,6 +246,9 @@ func responsesTools(tools []any) []any {
 		if p, ok := fn["parameters"]; ok && p != nil {
 			flat["parameters"] = p
 		}
+		if s, ok := fn["strict"].(bool); ok {
+			flat["strict"] = s
+		}
 		out = append(out, flat)
 	}
 	return out

@@ -18,6 +18,7 @@ import (
 
 	"os"
 	"routerllm/internal/adapter"
+	"routerllm/internal/opencode"
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
@@ -548,6 +549,16 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 	}
 
+	// OpenCode legs dispatch on style, not dialect: their Responses wire format
+	// needs the required-tool injection and reserved-name rename before the
+	// generic responses translation applies.
+	if pv.Style == "opencode" {
+		restore, reqBytes, reqPath2, err2 := p.translateOpenCodeRoute(route, path, routeBody)
+		toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
+
+		return reqBytes, reqPath2, "", toolNameRestore, err2
+	}
+
 	switch route.Dialect() {
 	case "messages":
 		applyCanonicalDefaults(routeBody, route.Defaults)
@@ -608,6 +619,74 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	}
 
 	return reqBody, reqPath, sessionID, toolNameRestore, err
+}
+
+// translateOpenCodeRoute builds the outbound request for style: opencode legs.
+// The gateway always speaks the Responses dialect and rejects requests without
+// its own tool set, so the required tools are injected and client tools whose
+// names collide with them are renamed (restored on the way back).
+func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeBody map[string]any) (map[string]string, []byte, string, error) {
+	if path == "/v1/responses" {
+		applyLegacyDefaults(routeBody, route.Defaults)
+		reverse := renameReservedResponsesNames(routeBody, openCodeReservedTools)
+		injectMissingResponsesTools(routeBody, openCodeResponsesTools())
+		routeBody["model"] = route.ModelName
+
+		reqBody, err := json.Marshal(routeBody)
+
+		return reverse, reqBody, path, err
+	}
+
+	applyCanonicalDefaults(routeBody, route.Defaults)
+	reverse := renameReservedToolNames(routeBody, openCodeReservedTools)
+	injectMissingTools(routeBody, opencode.RequiredTools())
+	routeBody["model"] = route.ModelName
+
+	reqBody, reqPath, err := adapter.TranslateResponsesRequest(routeBody, route.ModelName)
+
+	return reverse, reqBody, reqPath, err
+}
+
+// openCodeReservedTools holds the tool names the OpenCode gateway injects
+// itself; client tools using them are renamed per request.
+var openCodeReservedTools = func() map[string]bool {
+	reserved := make(map[string]bool)
+	for _, name := range opencode.RequiredToolNames() {
+		reserved[name] = true
+	}
+
+	return reserved
+}()
+
+// openCodeResponsesTools returns the required tools in the flat Responses
+// shape, fresh maps each call.
+func openCodeResponsesTools() []map[string]any {
+	chat := opencode.RequiredTools()
+	flat := make([]map[string]any, 0, len(chat))
+	for _, entry := range chat {
+		if tool, ok := chatToolToResponsesTool(entry); ok {
+			flat = append(flat, tool)
+		}
+	}
+
+	return flat
+}
+
+// mergeToolNameRestore folds a second reverse map into the accumulated one.
+func mergeToolNameRestore(dst, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
+	}
+	if len(dst) == 0 {
+		return src
+	}
+	for k, v := range src {
+		if _, ok := dst[k]; !ok {
+			dst[k] = v
+		}
+	}
+
+	return dst
 }
 
 // servedKey extracts the credential actually used from the completed request
@@ -680,13 +759,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			p.serveGoogle(resp, clientStream, route.ModelName, w)
 		case "responses":
 			if path == "/v1/responses" {
-				serveResponses(resp, clientStream, w)
+				serveResponses(resp, clientStream, w, toolNameRestore)
 			} else {
 				p.serveResponsesAsChat(resp, clientStream, route.ModelName, w, toolNameRestore)
 			}
 		default:
 			if path == "/v1/responses" {
-				serveResponses(resp, clientStream, w)
+				serveResponses(resp, clientStream, w, toolNameRestore)
 			} else {
 				serveOpenAI(resp, clientStream, w, toolNameRestore)
 			}
@@ -859,6 +938,9 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				codex.SetHeaders(req.Header, token)
 			} else if pv.Style == "google" {
 				req.Header.Set("x-goog-api-key", key)
+			} else if pv.Style == "opencode" {
+				opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID())
+				req.Header.Set("Authorization", "Bearer "+key)
 			} else {
 				switch pv.AuthMode {
 				case "both":
@@ -1055,12 +1137,12 @@ func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, 
 	writeJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
 }
 
-func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter) {
+func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) {
 	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
-		if err := util.StreamSSE(resp.Body, w, false); err != nil {
+		if err := util.StreamSSETransform(resp.Body, w, false, responsesRestoreTransform(toolNameRestore)); err != nil {
 			log.Printf("responses stream error: %v", err)
 		}
 		return
@@ -1069,7 +1151,19 @@ func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWrite
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+	w.Write([]byte(restoreResponsesPayloadNames(string(body), toolNameRestore)))
+}
+
+// responsesRestoreTransform adapts the Responses-shape name restorer to the SSE
+// frame hook.
+func responsesRestoreTransform(reverse map[string]string) func(string) string {
+	if len(reverse) == 0 {
+		return nil
+	}
+
+	return func(payload string) string {
+		return restoreResponsesPayloadNames(payload, reverse)
+	}
 }
 
 func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {

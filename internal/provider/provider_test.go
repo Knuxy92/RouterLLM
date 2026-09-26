@@ -154,6 +154,7 @@ func TestRouteDialect(t *testing.T) {
 		{style: "google", want: "google"},
 		{style: "alysis", want: "alysis"},
 		{style: "cline", want: "cline"},
+		{style: "opencode", want: "responses"},
 		{style: "openai", styleCall: "chat", want: "chat"},
 		{style: "openai", styleCall: "responses", want: "responses"},
 		{style: "anthropic", styleCall: "chat", want: "chat"},
