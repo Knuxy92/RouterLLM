@@ -96,26 +96,7 @@ func TranslateCodexRequest(body map[string]any, modelName string) ([]byte, strin
 // codexTextContent joins the text of an OpenAI content field, accepting both a
 // plain string and an array of parts.
 func codexTextContent(content any) string {
-	if text, ok := content.(string); ok {
-		return text
-	}
-
-	parts, ok := content.([]any)
-	if !ok {
-		return ""
-	}
-
-	var texts []string
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if text, ok := part["text"].(string); ok {
-			texts = append(texts, text)
-		}
-	}
-	return strings.Join(texts, "\n")
+	return contentText(content, "\n", "", false)
 }
 
 // codexUserItem builds the input item for a user message: a plain string
@@ -365,12 +346,11 @@ func (u *codexUsage) toOpenAI() json.RawMessage {
 		reasoning = u.OutputTokensDetails.ReasoningTokens
 	}
 
-	return json.RawMessage(fmt.Sprintf(
-		`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d,`+
-			`"prompt_tokens_details":{"cached_tokens":%d},`+
-			`"completion_tokens_details":{"reasoning_tokens":%d}}`,
-		u.InputTokens, u.OutputTokens, u.InputTokens+u.OutputTokens, cached, reasoning,
-	))
+	details := fmt.Sprintf(
+		`"prompt_tokens_details":{"cached_tokens":%d},"completion_tokens_details":{"reasoning_tokens":%d}`,
+		cached, reasoning,
+	)
+	return openAIUsageJSON(u.InputTokens, u.OutputTokens, u.InputTokens+u.OutputTokens, details)
 }
 
 type codexError struct {
@@ -437,7 +417,6 @@ func (e *codexEvent) responseError() *codexError {
 
 // codexSink receives the OpenAI-shaped output of the shared Codex event core.
 type codexSink interface {
-	prologue()
 	delta(model.Delta)
 	finish(finishReason string, usage json.RawMessage)
 	failure(message, code string)
@@ -488,8 +467,6 @@ func (r *codexToolRegistry) resolve(ids ...string) *codexToolCall {
 func emitCodexAsOpenAI(src io.Reader, sink codexSink) error {
 	var registry codexToolRegistry
 	hasToolCalls := false
-
-	sink.prologue()
 
 	startCall := func(call *codexToolCall, id, name string) {
 		if call.started {
@@ -611,26 +588,25 @@ func emitCodexAsOpenAI(src io.Reader, sink codexSink) error {
 }
 
 type codexStreamSink struct {
-	dst     io.Writer
-	flusher http.Flusher
+	sseWriter
 	id      string
 	model   string
 	created int64
 }
 
 func newCodexStreamSink(dst io.Writer, modelName string) *codexStreamSink {
-	flusher, _ := dst.(http.Flusher)
-	return &codexStreamSink{
-		dst:     dst,
-		flusher: flusher,
-		id:      newCodexChatID(),
-		model:   modelName,
-		created: time.Now().Unix(),
+	s := &codexStreamSink{
+		sseWriter: newSSEWriter(dst),
+		id:        newCodexChatID(),
+		model:     modelName,
+		created:   time.Now().Unix(),
 	}
+	s.write(model.Delta{Role: "assistant"}, nil, nil)
+	return s
 }
 
 func (s *codexStreamSink) write(delta model.Delta, finish *string, usage json.RawMessage) {
-	data, _ := json.Marshal(model.StreamChunk{
+	s.frame(model.StreamChunk{
 		ID:      s.id,
 		Object:  model.ChatCompletionChunkObject,
 		Created: s.created,
@@ -638,14 +614,6 @@ func (s *codexStreamSink) write(delta model.Delta, finish *string, usage json.Ra
 		Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
 		Usage:   usage,
 	})
-	fmt.Fprintf(s.dst, "data: %s\n\n", data)
-	if s.flusher != nil {
-		s.flusher.Flush()
-	}
-}
-
-func (s *codexStreamSink) prologue() {
-	s.write(model.Delta{Role: "assistant"}, nil, nil)
 }
 
 func (s *codexStreamSink) delta(delta model.Delta) {
@@ -657,22 +625,15 @@ func (s *codexStreamSink) finish(finishReason string, usage json.RawMessage) {
 }
 
 func (s *codexStreamSink) failure(message, code string) {
-	data, _ := json.Marshal(map[string]any{"error": map[string]any{
+	s.frame(map[string]any{"error": map[string]any{
 		"message": message,
 		"type":    "upstream_error",
 		"code":    code,
 	}})
-	fmt.Fprintf(s.dst, "data: %s\n\n", data)
-	if s.flusher != nil {
-		s.flusher.Flush()
-	}
 }
 
 func (s *codexStreamSink) closeStream() {
-	fmt.Fprintf(s.dst, "data: [DONE]\n\n")
-	if s.flusher != nil {
-		s.flusher.Flush()
-	}
+	s.done()
 }
 
 type codexBufferSink struct {
@@ -684,8 +645,6 @@ type codexBufferSink struct {
 	errCode      string
 	errMsg       string
 }
-
-func (s *codexBufferSink) prologue() {}
 
 func (s *codexBufferSink) delta(delta model.Delta) {
 	s.content.WriteString(delta.Content)

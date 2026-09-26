@@ -475,10 +475,7 @@ func (c *googleChunk) usageJSON() json.RawMessage {
 		return nil
 	}
 	u := c.UsageMetadata
-	return json.RawMessage(fmt.Sprintf(
-		`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
-		u.PromptTokenCount, u.CandidatesTokenCount+u.ThoughtsTokenCount, u.TotalTokenCount,
-	))
+	return openAIUsageJSON(u.PromptTokenCount, u.CandidatesTokenCount+u.ThoughtsTokenCount, u.TotalTokenCount)
 }
 
 func mapGoogleFinishReason(reason string) string {
@@ -492,39 +489,118 @@ func mapGoogleFinishReason(reason string) string {
 	}
 }
 
-// BufferGoogleToOpenAI reads a Gemini SSE stream and emits a single OpenAI
-// chat.completion JSON document.
-func BufferGoogleToOpenAI(src io.Reader, modelName string) ([]byte, error) {
-	var (
-		msgID     string
-		content   strings.Builder
-		reasoning strings.Builder
-		toolCalls []model.ToolCall
-		finish    string
-		usage     json.RawMessage
-	)
+// googleSink receives the OpenAI-shaped output of the shared Gemini event
+// core.
+type googleSink interface {
+	// upstreamError handles an error object embedded in a Gemini chunk. It
+	// reports whether the rest of the chunk is dropped and whether iteration
+	// should stop.
+	upstreamError(message string) (skip, stop bool)
+	responseID(id string)
+	usage(raw json.RawMessage)
+	// blocked handles a promptFeedback block on a candidate-less chunk and
+	// reports whether iteration should stop.
+	blocked() bool
+	candidate()
+	delta(delta model.Delta)
+	// finish handles a candidate finish_reason and reports whether iteration
+	// should stop.
+	finish(reason string) bool
+}
+
+type googleBufferSink struct {
+	msgID        string
+	content      strings.Builder
+	reasoning    strings.Builder
+	toolCalls    []model.ToolCall
+	finishReason string
+	lastUsage    json.RawMessage
+}
+
+func (s *googleBufferSink) upstreamError(string) (skip, stop bool) { return true, false }
+
+func (s *googleBufferSink) responseID(id string) {
+	if s.msgID == "" {
+		s.msgID = id
+	}
+}
+
+func (s *googleBufferSink) usage(raw json.RawMessage) { s.lastUsage = raw }
+
+func (s *googleBufferSink) blocked() bool {
+	s.finishReason = "content_filter"
+	return false
+}
+
+func (s *googleBufferSink) candidate() {}
+
+func (s *googleBufferSink) delta(delta model.Delta) {
+	s.content.WriteString(delta.Content)
+	s.reasoning.WriteString(delta.ReasoningContent)
+	s.toolCalls = append(s.toolCalls, delta.ToolCalls...)
+}
+
+func (s *googleBufferSink) finish(reason string) bool {
+	s.finishReason = reason
+	return false
+}
+
+func (s *googleBufferSink) document(modelName string) ([]byte, error) {
+	finish := s.finishReason
+	if finish == "" {
+		finish = "stop"
+	}
+
+	msg := model.Message{Role: "assistant", Content: s.content.String(), ToolCalls: s.toolCalls}
+	if s.reasoning.Len() > 0 {
+		msg.ReasoningContent = s.reasoning.String()
+	}
+
+	result := model.ChatCompletionResponse{
+		ID:      s.msgID,
+		Object:  model.ChatCompletionObject,
+		Created: time.Now().Unix(),
+		Model:   modelName,
+		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
+		Usage:   s.lastUsage,
+	}
+	return json.Marshal(result)
+}
+
+// emitGoogleAsOpenAI translates a Gemini SSE stream into OpenAI deltas and
+// hands them to the sink.
+func emitGoogleAsOpenAI(src io.Reader, sink googleSink) error {
+	toolIdx := 0
 
 	_, err := util.IterDataLines(src, func(payload string) bool {
 		var chunk googleChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			return true
 		}
+
 		if chunk.Error != nil {
-			return true
+			skip, stop := sink.upstreamError(chunk.Error.Message)
+			if stop {
+				return false
+			}
+			if skip {
+				return true
+			}
 		}
-		if msgID == "" && chunk.ResponseID != "" {
-			msgID = chunk.ResponseID
-		}
+
+		sink.responseID(chunk.ResponseID)
 		if chunk.UsageMetadata != nil {
-			usage = chunk.usageJSON()
+			sink.usage(chunk.usageJSON())
 		}
+
 		if len(chunk.Candidates) == 0 {
 			if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" {
-				finish = "content_filter"
+				return sink.blocked()
 			}
 			return true
 		}
 
+		sink.candidate()
 		cand := chunk.Candidates[0]
 		if cand.Content != nil {
 			for _, part := range cand.Content.Parts {
@@ -534,165 +610,137 @@ func BufferGoogleToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 					if strings.TrimSpace(args) == "" || string(args) == "null" {
 						args = "{}"
 					}
-					toolCalls = append(toolCalls, model.ToolCall{
-						Index:    len(toolCalls),
-						ID:       fmt.Sprintf("call_%d", len(toolCalls)),
+					sink.delta(model.Delta{ToolCalls: []model.ToolCall{{
+						Index:    toolIdx,
+						ID:       fmt.Sprintf("call_%d", toolIdx),
 						Type:     "function",
 						Function: model.ToolCallFunction{Name: part.FunctionCall.Name, Arguments: args},
-					})
+					}}})
+					toolIdx++
 				case part.Thought:
-					reasoning.WriteString(part.Text)
+					if part.Text != "" {
+						sink.delta(model.Delta{ReasoningContent: part.Text})
+					}
 				default:
-					content.WriteString(part.Text)
+					if part.Text != "" {
+						sink.delta(model.Delta{Content: part.Text})
+					}
 				}
 			}
 		}
+
 		if cand.FinishReason != "" {
-			finish = mapGoogleFinishReason(cand.FinishReason)
+			return sink.finish(mapGoogleFinishReason(cand.FinishReason))
 		}
 		return true
 	})
-	if err != nil {
+	return err
+}
+
+// BufferGoogleToOpenAI reads a Gemini SSE stream and emits a single OpenAI
+// chat.completion JSON document.
+func BufferGoogleToOpenAI(src io.Reader, modelName string) ([]byte, error) {
+	sink := &googleBufferSink{}
+	if err := emitGoogleAsOpenAI(src, sink); err != nil {
 		return nil, err
 	}
-	if finish == "" {
-		finish = "stop"
+	return sink.document(modelName)
+}
+
+type googleStreamSink struct {
+	sse       sseWriter
+	msgID     string
+	idSet     bool
+	sentRole  bool
+	created   int64
+	model     string
+	lastUsage json.RawMessage
+}
+
+func newGoogleStreamSink(dst io.Writer, modelName string) *googleStreamSink {
+	return &googleStreamSink{
+		sse:     newSSEWriter(dst),
+		created: time.Now().Unix(),
+		model:   modelName,
+	}
+}
+
+func (s *googleStreamSink) write(delta model.Delta, finish *string) {
+	s.sse.frame(model.StreamChunk{
+		ID:      s.msgID,
+		Object:  model.ChatCompletionChunkObject,
+		Created: s.created,
+		Model:   s.model,
+		Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
+	})
+}
+
+func (s *googleStreamSink) upstreamError(message string) (skip, stop bool) {
+	if message == "" {
+		return false, false
 	}
 
-	msg := model.Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls}
-	if reasoning.Len() > 0 {
-		msg.ReasoningContent = reasoning.String()
+	s.sse.frame(map[string]any{"error": map[string]any{
+		"message": message, "code": "upstream_error", "type": "server_error",
+	}})
+	return true, true
+}
+
+func (s *googleStreamSink) responseID(id string) {
+	if s.idSet {
+		return
+	}
+	s.idSet = true
+	if id != "" {
+		s.msgID = id
+		return
 	}
 
-	result := model.ChatCompletionResponse{
-		ID:      msgID,
-		Object:  model.ChatCompletionObject,
-		Created: time.Now().Unix(),
-		Model:   modelName,
-		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
-		Usage:   usage,
+	s.msgID = chatCompletionIDPrefix + fmt.Sprintf("google-%d", s.created)
+}
+
+func (s *googleStreamSink) usage(raw json.RawMessage) { s.lastUsage = raw }
+
+func (s *googleStreamSink) blocked() bool {
+	fr := "content_filter"
+	s.write(model.Delta{}, &fr)
+	return true
+}
+
+func (s *googleStreamSink) candidate() {
+	if s.sentRole {
+		return
 	}
-	return json.Marshal(result)
+	s.sentRole = true
+	s.write(model.Delta{Role: "assistant"}, nil)
+}
+
+func (s *googleStreamSink) delta(delta model.Delta) {
+	s.write(delta, nil)
+}
+
+func (s *googleStreamSink) finish(reason string) bool {
+	s.write(model.Delta{}, &reason)
+	return true
+}
+
+func (s *googleStreamSink) close() {
+	if s.lastUsage != nil {
+		s.sse.frame(model.StreamChunk{
+			ID: s.msgID, Object: model.ChatCompletionChunkObject, Created: s.created, Model: s.model,
+			Choices: []model.StreamChoice{{Index: 0, Delta: model.Delta{}}},
+			Usage:   s.lastUsage,
+		})
+	}
+	s.sse.done()
 }
 
 // StreamGoogleToOpenAI converts a Gemini SSE stream into OpenAI
 // chat.completion.chunk SSE frames.
 func StreamGoogleToOpenAI(src io.Reader, dst io.Writer, modelName string) error {
-	flusher, _ := dst.(http.Flusher)
-	created := time.Now().Unix()
-
-	msgID := ""
-	sentRole := false
-	toolIdx := 0
-	var usage json.RawMessage
-
-	writeChunk := func(delta model.Delta, finish *string) {
-		data, _ := json.Marshal(model.StreamChunk{
-			ID:      msgID,
-			Object:  model.ChatCompletionChunkObject,
-			Created: created,
-			Model:   modelName,
-			Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
-		})
-		fmt.Fprintf(dst, "data: %s\n\n", data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-
-	_, err := util.IterDataLines(src, func(payload string) bool {
-		var chunk googleChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return true
-		}
-
-		if chunk.Error != nil && chunk.Error.Message != "" {
-			errBody, _ := json.Marshal(map[string]any{"error": map[string]any{
-				"message": chunk.Error.Message, "code": "upstream_error", "type": "server_error",
-			}})
-			fmt.Fprintf(dst, "data: %s\n\n", errBody)
-			if flusher != nil {
-				flusher.Flush()
-			}
-			return false
-		}
-
-		if msgID == "" {
-			msgID = chunk.ResponseID
-			if msgID == "" {
-				msgID = chatCompletionIDPrefix + fmt.Sprintf("google-%d", created)
-			}
-		}
-		if chunk.UsageMetadata != nil {
-			usage = chunk.usageJSON()
-		}
-
-		if len(chunk.Candidates) == 0 {
-			if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" {
-				fr := "content_filter"
-				writeChunk(model.Delta{}, &fr)
-				return false
-			}
-			return true
-		}
-
-		cand := chunk.Candidates[0]
-		if !sentRole {
-			sentRole = true
-			writeChunk(model.Delta{Role: "assistant"}, nil)
-		}
-
-		if cand.Content != nil {
-			for _, part := range cand.Content.Parts {
-				switch {
-				case part.FunctionCall != nil:
-					args := string(part.FunctionCall.Args)
-					if strings.TrimSpace(args) == "" || string(args) == "null" {
-						args = "{}"
-					}
-					writeChunk(model.Delta{ToolCalls: []model.ToolCall{{
-						Index:    toolIdx,
-						ID:       fmt.Sprintf("call_%d", toolIdx),
-						Type:     "function",
-						Function: model.ToolCallFunction{Name: part.FunctionCall.Name, Arguments: args},
-					}}}, nil)
-					toolIdx++
-				case part.Thought:
-					if part.Text != "" {
-						writeChunk(model.Delta{ReasoningContent: part.Text}, nil)
-					}
-				default:
-					if part.Text != "" {
-						writeChunk(model.Delta{Content: part.Text}, nil)
-					}
-				}
-			}
-		}
-
-		if cand.FinishReason != "" {
-			fr := mapGoogleFinishReason(cand.FinishReason)
-			writeChunk(model.Delta{}, &fr)
-			return false
-		}
-		return true
-	})
-
-	if usage != nil {
-		data, _ := json.Marshal(model.StreamChunk{
-			ID: msgID, Object: model.ChatCompletionChunkObject, Created: created, Model: modelName,
-			Choices: []model.StreamChoice{{Index: 0, Delta: model.Delta{}}},
-			Usage:   usage,
-		})
-		fmt.Fprintf(dst, "data: %s\n\n", data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-
-	fmt.Fprintf(dst, "data: [DONE]\n\n")
-	if flusher != nil {
-		flusher.Flush()
-	}
+	sink := newGoogleStreamSink(dst, modelName)
+	err := emitGoogleAsOpenAI(src, sink)
+	sink.close()
 	return err
 }
 

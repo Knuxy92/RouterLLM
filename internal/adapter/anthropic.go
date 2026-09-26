@@ -115,24 +115,54 @@ func intValue(v any, fallback int) int {
 	return fallback
 }
 
-func systemText(content any) string {
-	switch c := content.(type) {
-	case string:
-		return c
-	case []any:
-		var parts []string
-		for _, p := range c {
-			if m, ok := p.(map[string]any); ok {
-				if t, _ := m["type"].(string); t == "text" {
-					if text, _ := m["text"].(string); text != "" {
-						parts = append(parts, text)
-					}
-				}
+// contentText flattens an OpenAI-style content field into text: a plain
+// string is returned verbatim, array parts contribute their "text" member,
+// optionally filtered to one part type and with empty texts dropped.
+func contentText(content any, sep, partType string, skipEmpty bool) string {
+	if text, ok := content.(string); ok {
+		return text
+	}
+
+	parts, ok := content.([]any)
+	if !ok {
+		return ""
+	}
+
+	var texts []string
+	for _, raw := range parts {
+		part, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if partType != "" {
+			if t, _ := part["type"].(string); t != partType {
+				continue
 			}
 		}
-		return strings.Join(parts, "\n")
+		text, ok := part["text"].(string)
+		if !ok || (skipEmpty && text == "") {
+			continue
+		}
+		texts = append(texts, text)
 	}
-	return ""
+	return strings.Join(texts, sep)
+}
+
+func systemText(content any) string {
+	return contentText(content, "\n", "text", true)
+}
+
+// openAIUsageJSON renders the OpenAI usage object; the optional extra member
+// snippet is spliced in before the closing brace.
+func openAIUsageJSON(prompt, completion, total int, extra ...string) json.RawMessage {
+	more := ""
+	if len(extra) > 0 {
+		more = "," + extra[0]
+	}
+	return json.RawMessage(fmt.Sprintf(
+		`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d%s}`,
+		prompt, completion, total, more,
+	))
 }
 
 type anthropicUsage struct {
@@ -176,72 +206,75 @@ func (b *anthropicToolBlock) arguments() string {
 	return args
 }
 
-func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
-	var msgID string
-	var upModel string
-	var contentBuilder strings.Builder
-	var reasoningBuilder strings.Builder
-	var stopReason string
-	var usage *anthropicUsage
-	toolBlocks := make(map[int]*anthropicToolBlock)
-	var toolOrder []int
+// anthropicSink receives the OpenAI-shaped output of the shared Anthropic
+// event core.
+type anthropicSink interface {
+	messageMeta(id, model string)
+	messageStart()
+	toolStart(index int, id, name string)
+	textDelta(text string)
+	thinkingDelta(text string)
+	argsDelta(index int, partialJSON string)
+	messageDelta(stopReason string, usage *anthropicUsage)
+}
 
-	_, err := util.IterDataLines(src, func(payload string) bool {
-		var event anthropicEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return true
-		}
+type anthropicBufferSink struct {
+	msgID      string
+	upModel    string
+	content    strings.Builder
+	reasoning  strings.Builder
+	stopReason string
+	usage      *anthropicUsage
+	toolBlocks map[int]*anthropicToolBlock
+	toolOrder  []int
+}
 
-		switch event.Type {
-		case "message_start":
-			if event.Message != nil {
-				msgID = event.Message.ID
-				upModel = event.Message.Model
-			}
-		case "content_block_start":
-			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-				if _, exists := toolBlocks[event.Index]; !exists {
-					toolOrder = append(toolOrder, event.Index)
-				}
-				toolBlocks[event.Index] = &anthropicToolBlock{id: event.ContentBlock.ID, name: event.ContentBlock.Name}
-			}
-		case "content_block_delta":
-			if event.Delta != nil {
-				switch event.Delta.Type {
-				case "text_delta":
-					contentBuilder.WriteString(event.Delta.Text)
-				case "thinking_delta":
-					reasoningBuilder.WriteString(event.Delta.Thinking)
-				case "input_json_delta":
-					block := toolBlocks[event.Index]
-					if block == nil {
-						block = &anthropicToolBlock{}
-						toolBlocks[event.Index] = block
-						toolOrder = append(toolOrder, event.Index)
-					}
-					block.args.WriteString(event.Delta.PartialJSON)
-				}
-			}
-		case "message_delta":
-			if event.Delta != nil && event.Delta.StopReason != "" {
-				stopReason = event.Delta.StopReason
-			}
-			if event.Usage != nil {
-				usage = event.Usage
-			}
-		case "message_stop":
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return nil, err
+func (s *anthropicBufferSink) messageMeta(id, model string) {
+	s.msgID = id
+	s.upModel = model
+}
+
+func (s *anthropicBufferSink) messageStart() {}
+
+func (s *anthropicBufferSink) toolStart(index int, id, name string) {
+	if _, exists := s.toolBlocks[index]; !exists {
+		s.toolOrder = append(s.toolOrder, index)
 	}
+	s.toolBlocks[index] = &anthropicToolBlock{id: id, name: name}
+}
 
-	sort.Ints(toolOrder)
+func (s *anthropicBufferSink) textDelta(text string) {
+	s.content.WriteString(text)
+}
+
+func (s *anthropicBufferSink) thinkingDelta(text string) {
+	s.reasoning.WriteString(text)
+}
+
+func (s *anthropicBufferSink) argsDelta(index int, partialJSON string) {
+	block := s.toolBlocks[index]
+	if block == nil {
+		block = &anthropicToolBlock{}
+		s.toolBlocks[index] = block
+		s.toolOrder = append(s.toolOrder, index)
+	}
+	block.args.WriteString(partialJSON)
+}
+
+func (s *anthropicBufferSink) messageDelta(stopReason string, usage *anthropicUsage) {
+	if stopReason != "" {
+		s.stopReason = stopReason
+	}
+	if usage != nil {
+		s.usage = usage
+	}
+}
+
+func (s *anthropicBufferSink) document() ([]byte, error) {
+	sort.Ints(s.toolOrder)
 	var toolCalls []model.ToolCall
-	for _, blockIndex := range toolOrder {
-		block := toolBlocks[blockIndex]
+	for _, blockIndex := range s.toolOrder {
+		block := s.toolBlocks[blockIndex]
 		toolCalls = append(toolCalls, model.ToolCall{
 			Index: len(toolCalls),
 			ID:    block.id,
@@ -253,65 +286,31 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 		})
 	}
 
-	msg := model.Message{Role: "assistant", Content: contentBuilder.String(), ToolCalls: toolCalls}
-	if reasoning := reasoningBuilder.String(); reasoning != "" {
+	msg := model.Message{Role: "assistant", Content: s.content.String(), ToolCalls: toolCalls}
+	if reasoning := s.reasoning.String(); reasoning != "" {
 		msg.ReasoningContent = reasoning
 	}
 
 	result := model.ChatCompletionResponse{
-		ID:      msgID,
+		ID:      s.msgID,
 		Object:  model.ChatCompletionObject,
 		Created: time.Now().Unix(),
-		Model:   upModel,
+		Model:   s.upModel,
 		Choices: []model.Choice{{
 			Index:        0,
 			Message:      msg,
-			FinishReason: mapStopReason(stopReason),
+			FinishReason: mapStopReason(s.stopReason),
 		}},
 	}
-	if usage != nil {
-		result.Usage = json.RawMessage(fmt.Sprintf(
-			`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
-			usage.InputTokens, usage.OutputTokens, usage.InputTokens+usage.OutputTokens,
-		))
+	if s.usage != nil {
+		result.Usage = openAIUsageJSON(s.usage.InputTokens, s.usage.OutputTokens, s.usage.InputTokens+s.usage.OutputTokens)
 	}
 	return json.Marshal(result)
 }
 
-func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName string) error {
-	flusher, _ := dst.(http.Flusher)
-	var msgID string
-	created := time.Now().Unix()
-	toolIndexes := make(map[int]int)
-	nextToolIndex := 0
-
-	writeChunk := func(chunk model.StreamChunk) {
-		data, _ := json.Marshal(chunk)
-		fmt.Fprintf(dst, "data: %s\n\n", data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	writeDelta := func(delta model.Delta, finish *string) {
-		writeChunk(model.StreamChunk{
-			ID:      msgID,
-			Object:  model.ChatCompletionChunkObject,
-			Created: created,
-			Model:   modelName,
-			Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
-		})
-	}
-	toolIndexFor := func(blockIndex int) int {
-		if idx, ok := toolIndexes[blockIndex]; ok {
-			return idx
-		}
-
-		idx := nextToolIndex
-		nextToolIndex++
-		toolIndexes[blockIndex] = idx
-		return idx
-	}
-
+// emitAnthropicAsOpenAI translates an Anthropic SSE stream into OpenAI deltas
+// and hands them to the sink.
+func emitAnthropicAsOpenAI(src io.Reader, sink anthropicSink) error {
 	_, err := util.IterDataLines(src, func(payload string) bool {
 		var event anthropicEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -321,71 +320,169 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 		switch event.Type {
 		case "message_start":
 			if event.Message != nil {
-				msgID = event.Message.ID
+				sink.messageMeta(event.Message.ID, event.Message.Model)
 			}
-			writeDelta(model.Delta{Role: "assistant"}, nil)
+			sink.messageStart()
 
 		case "content_block_start":
 			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-				writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
-					Index: toolIndexFor(event.Index),
-					ID:    event.ContentBlock.ID,
-					Type:  "function",
-					Function: model.ToolCallFunction{
-						Name: event.ContentBlock.Name,
-					},
-				}}}, nil)
+				sink.toolStart(event.Index, event.ContentBlock.ID, event.ContentBlock.Name)
 			}
 
 		case "content_block_delta":
-			if event.Delta != nil && event.Delta.Type == "text_delta" && event.Delta.Text != "" {
-				writeDelta(model.Delta{Content: event.Delta.Text}, nil)
+			if event.Delta == nil {
+				return true
 			}
-			if event.Delta != nil && event.Delta.Type == "thinking_delta" && event.Delta.Thinking != "" {
-				writeDelta(model.Delta{ReasoningContent: event.Delta.Thinking}, nil)
-			}
-			if event.Delta != nil && event.Delta.Type == "input_json_delta" && event.Delta.PartialJSON != "" {
-				writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
-					Index:    toolIndexFor(event.Index),
-					Function: model.ToolCallFunction{Arguments: event.Delta.PartialJSON},
-				}}}, nil)
+			switch event.Delta.Type {
+			case "text_delta":
+				sink.textDelta(event.Delta.Text)
+			case "thinking_delta":
+				sink.thinkingDelta(event.Delta.Thinking)
+			case "input_json_delta":
+				sink.argsDelta(event.Index, event.Delta.PartialJSON)
 			}
 
 		case "message_delta":
-			if event.Delta != nil && event.Delta.StopReason != "" {
-				fr := mapStopReason(event.Delta.StopReason)
-				var usage json.RawMessage
-				if event.Usage != nil {
-					usage = json.RawMessage(fmt.Sprintf(
-						`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
-						event.Usage.InputTokens, event.Usage.OutputTokens,
-						event.Usage.InputTokens+event.Usage.OutputTokens,
-					))
-				}
-				writeChunk(model.StreamChunk{
-					ID:      msgID,
-					Object:  model.ChatCompletionChunkObject,
-					Created: created,
-					Model:   modelName,
-					Choices: []model.StreamChoice{{
-						Index:        0,
-						Delta:        model.Delta{},
-						FinishReason: &fr,
-					}},
-					Usage: usage,
-				})
+			var stopReason string
+			if event.Delta != nil {
+				stopReason = event.Delta.StopReason
 			}
+			sink.messageDelta(stopReason, event.Usage)
 
 		case "message_stop":
 			return false
 		}
 		return true
 	})
+	return err
+}
 
-	fmt.Fprintf(dst, "data: [DONE]\n\n")
-	if flusher != nil {
-		flusher.Flush()
+// BufferAnthropicToOpenAI drains an Anthropic SSE stream into one
+// non-streaming OpenAI chat.completion JSON document.
+func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
+	sink := &anthropicBufferSink{toolBlocks: make(map[int]*anthropicToolBlock)}
+	if err := emitAnthropicAsOpenAI(src, sink); err != nil {
+		return nil, err
 	}
+	return sink.document()
+}
+
+type anthropicStreamSink struct {
+	sse           sseWriter
+	msgID         string
+	created       int64
+	model         string
+	toolIndexes   map[int]int
+	nextToolIndex int
+}
+
+func newAnthropicStreamSink(dst http.ResponseWriter, modelName string) *anthropicStreamSink {
+	return &anthropicStreamSink{
+		sse:         newSSEWriter(dst),
+		created:     time.Now().Unix(),
+		model:       modelName,
+		toolIndexes: make(map[int]int),
+	}
+}
+
+func (s *anthropicStreamSink) writeChunk(chunk model.StreamChunk) {
+	s.sse.frame(chunk)
+}
+
+func (s *anthropicStreamSink) writeDelta(delta model.Delta, finish *string) {
+	s.writeChunk(model.StreamChunk{
+		ID:      s.msgID,
+		Object:  model.ChatCompletionChunkObject,
+		Created: s.created,
+		Model:   s.model,
+		Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
+	})
+}
+
+func (s *anthropicStreamSink) toolIndexFor(blockIndex int) int {
+	if idx, ok := s.toolIndexes[blockIndex]; ok {
+		return idx
+	}
+
+	idx := s.nextToolIndex
+	s.nextToolIndex++
+	s.toolIndexes[blockIndex] = idx
+	return idx
+}
+
+func (s *anthropicStreamSink) messageMeta(id, _ string) {
+	s.msgID = id
+}
+
+func (s *anthropicStreamSink) messageStart() {
+	s.writeDelta(model.Delta{Role: "assistant"}, nil)
+}
+
+func (s *anthropicStreamSink) toolStart(index int, id, name string) {
+	s.writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
+		Index: s.toolIndexFor(index),
+		ID:    id,
+		Type:  "function",
+		Function: model.ToolCallFunction{
+			Name: name,
+		},
+	}}}, nil)
+}
+
+func (s *anthropicStreamSink) textDelta(text string) {
+	if text == "" {
+		return
+	}
+	s.writeDelta(model.Delta{Content: text}, nil)
+}
+
+func (s *anthropicStreamSink) thinkingDelta(text string) {
+	if text == "" {
+		return
+	}
+	s.writeDelta(model.Delta{ReasoningContent: text}, nil)
+}
+
+func (s *anthropicStreamSink) argsDelta(index int, partialJSON string) {
+	if partialJSON == "" {
+		return
+	}
+	s.writeDelta(model.Delta{ToolCalls: []model.ToolCall{{
+		Index:    s.toolIndexFor(index),
+		Function: model.ToolCallFunction{Arguments: partialJSON},
+	}}}, nil)
+}
+
+func (s *anthropicStreamSink) messageDelta(stopReason string, usage *anthropicUsage) {
+	if stopReason == "" {
+		return
+	}
+
+	fr := mapStopReason(stopReason)
+	var usageRaw json.RawMessage
+	if usage != nil {
+		usageRaw = openAIUsageJSON(usage.InputTokens, usage.OutputTokens, usage.InputTokens+usage.OutputTokens)
+	}
+	s.writeChunk(model.StreamChunk{
+		ID:      s.msgID,
+		Object:  model.ChatCompletionChunkObject,
+		Created: s.created,
+		Model:   s.model,
+		Choices: []model.StreamChoice{{
+			Index:        0,
+			Delta:        model.Delta{},
+			FinishReason: &fr,
+		}},
+		Usage: usageRaw,
+	})
+}
+
+// StreamAnthropicToOpenAI converts an Anthropic SSE stream into OpenAI
+// chat.completion.chunk SSE frames.
+func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName string) error {
+	sink := newAnthropicStreamSink(dst, modelName)
+	err := emitAnthropicAsOpenAI(src, sink)
+	sink.sse.done()
 	return err
 }
 
@@ -433,16 +530,10 @@ func (ts *toolStreamState) freshArgs() string {
 // StreamOpenAIToAnthropicSSE reads OpenAI SSE chunks from src and writes
 // proper Anthropic SSE events (with event: prefix) to dst.
 func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName string) error {
-	flusher, _ := dst.(http.Flusher)
+	sse := newSSEWriter(dst)
 	var st anthropicSSEState
 
-	writeSSE := func(event string, data any) {
-		b, _ := json.Marshal(data)
-		fmt.Fprintf(dst, "event: %s\ndata: %s\n\n", event, b)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
+	writeSSE := sse.event
 	stopBlock := func() {
 		writeSSE("content_block_stop", map[string]any{
 			"type": "content_block_stop", "index": st.blockIndex,
@@ -473,6 +564,22 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 		writeSSE("content_block_start", map[string]any{
 			"type": "content_block_start", "index": st.blockIndex,
 			"content_block": contentBlock,
+		})
+	}
+	emitToolBlockStart := func(ts *toolStreamState) {
+		writeSSE("content_block_start", map[string]any{
+			"type": "content_block_start", "index": ts.blockIndex,
+			"content_block": map[string]any{
+				"type": "tool_use",
+				"id":   ts.id,
+				"name": ts.name,
+			},
+		})
+	}
+	emitToolArgsDelta := func(ts *toolStreamState, part string) {
+		writeSSE("content_block_delta", map[string]any{
+			"type": "content_block_delta", "index": ts.blockIndex,
+			"delta": map[string]string{"type": "input_json_delta", "partial_json": part},
 		})
 	}
 
@@ -602,22 +709,12 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 					ts.started = true
 					ts.blockIndex = st.blockIndex
 					st.blockIndex++
-					writeSSE("content_block_start", map[string]any{
-						"type": "content_block_start", "index": ts.blockIndex,
-						"content_block": map[string]any{
-							"type": "tool_use",
-							"id":   ts.id,
-							"name": ts.name,
-						},
-					})
+					emitToolBlockStart(ts)
 				}
 
 				if ts.started {
 					if part := ts.freshArgs(); part != "" {
-						writeSSE("content_block_delta", map[string]any{
-							"type": "content_block_delta", "index": ts.blockIndex,
-							"delta": map[string]string{"type": "input_json_delta", "partial_json": part},
-						})
+						emitToolArgsDelta(ts, part)
 					}
 				}
 			}
@@ -637,19 +734,9 @@ func StreamOpenAIToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelNam
 				} else if ts.id != "" && ts.name != "" {
 					ts.blockIndex = st.blockIndex
 					st.blockIndex++
-					writeSSE("content_block_start", map[string]any{
-						"type": "content_block_start", "index": ts.blockIndex,
-						"content_block": map[string]any{
-							"type": "tool_use",
-							"id":   ts.id,
-							"name": ts.name,
-						},
-					})
+					emitToolBlockStart(ts)
 					if part := ts.freshArgs(); part != "" {
-						writeSSE("content_block_delta", map[string]any{
-							"type": "content_block_delta", "index": ts.blockIndex,
-							"delta": map[string]string{"type": "input_json_delta", "partial_json": part},
-						})
+						emitToolArgsDelta(ts, part)
 					}
 					writeSSE("content_block_stop", map[string]any{
 						"type": "content_block_stop", "index": ts.blockIndex,

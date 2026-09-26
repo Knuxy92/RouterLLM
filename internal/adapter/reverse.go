@@ -255,25 +255,9 @@ func convertAnthropicToolChoice(tc any) any {
 	}
 }
 
+// flattenContent joins the "text" member of every content block.
 func flattenContent(content any) string {
-	if content == nil {
-		return ""
-	}
-	switch v := content.(type) {
-	case string:
-		return v
-	case []any:
-		var parts []string
-		for _, block := range v {
-			if m, ok := block.(map[string]any); ok {
-				if text, _ := m["text"].(string); text != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-		return strings.Join(parts, "")
-	}
-	return ""
+	return contentText(content, "", "", true)
 }
 
 func stripCacheControl(msg map[string]any) {

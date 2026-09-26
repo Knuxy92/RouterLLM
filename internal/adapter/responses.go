@@ -335,10 +335,7 @@ func (e *responsesEvent) usageJSON() json.RawMessage {
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens
 	}
-	return json.RawMessage(fmt.Sprintf(
-		`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`,
-		u.InputTokens, u.OutputTokens, total,
-	))
+	return openAIUsageJSON(int(u.InputTokens), int(u.OutputTokens), int(total))
 }
 
 // responsesChunk mirrors model.StreamChunk but keeps the delta as a raw map:
@@ -369,132 +366,104 @@ func responsesFinishReason(ev *responsesEvent) string {
 	return "stop"
 }
 
-// BufferResponsesToOpenAI drains a Responses SSE stream and assembles a
-// single OpenAI chat.completion JSON document.
-func BufferResponsesToOpenAI(src io.Reader, modelName string) ([]byte, error) {
-	var (
-		msgID     string
-		created   = time.Now().Unix()
-		content   strings.Builder
-		reasoning strings.Builder
-		toolCalls []model.ToolCall
-		finish    string
-		usage     json.RawMessage
-	)
+// responsesSink receives the OpenAI-shaped output of the shared Responses
+// event core.
+type responsesSink interface {
+	created(id string, ts int64)
+	content(delta string)
+	reasoning(delta string)
+	toolStart(callID, name string)
+	toolArgs(delta string)
+	completed(finish string, usage json.RawMessage)
+	// failure handles a terminal upstream error event and reports whether
+	// iteration should stop.
+	failure(message string) bool
+}
 
-	_, err := util.IterDataLines(src, func(payload string) bool {
-		var ev responsesEvent
-		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return true
-		}
+type responsesBufferSink struct {
+	msgID        string
+	createdAt    int64
+	text         strings.Builder
+	reasoningBuf strings.Builder
+	toolCalls    []model.ToolCall
+	finishReason string
+	lastUsage    json.RawMessage
+}
 
-		switch ev.Type {
-		case "response.created":
-			if ev.Response != nil {
-				if ev.Response.ID != "" {
-					msgID = ev.Response.ID
-				}
-				if ts := ev.createdUnix(); ts != 0 {
-					created = ts
-				}
-			}
-		case "response.output_text.delta":
-			content.WriteString(ev.Delta)
-		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-			reasoning.WriteString(ev.Delta)
-		case "response.output_item.added":
-			if ev.Item == nil || ev.Item.Type != "function_call" {
-				return true
-			}
-
-			toolCalls = append(toolCalls, model.ToolCall{
-				Index:    len(toolCalls),
-				ID:       ev.Item.CallID,
-				Type:     "function",
-				Function: model.ToolCallFunction{Name: ev.Item.Name},
-			})
-		case "response.function_call_arguments.delta":
-			if len(toolCalls) > 0 {
-				last := &toolCalls[len(toolCalls)-1]
-				last.Function.Arguments += ev.Delta
-			}
-		case "response.completed":
-			finish = responsesFinishReason(&ev)
-			usage = ev.usageJSON()
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return nil, err
+func (s *responsesBufferSink) created(id string, ts int64) {
+	if id != "" {
+		s.msgID = id
 	}
+	if ts != 0 {
+		s.createdAt = ts
+	}
+}
 
-	if msgID == "" && content.Len() == 0 && reasoning.Len() == 0 && len(toolCalls) == 0 {
+func (s *responsesBufferSink) content(delta string) {
+	s.text.WriteString(delta)
+}
+
+func (s *responsesBufferSink) reasoning(delta string) {
+	s.reasoningBuf.WriteString(delta)
+}
+
+func (s *responsesBufferSink) toolStart(callID, name string) {
+	s.toolCalls = append(s.toolCalls, model.ToolCall{
+		Index:    len(s.toolCalls),
+		ID:       callID,
+		Type:     "function",
+		Function: model.ToolCallFunction{Name: name},
+	})
+}
+
+func (s *responsesBufferSink) toolArgs(delta string) {
+	if len(s.toolCalls) > 0 {
+		last := &s.toolCalls[len(s.toolCalls)-1]
+		last.Function.Arguments += delta
+	}
+}
+
+func (s *responsesBufferSink) completed(finish string, usage json.RawMessage) {
+	s.finishReason = finish
+	s.lastUsage = usage
+}
+
+func (s *responsesBufferSink) failure(string) bool { return true }
+
+func (s *responsesBufferSink) document(modelName string) ([]byte, error) {
+	if s.msgID == "" && s.text.Len() == 0 && s.reasoningBuf.Len() == 0 && len(s.toolCalls) == 0 {
 		return json.Marshal(map[string]any{"object": model.ChatCompletionObject, "choices": []any{}})
 	}
 
-	for i := range toolCalls {
-		if strings.TrimSpace(toolCalls[i].Function.Arguments) == "" {
-			toolCalls[i].Function.Arguments = "{}"
+	for i := range s.toolCalls {
+		if strings.TrimSpace(s.toolCalls[i].Function.Arguments) == "" {
+			s.toolCalls[i].Function.Arguments = "{}"
 		}
 	}
+	finish := s.finishReason
 	if finish == "" {
 		finish = "stop"
 	}
 
-	msg := model.Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls}
-	if reasoning.Len() > 0 {
-		msg.ReasoningContent = reasoning.String()
+	msg := model.Message{Role: "assistant", Content: s.text.String(), ToolCalls: s.toolCalls}
+	if s.reasoningBuf.Len() > 0 {
+		msg.ReasoningContent = s.reasoningBuf.String()
 	}
 
 	result := model.ChatCompletionResponse{
-		ID:      msgID,
+		ID:      s.msgID,
 		Object:  model.ChatCompletionObject,
-		Created: created,
+		Created: s.createdAt,
 		Model:   modelName,
 		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
-		Usage:   usage,
+		Usage:   s.lastUsage,
 	}
 	return json.Marshal(result)
 }
 
-// StreamResponsesToOpenAI converts an OpenAI Responses SSE stream into OpenAI
-// chat.completion.chunk SSE frames.
-func StreamResponsesToOpenAI(src io.Reader, dst io.Writer, modelName string) error {
-	flusher, _ := dst.(http.Flusher)
-	created := time.Now().Unix()
-
-	msgID := ""
-	sentRole := false
-	toolIdx := 0
-	curToolIdx := 0
-
-	writeChunk := func(delta map[string]any, finish *string, usage json.RawMessage) {
-		if msgID == "" {
-			msgID = chatCompletionIDPrefix + fmt.Sprintf("responses-%d", created)
-		}
-		data, _ := json.Marshal(responsesChunk{
-			ID:      msgID,
-			Object:  model.ChatCompletionChunkObject,
-			Created: created,
-			Model:   modelName,
-			Choices: []responsesChoice{{Index: 0, Delta: delta, FinishReason: finish}},
-			Usage:   usage,
-		})
-		fmt.Fprintf(dst, "data: %s\n\n", data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	writeRole := func() {
-		if sentRole {
-			return
-		}
-		sentRole = true
-		writeChunk(map[string]any{"role": "assistant"}, nil, nil)
-	}
-
-	var eventErr error
+// emitResponsesAsOpenAI translates a Responses SSE stream into OpenAI deltas
+// and hands them to the sink.
+func emitResponsesAsOpenAI(src io.Reader, sink responsesSink) error {
 	_, err := util.IterDataLines(src, func(payload string) bool {
 		var ev responsesEvent
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
@@ -503,78 +472,161 @@ func StreamResponsesToOpenAI(src io.Reader, dst io.Writer, modelName string) err
 
 		switch ev.Type {
 		case "response.created":
+			var id string
+			var ts int64
 			if ev.Response != nil {
-				if ev.Response.ID != "" {
-					msgID = ev.Response.ID
-				}
-				if ts := ev.createdUnix(); ts != 0 {
-					created = ts
-				}
+				id = ev.Response.ID
+				ts = ev.createdUnix()
 			}
-			writeRole()
+			sink.created(id, ts)
 		case "response.output_text.delta":
-			if ev.Delta == "" {
-				return true
+			if ev.Delta != "" {
+				sink.content(ev.Delta)
 			}
-			writeRole()
-			writeChunk(map[string]any{"content": ev.Delta}, nil, nil)
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-			if ev.Delta == "" {
-				return true
+			if ev.Delta != "" {
+				sink.reasoning(ev.Delta)
 			}
-			writeRole()
-			writeChunk(map[string]any{"reasoning_content": ev.Delta}, nil, nil)
 		case "response.output_item.added":
 			if ev.Item == nil || ev.Item.Type != "function_call" {
 				return true
 			}
-
-			writeRole()
-			writeChunk(map[string]any{"tool_calls": []any{map[string]any{
-				"index":    toolIdx,
-				"id":       ev.Item.CallID,
-				"type":     "function",
-				"function": map[string]any{"name": ev.Item.Name, "arguments": ""},
-			}}}, nil, nil)
-			curToolIdx = toolIdx
-			toolIdx++
+			sink.toolStart(ev.Item.CallID, ev.Item.Name)
 		case "response.function_call_arguments.delta":
-			if ev.Delta == "" {
-				return true
+			if ev.Delta != "" {
+				sink.toolArgs(ev.Delta)
 			}
-			writeChunk(map[string]any{"tool_calls": []any{map[string]any{
-				"index":    curToolIdx,
-				"function": map[string]any{"arguments": ev.Delta},
-			}}}, nil, nil)
 		case "response.completed":
-			writeRole()
-			finish := responsesFinishReason(&ev)
-			writeChunk(map[string]any{}, &finish, nil)
-			if u := ev.usageJSON(); u != nil {
-				writeChunk(map[string]any{}, nil, u)
-			}
+			sink.completed(responsesFinishReason(&ev), ev.usageJSON())
 			return false
 		case "response.failed", "error":
 			msg := ev.errorMessage()
 			if msg == "" {
 				msg = "unknown error"
 			}
-			eventErr = fmt.Errorf("responses upstream error: %s", msg)
-			return false
+			return sink.failure(msg)
 		}
 		return true
 	})
-	if eventErr != nil {
-		return eventErr
+	return err
+}
+
+// BufferResponsesToOpenAI drains a Responses SSE stream and assembles a
+// single OpenAI chat.completion JSON document.
+func BufferResponsesToOpenAI(src io.Reader, modelName string) ([]byte, error) {
+	sink := &responsesBufferSink{createdAt: time.Now().Unix()}
+	if err := emitResponsesAsOpenAI(src, sink); err != nil {
+		return nil, err
+	}
+	return sink.document(modelName)
+}
+
+type responsesStreamSink struct {
+	sse        sseWriter
+	msgID      string
+	createdAt  int64
+	model      string
+	sentRole   bool
+	toolIdx    int
+	curToolIdx int
+	err        error
+}
+
+func newResponsesStreamSink(dst io.Writer, modelName string) *responsesStreamSink {
+	return &responsesStreamSink{
+		sse:       newSSEWriter(dst),
+		createdAt: time.Now().Unix(),
+		model:     modelName,
+	}
+}
+
+func (s *responsesStreamSink) chunk(delta map[string]any, finish *string, usage json.RawMessage) {
+	if s.msgID == "" {
+		s.msgID = chatCompletionIDPrefix + fmt.Sprintf("responses-%d", s.createdAt)
+	}
+	s.sse.frame(responsesChunk{
+		ID:      s.msgID,
+		Object:  model.ChatCompletionChunkObject,
+		Created: s.createdAt,
+		Model:   s.model,
+		Choices: []responsesChoice{{Index: 0, Delta: delta, FinishReason: finish}},
+		Usage:   usage,
+	})
+}
+
+func (s *responsesStreamSink) emitRole() {
+	if s.sentRole {
+		return
+	}
+	s.sentRole = true
+	s.chunk(map[string]any{"role": "assistant"}, nil, nil)
+}
+
+func (s *responsesStreamSink) created(id string, ts int64) {
+	if id != "" {
+		s.msgID = id
+	}
+	if ts != 0 {
+		s.createdAt = ts
+	}
+	s.emitRole()
+}
+
+func (s *responsesStreamSink) content(delta string) {
+	s.emitRole()
+	s.chunk(map[string]any{"content": delta}, nil, nil)
+}
+
+func (s *responsesStreamSink) reasoning(delta string) {
+	s.emitRole()
+	s.chunk(map[string]any{"reasoning_content": delta}, nil, nil)
+}
+
+func (s *responsesStreamSink) toolStart(callID, name string) {
+	s.emitRole()
+	s.chunk(map[string]any{"tool_calls": []any{map[string]any{
+		"index":    s.toolIdx,
+		"id":       callID,
+		"type":     "function",
+		"function": map[string]any{"name": name, "arguments": ""},
+	}}}, nil, nil)
+	s.curToolIdx = s.toolIdx
+	s.toolIdx++
+}
+
+func (s *responsesStreamSink) toolArgs(delta string) {
+	s.chunk(map[string]any{"tool_calls": []any{map[string]any{
+		"index":    s.curToolIdx,
+		"function": map[string]any{"arguments": delta},
+	}}}, nil, nil)
+}
+
+func (s *responsesStreamSink) completed(finish string, usage json.RawMessage) {
+	s.emitRole()
+	s.chunk(map[string]any{}, &finish, nil)
+	if usage != nil {
+		s.chunk(map[string]any{}, nil, usage)
+	}
+}
+
+func (s *responsesStreamSink) failure(message string) bool {
+	s.err = fmt.Errorf("responses upstream error: %s", message)
+	return false
+}
+
+// StreamResponsesToOpenAI converts an OpenAI Responses SSE stream into OpenAI
+// chat.completion.chunk SSE frames.
+func StreamResponsesToOpenAI(src io.Reader, dst io.Writer, modelName string) error {
+	sink := newResponsesStreamSink(dst, modelName)
+	err := emitResponsesAsOpenAI(src, sink)
+	if sink.err != nil {
+		return sink.err
 	}
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(dst, "data: [DONE]\n\n")
-	if flusher != nil {
-		flusher.Flush()
-	}
+	sink.sse.done()
 	return nil
 }
 
