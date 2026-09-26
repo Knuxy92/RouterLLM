@@ -1019,7 +1019,7 @@ routes:
 	}
 }
 
-func TestLoadYAMLStyleCallNotSupportedOnOpencode(t *testing.T) {
+func TestLoadYAMLStyleCallAllowedOnOpencode(t *testing.T) {
 	path := writeTempYAML(t, `
 providers:
   - name: oc
@@ -1031,11 +1031,14 @@ routes:
     routes:
       - provider: oc
         model: m
-        stylecall: chat
+        stylecall: messages
 `)
-	_, err := loadYAML(path)
-	if err == nil || !strings.Contains(err.Error(), "not supported on opencode-style providers") {
-		t.Fatalf("expected 'not supported on opencode-style providers' error, got: %v", err)
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("stylecall must be allowed on opencode providers: %v", err)
+	}
+	if cfg.Routes[0].Routes[0].StyleCall != "messages" {
+		t.Fatalf("stylecall = %q, want messages", cfg.Routes[0].Routes[0].StyleCall)
 	}
 }
 

@@ -906,3 +906,56 @@ func restoreFunctionCallNames(v any, reverse map[string]string) bool {
 
 	return changed
 }
+
+// injectMissingAnthropicTools appends required tools (Anthropic shape:
+// {name, description, input_schema}) the body does not already carry.
+func injectMissingAnthropicTools(doc map[string]any, required []map[string]any) {
+	if len(required) == 0 {
+		return
+	}
+
+	tools, _ := doc["tools"].([]any)
+	existing := make(map[string]bool, len(tools))
+	for _, entry := range tools {
+		if tm, ok := entry.(map[string]any); ok {
+			if name, _ := tm["name"].(string); name != "" {
+				existing[name] = true
+			}
+		}
+	}
+
+	for _, tool := range required {
+		name, _ := tool["name"].(string)
+		if name == "" || existing[name] {
+			continue
+		}
+		tools = append(tools, tool)
+	}
+	doc["tools"] = tools
+}
+
+// chatToolToAnthropicTool converts one chat-shaped function tool to the
+// Anthropic definition shape ({name, description, input_schema}).
+func chatToolToAnthropicTool(entry map[string]any) (map[string]any, bool) {
+	fn, ok := entry["function"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+
+	name, _ := fn["name"].(string)
+	if name == "" {
+		return nil, false
+	}
+
+	tool := map[string]any{"name": name}
+	if d, ok := fn["description"].(string); ok {
+		tool["description"] = d
+	}
+	if p, ok := fn["parameters"]; ok && p != nil {
+		tool["input_schema"] = p
+	} else {
+		tool["input_schema"] = map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+
+	return tool, true
+}

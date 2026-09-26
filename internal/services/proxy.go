@@ -549,14 +549,63 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 	}
 
-	// OpenCode legs dispatch on style, not dialect: their Responses wire format
-	// needs the required-tool injection and reserved-name rename before the
-	// generic responses translation applies.
+	// OpenCode legs dispatch per-leg on stylecall (the gateway serves chat,
+	// responses and messages models), with the required-tool injection and
+	// reserved-name rename applied on every dialect.
 	if pv.Style == "opencode" {
-		restore, reqBytes, reqPath2, err2 := p.translateOpenCodeRoute(route, path, routeBody)
-		toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
+		switch route.Dialect() {
+		case "chat":
+			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
+			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
+			injectMissingTools(routeBody, opencode.RequiredTools())
+			routeBody["model"] = route.ModelName
+			if pv.ReasoningStyle == "raw" {
+				applyLegacyDefaults(routeBody, route.Defaults)
+			} else {
+				if notice := canonicalizeReasoning(routeBody, route.Defaults); notice != "" {
+					p.log.Printf("route %s/%s: %s — ignored", route.ModelName, pv.Name, notice)
+				}
+				applyReasoningDialect(routeBody, pv.ReasoningStyle)
+			}
+			p.injectStreamUsage(routeBody, path)
+			reqBody, err = json.Marshal(routeBody)
+			reqPath = "/v1/chat/completions"
+		case "messages":
+			applyCanonicalDefaults(routeBody, route.Defaults)
+			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
+			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
+			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
+			if err != nil {
+				return reqBody, reqPath, sessionID, toolNameRestore, err
+			}
 
-		return reqBytes, reqPath2, "", toolNameRestore, err2
+			var doc map[string]any
+			if err := json.Unmarshal(reqBody, &doc); err != nil {
+				return nil, "", "", toolNameRestore, err
+			}
+			// Client declarations were already renamed above, so converting
+			// them cannot collide with the required tools injected here.
+			if clientTools, ok := routeBody["tools"].([]any); ok {
+				for _, entry := range clientTools {
+					entryMap, ok := entry.(map[string]any)
+					if !ok {
+						continue
+					}
+					if tool, ok := chatToolToAnthropicTool(entryMap); ok {
+						injectMissingAnthropicTools(doc, []map[string]any{tool})
+					}
+				}
+			}
+			injectMissingAnthropicTools(doc, openCodeAnthropicTools())
+			reqBody, err = json.Marshal(doc)
+		default: // responses
+			restore, reqBytes, reqPath2, err2 := p.translateOpenCodeRoute(route, path, routeBody)
+			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
+
+			return reqBytes, reqPath2, "", toolNameRestore, err2
+		}
+
+		return reqBody, reqPath, sessionID, toolNameRestore, err
 	}
 
 	switch route.Dialect() {
@@ -672,6 +721,20 @@ func openCodeResponsesTools() []map[string]any {
 	return flat
 }
 
+// openCodeAnthropicTools returns the required tools in the Anthropic
+// definition shape, fresh maps each call.
+func openCodeAnthropicTools() []map[string]any {
+	chat := opencode.RequiredTools()
+	anthropic := make([]map[string]any, 0, len(chat))
+	for _, entry := range chat {
+		if tool, ok := chatToolToAnthropicTool(entry); ok {
+			anthropic = append(anthropic, tool)
+		}
+	}
+
+	return anthropic
+}
+
 // mergeToolNameRestore folds a second reverse map into the accumulated one.
 func mergeToolNameRestore(dst, src map[string]string) map[string]string {
 	if len(src) == 0 {
@@ -754,7 +817,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		case "codex":
 			p.serveCodex(resp, clientStream, route.ModelName, w)
 		case "messages":
-			p.serveAnthropic(resp, clientStream, route.ModelName, w)
+			p.serveAnthropic(resp, clientStream, route.ModelName, w, toolNameRestore)
 		case "google":
 			p.serveGoogle(resp, clientStream, route.ModelName, w)
 		case "responses":
@@ -1166,12 +1229,12 @@ func responsesRestoreTransform(reverse map[string]string) func(string) string {
 	}
 }
 
-func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
+func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter, toolNameRestore map[string]string) {
 	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
-		if err := adapter.StreamAnthropicToOpenAI(resp.Body, w, modelName); err != nil {
+		if err := adapter.StreamAnthropicToOpenAI(resp.Body, newRestoringWriter(w, toolNameRestore), modelName); err != nil {
 			p.log.Printf("anthropic stream error: %v", err)
 		}
 		return
@@ -1183,9 +1246,7 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(openaiBody)
+	writeJSON(w, http.StatusOK, restoreToolCallNamesJSON(openaiBody, toolNameRestore))
 }
 
 func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
@@ -1406,7 +1467,7 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 	w.WriteHeader(http.StatusOK)
 
 	if dialect == "messages" {
-		if err := util.StreamRawSSE(resp.Body, w); err != nil {
+		if err := util.StreamRawSSE(resp.Body, newRestoringWriter(w, toolNameRestore)); err != nil {
 			p.log.Printf("anthropic passthrough stream error: %v", err)
 		}
 		return
@@ -1420,7 +1481,7 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 	}
 
 	if dialect == "responses" {
-		if err := adapter.StreamResponsesToAnthropicSSE(resp.Body, w, modelName); err != nil {
+		if err := adapter.StreamResponsesToAnthropicSSE(resp.Body, newRestoringWriter(w, toolNameRestore), modelName); err != nil {
 			p.log.Printf("responses stream error: %v", err)
 		}
 		return

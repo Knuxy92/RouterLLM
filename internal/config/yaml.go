@@ -269,7 +269,7 @@ func validateConfig(yc *yamlConfig) error {
 
 			if spec.StyleCall != "" {
 				style := seenProviders[spec.Provider]
-				if style == "google" || style == "cline" || style == "opencode" {
+				if style == "google" || style == "cline" {
 					return fmt.Errorf("route %q provider %q: stylecall is not supported on %s-style providers", rule.ModelID, spec.Provider, style)
 				}
 			}

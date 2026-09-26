@@ -17,6 +17,10 @@ import (
 )
 
 func opencodeTestRegistry(upstream *httptest.Server) *provider.Registry {
+	return opencodeTestRegistryWithStyleCall(upstream, "")
+}
+
+func opencodeTestRegistryWithStyleCall(upstream *httptest.Server, styleCall string) *provider.Registry {
 	return provider.NewRegistry([]config.ProviderConfig{{
 		Name:    "oc-test",
 		BaseURL: upstream.URL,
@@ -24,7 +28,7 @@ func opencodeTestRegistry(upstream *httptest.Server) *provider.Registry {
 		Keys:    []string{"oc_sk_key"},
 	}}, []model.Rule{{
 		ModelID: "test-model",
-		Routes:  []model.Spec{{Provider: "oc-test", Model: "up-model"}},
+		Routes:  []model.Spec{{Provider: "oc-test", Model: "up-model", StyleCall: styleCall}},
 	}}, time.Minute)
 }
 
@@ -241,5 +245,125 @@ func TestForwardOpenCodeWithoutClientTools(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "ok") {
 		t.Fatalf("content missing:\n%s", w.Body.String())
+	}
+}
+
+func TestForwardOpenCodeStyleCallChat(t *testing.T) {
+	sanitized := openCodeSanitizedBash()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %q, want /v1/chat/completions", r.URL.Path)
+		}
+		assertOpenCodeHeaders(t, r)
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		tools, _ := body["tools"].([]any)
+		if len(tools) != len(opencode.RequiredToolNames())+1 {
+			t.Errorf("upstream tools = %d, want %d", len(tools), len(opencode.RequiredToolNames())+1)
+		}
+		foundSanitized := false
+		for _, entry := range tools {
+			tm, _ := entry.(map[string]any)
+			fn, _ := tm["function"].(map[string]any)
+			if fn["name"] == sanitized {
+				foundSanitized = true
+			}
+		}
+		if !foundSanitized {
+			t.Errorf("client tool not renamed to %q", sanitized)
+		}
+		if _, ok := body["stream_options"]; !ok {
+			t.Error("stream_options.include_usage missing on chat dialect")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\""+sanitized+"\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
+			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"name":"bash"`) {
+		t.Fatalf("client must see the original tool name:\n%s", w.Body.String())
+	}
+}
+
+func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
+	sanitized := openCodeSanitizedBash()
+	anthropicSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"" + sanitized + "\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
+		}
+		assertOpenCodeHeaders(t, r)
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		tools, _ := body["tools"].([]any)
+		if len(tools) != len(opencode.RequiredToolNames())+1 {
+			t.Errorf("upstream tools = %d, want %d (7 required + 1 renamed client tool)", len(tools), len(opencode.RequiredToolNames())+1)
+		}
+		seen := map[string]bool{}
+		for _, entry := range tools {
+			tm, _ := entry.(map[string]any)
+			name, _ := tm["name"].(string)
+			seen[name] = true
+			if name == sanitized {
+				if _, ok := tm["input_schema"].(map[string]any); !ok {
+					t.Errorf("client tool %q lost input_schema: %v", name, tm)
+				}
+			}
+		}
+		for _, name := range opencode.RequiredToolNames() {
+			if !seen[name] {
+				t.Errorf("required tool %q missing", name)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, anthropicSSE)
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "messages"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
+			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"name":"bash"`) {
+		t.Fatalf("client must see the original tool name:\n%s", body)
+	}
+	if strings.Contains(body, sanitized) {
+		t.Fatalf("client must not see the renamed tool:\n%s", body)
 	}
 }

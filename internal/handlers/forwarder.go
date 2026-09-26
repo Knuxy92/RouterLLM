@@ -84,7 +84,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 
 		switch route.Dialect() {
 		case "messages":
-			_ = util.StreamRawSSE(resp.Body, w)
+			_ = util.StreamRawSSE(resp.Body, services.RestoreToolNamesWriter(w, toolNameRestore))
 		case "google":
 			adapter.StreamGoogleToAnthropicSSE(resp.Body, w, modelName)
 		case "codex":
