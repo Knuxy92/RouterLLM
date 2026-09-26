@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"routerllm/internal/provider"
+	"routerllm/internal/util"
 )
 
 // Pulse is the poll heartbeat: change signatures for /status and /metrics plus
@@ -40,7 +41,7 @@ func (d Deps) handlePulse(w http.ResponseWriter, r *http.Request) {
 	// the chart) moving without any traffic flowing.
 	bucket := time.Now().Unix() / 60
 
-	writeJSON(w, http.StatusOK, Pulse{
+	util.WriteJSON(w, http.StatusOK, Pulse{
 		Seq:        seq,
 		StatusSig:  hashSig("status", fmt.Sprint(reload.At.UnixNano()), fmt.Sprint(reload.OK), keySig(d.Registry()), fmt.Sprint(seq), fmt.Sprint(bucket)),
 		MetricsSig: hashSig("metrics", fmt.Sprint(reload.At.UnixNano()), fmt.Sprint(seq), fmt.Sprint(bucket)),

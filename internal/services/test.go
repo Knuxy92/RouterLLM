@@ -137,23 +137,24 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 // testProvider resolves the configured provider for a test run. A name that is
 // not in the config is 404; a disabled or keyless provider is 400.
 func (p *Proxy) testProvider(name string) (*provider.Provider, int, error) {
-	var found bool
+	configured := false
 	for _, pc := range p.Registry().ProviderConfigs() {
 		if pc.Name != name {
 			continue
 		}
-		found = true
+		configured = true
 		if pc.Disabled {
 			return nil, http.StatusBadRequest, fmt.Errorf("provider %s is disabled", name)
 		}
-	}
-	if !found {
-		return nil, http.StatusNotFound, fmt.Errorf("provider %s not found", name)
+		break
 	}
 
 	pv, ok := p.Registry().Provider(name)
 	if !ok {
-		return nil, http.StatusBadRequest, fmt.Errorf("provider %s is not active", name)
+		if configured {
+			return nil, http.StatusBadRequest, fmt.Errorf("provider %s is not active", name)
+		}
+		return nil, http.StatusNotFound, fmt.Errorf("provider %s not found", name)
 	}
 	if pv.Keys.AliveCount() == 0 {
 		return nil, http.StatusBadRequest, fmt.Errorf("provider %s has no usable keys", name)
@@ -205,28 +206,17 @@ func (p *Proxy) finishTestFailure(start time.Time, ctx context.Context, pv *prov
 
 // bufferedTestContent drains the upstream SSE stream into the assistant text of
 // the assembled chat.completion response, per wire dialect.
+// bufferToOpenAI drains one SSE dialect into the assembled OpenAI document.
+var bufferToOpenAI = map[string]func(io.Reader, string) ([]byte, error){
+	"messages":  adapter.BufferAnthropicToOpenAI,
+	"google":    adapter.BufferGoogleToOpenAI,
+	"responses": adapter.BufferResponsesToOpenAI,
+	"codex":     adapter.BufferCodexToOpenAI,
+}
+
 func bufferedTestContent(body io.Reader, dialect, modelName string) (string, error) {
-	switch dialect {
-	case "messages":
-		data, err := adapter.BufferAnthropicToOpenAI(body, modelName)
-		if err != nil {
-			return "", err
-		}
-		return contentFromOpenAIJSON(data)
-	case "google":
-		data, err := adapter.BufferGoogleToOpenAI(body, modelName)
-		if err != nil {
-			return "", err
-		}
-		return contentFromOpenAIJSON(data)
-	case "responses":
-		data, err := adapter.BufferResponsesToOpenAI(body, modelName)
-		if err != nil {
-			return "", err
-		}
-		return contentFromOpenAIJSON(data)
-	case "codex":
-		data, err := adapter.BufferCodexToOpenAI(body, modelName)
+	if bufferFn, ok := bufferToOpenAI[dialect]; ok {
+		data, err := bufferFn(body, modelName)
 		if err != nil {
 			return "", err
 		}

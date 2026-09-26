@@ -1,5 +1,5 @@
 import { addLeg, getLogsPage } from "./state.js"
-import { $, $$, closeDialog, openTrace } from "./render.js"
+import { $, $$, closeDialog, closeDrawers, openTrace } from "./render.js"
 
 export function wireUi() {
   $("#menu-btn").addEventListener("click", () => {
@@ -39,8 +39,7 @@ export function wireUi() {
   $("#pd-scrim").addEventListener("click", closeProviderDrawer)
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return
-    closeDrawer()
-    closeProviderDrawer()
+    closeDrawers()
   })
 
   const dialog = $("#leg-dialog")

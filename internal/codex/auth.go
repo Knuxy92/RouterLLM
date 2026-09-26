@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"routerllm/internal/util"
 )
 
 const (
@@ -112,7 +113,7 @@ func (c *Client) RequestDeviceAuth(ctx context.Context) (DeviceAuth, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return DeviceAuth{}, fmt.Errorf("codex device auth returned %s: %s", resp.Status, readLimited(resp.Body))
+		return DeviceAuth{}, fmt.Errorf("codex device auth returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var payload deviceAuthResponse
@@ -208,7 +209,7 @@ func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (Token,
 			return Token{}, fmt.Errorf("codex device login failed: %s", deviceErrorMessage(payload, resp.Status))
 		}
 
-		if err := sleepContext(ctx, interval); err != nil {
+		if err := util.SleepContext(ctx, interval); err != nil {
 			return Token{}, err
 		}
 	}
@@ -233,7 +234,7 @@ func (c *Client) exchangeDeviceCode(ctx context.Context, code, verifier string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Token{}, fmt.Errorf("codex device token exchange returned %s: %s", resp.Status, readLimited(resp.Body))
+		return Token{}, fmt.Errorf("codex device token exchange returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var payload tokenResponse
@@ -299,7 +300,7 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Token, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Token{}, fmt.Errorf("codex refresh returned %s: %s", resp.Status, readLimited(resp.Body))
+		return Token{}, fmt.Errorf("codex refresh returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var payload tokenResponse
@@ -433,24 +434,6 @@ func (c *Client) postJSON(ctx context.Context, endpoint string, payload any) (*h
 	}
 
 	return resp, nil
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func readLimited(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, 2048))
-
-	return string(raw)
 }
 
 func SetHeaders(header http.Header, accessToken string) {

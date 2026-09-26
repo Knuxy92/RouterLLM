@@ -113,7 +113,7 @@ function concat(a, b) {
   return out
 }
 
-export function hmacSha256(key, message) {
+function hmacSha256(key, message) {
   let keyBytes = utf8(key)
   if (keyBytes.length > 64) {
     keyBytes = sha256(keyBytes)
@@ -134,7 +134,7 @@ export function hmacSha256(key, message) {
   return sha256(concat(outer, innerHash))
 }
 
-export function toHex(bytes) {
+function toHex(bytes) {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
 }
 

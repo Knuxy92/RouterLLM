@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"routerllm/internal/util"
 )
 
 const (
@@ -93,7 +94,7 @@ func (c *Client) RequestDeviceAuth(ctx context.Context, clientName string) (Devi
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return DeviceAuth{}, fmt.Errorf("alysis device auth returned %s: %s", resp.Status, readLimited(resp.Body))
+		return DeviceAuth{}, fmt.Errorf("alysis device auth returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var device DeviceAuth
@@ -134,7 +135,7 @@ func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, e
 			return "", err
 		}
 
-		body := readLimited(resp.Body)
+		body := util.ReadLimited(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return "", fmt.Errorf("alysis device token returned %s: %s", resp.Status, body)
@@ -158,7 +159,7 @@ func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, e
 			return "", fmt.Errorf("alysis login code expired — run again")
 		}
 
-		if err := sleepContext(ctx, interval); err != nil {
+		if err := util.SleepContext(ctx, interval); err != nil {
 			return "", err
 		}
 	}
@@ -218,7 +219,7 @@ func (c *Client) VerifyKey(ctx context.Context, key string) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("alysis models returned %s: %s", resp.Status, readLimited(resp.Body))
+		return nil, fmt.Errorf("alysis models returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var payload struct {
@@ -258,22 +259,4 @@ func (c *Client) postJSON(ctx context.Context, endpoint string, payload any) (*h
 	}
 
 	return resp, nil
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func readLimited(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, 2048))
-
-	return string(raw)
 }

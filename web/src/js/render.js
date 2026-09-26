@@ -53,7 +53,7 @@ const ALL_MODELS = "All models";
 export const $$ = (s) => document.querySelectorAll(s);
 
 // Smooth out state-driven re-renders where the browser supports it.
-export function withTransition(fn) {
+function withTransition(fn) {
   if (document.startViewTransition)
     document.startViewTransition(fn).ready.catch(() => {});
   else fn();
@@ -99,7 +99,7 @@ function keyLine(p) {
   return `${on}/${p.keyList.length} · ${bad.length ? bad.length + " " + bad[0].status : "all healthy"}`;
 }
 
-export function providerCard(p, agg) {
+function providerCard(p, agg) {
   const s = STATUS_META[p.status];
   const p50 = agg[p.name];
   return `
@@ -120,7 +120,7 @@ export function providerCard(p, agg) {
 
 // ----- models & fallback chains ----------------------------------------------
 
-export function modelBlock(m) {
+function modelBlock(m) {
   const legs = m.legs
     .map(
       (leg, i) => `
@@ -455,7 +455,7 @@ function refreshAll() {
 
 // ----- custom dropdowns ------------------------------------------------------
 
-export function buildDD(id, options, selected, onPick) {
+function buildDD(id, options, selected, onPick) {
   const root = $("#" + id);
   root.innerHTML = `
     <button type="button" class="dd-btn"><span class="dd-label">${esc(selected)}</span><i data-lucide="chevron-down"></i></button>
@@ -481,7 +481,7 @@ export function buildDD(id, options, selected, onPick) {
 
 // ----- chart tooltips --------------------------------------------------------
 
-export function attachChart(id, tips) {
+function attachChart(id, tips) {
   const wrap = $("#" + id);
   if (!wrap) return;
   const tip = document.createElement("div");
@@ -608,7 +608,7 @@ function quotaCell(quota) {
   </span>`;
 }
 
-export function openProvider(name, onOpened) {
+export function openProvider(name) {
   currentProvider = name;
   const p = getState().providers.find((x) => x.name === name);
   if (!p) return;
@@ -844,7 +844,8 @@ export function openProvider(name, onOpened) {
     });
   }
 
-  onOpened();
+  $("#provider-drawer").classList.add("open");
+  $("#pd-scrim").classList.add("open");
   refreshIcons();
 }
 
@@ -919,7 +920,7 @@ function logFilterFromState() {
   };
 }
 
-export function renderLogs() {
+function renderLogs() {
   const tbody = $("#log-tbody");
   if (!tbody) return;
   const { entries, meta } = getLogsPage();
@@ -1102,10 +1103,7 @@ export function initDynamic() {
     if (e.target.closest("input, button")) return;
     const card = e.target.closest("[data-provider]");
     if (card)
-      openProvider(card.dataset.provider, () => {
-        $("#provider-drawer").classList.add("open");
-        $("#pd-scrim").classList.add("open");
-      });
+      openProvider(card.dataset.provider);
   });
   $("#provider-grid").addEventListener("change", (e) => {
     const input = e.target.closest("input[data-action='provider-toggle']");
@@ -1150,13 +1148,7 @@ export function initDynamic() {
       Number(input.dataset.index),
       input.checked,
     );
-    if (currentProvider)
-      withTransition(() =>
-        openProvider(currentProvider, () => {
-          $("#provider-drawer").classList.add("open");
-          $("#pd-scrim").classList.add("open");
-        }),
-      );
+    if (currentProvider) withTransition(() => openProvider(currentProvider));
   });
 
   $("#log-pagination").addEventListener("click", (e) => {

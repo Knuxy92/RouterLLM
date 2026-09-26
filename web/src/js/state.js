@@ -29,7 +29,7 @@ let polling = false
 // Live updates flow through the delta ring: page 1 is re-fetched only when new
 // events actually arrived, and pages >1 stay put while you browse them.
 
-export const LOG_PER_PAGE = 20
+const LOG_PER_PAGE = 20
 
 let logMeta = { page: 1, per_page: LOG_PER_PAGE, total: 0, total_pages: 1, error_total: 0, latest: 0 }
 let logPageCache = new Map()
@@ -90,7 +90,7 @@ async function fetchPage(pageNo) {
   p.page = pageNo
   const res = await api.requestsPage(p)
   if (gen !== logGen) return
-  logPageCache.set(pageNo, { pageNo, entries: res.entries || [] })
+  logPageCache.set(pageNo, { entries: res.entries || [] })
   return res
 }
 

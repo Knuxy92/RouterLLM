@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"routerllm/internal/util"
 )
 
 const (
@@ -95,7 +96,7 @@ func (c *Client) RequestDeviceAuth(ctx context.Context) (DeviceAuth, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return DeviceAuth{}, fmt.Errorf("workos device auth returned %s: %s", resp.Status, readLimited(resp.Body))
+		return DeviceAuth{}, fmt.Errorf("workos device auth returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var device DeviceAuth
@@ -170,7 +171,7 @@ func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (string
 			return "", "", fmt.Errorf("workos device login failed: %s", message)
 		}
 
-		if err := sleepContext(ctx, interval); err != nil {
+		if err := util.SleepContext(ctx, interval); err != nil {
 			return "", "", err
 		}
 	}
@@ -201,7 +202,7 @@ func (c *Client) Register(ctx context.Context, workosAccess, workosRefresh strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Token{}, "", fmt.Errorf("cline register returned %s: %s", resp.Status, readLimited(resp.Body))
+		return Token{}, "", fmt.Errorf("cline register returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var parsed clineAuthResponse
@@ -241,7 +242,7 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Token, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Token{}, fmt.Errorf("cline refresh returned %s: %s", resp.Status, readLimited(resp.Body))
+		return Token{}, fmt.Errorf("cline refresh returned %s: %s", resp.Status, util.ReadLimited(resp.Body))
 	}
 
 	var parsed clineAuthResponse
@@ -325,22 +326,4 @@ func parseExpiry(value any) time.Time {
 	}
 
 	return time.Time{}
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func readLimited(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, 2048))
-
-	return string(raw)
 }

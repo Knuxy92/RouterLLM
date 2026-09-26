@@ -131,36 +131,16 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		}
 
 		keys := expandKeys(yp.APIKey)
-		if yp.Style == "cline" && len(keys) == 0 && !yp.Disabled {
-			store, err := cline.LoadAccountStore(cline.DefaultAccountsPath())
+		if !yp.Disabled && len(keys) == 0 {
+			storeKeys, path, ok, err := accountStyleKeys(yp.Style)
 			if err != nil {
 				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
 			}
-			keys = store.RefreshTokens()
-			if len(keys) == 0 {
-				return nil, fmt.Errorf("provider %q: no cline accounts found in %s — run `routerllm --cline-login`", yp.Name, store.Path())
-			}
-		}
-
-		if yp.Style == "alysis" && len(keys) == 0 && !yp.Disabled {
-			store, err := alysis.LoadAccountStore(alysis.DefaultAccountsPath())
-			if err != nil {
-				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
-			}
-			keys = store.GatewayKeys()
-			if len(keys) == 0 {
-				return nil, fmt.Errorf("provider %q: no alysis accounts found in %s — run `routerllm --alysis-login`", yp.Name, store.Path())
-			}
-		}
-
-		if yp.Style == "codex" && len(keys) == 0 && !yp.Disabled {
-			store, err := codex.LoadAccountStore(codex.DefaultAccountsPath())
-			if err != nil {
-				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
-			}
-			keys = store.RefreshTokens()
-			if len(keys) == 0 {
-				return nil, fmt.Errorf("provider %q: no codex accounts found in %s — run `routerllm --codex-login`", yp.Name, store.Path())
+			if ok {
+				if len(storeKeys) == 0 {
+					return nil, fmt.Errorf("provider %q: no %s accounts found in %s — run `routerllm --%s-login`", yp.Name, yp.Style, path, yp.Style)
+				}
+				keys = storeKeys
 			}
 		}
 
@@ -317,7 +297,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 		return fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
 	}
 
-	if len(yp.APIKey) == 0 && yp.Style != "cline" && yp.Style != "alysis" && yp.Style != "codex" && !yp.Disabled {
+	if len(yp.APIKey) == 0 && !isAccountStyle(yp.Style) && !yp.Disabled {
 		return fmt.Errorf("provider %q: api_key is required", yp.Name)
 	}
 
@@ -328,12 +308,45 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 				return fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
 			}
 		}
-		if len(keys) == 0 && yp.Style != "cline" && yp.Style != "alysis" && yp.Style != "codex" {
+		if len(keys) == 0 && !isAccountStyle(yp.Style) {
 			return fmt.Errorf("provider %q: api_key expanded to zero keys (is the environment variable empty?)", yp.Name)
 		}
 	}
 
 	return nil
+}
+
+// isAccountStyle reports styles whose credentials come from a login-managed
+// account store instead of api_key.
+func isAccountStyle(style string) bool {
+	return style == "cline" || style == "alysis" || style == "codex"
+}
+
+// accountStyleKeys loads the credentials of an account-backed style's store,
+// returning the store path for error messages. ok is false when the style has
+// no account store.
+func accountStyleKeys(style string) (keys []string, path string, ok bool, err error) {
+	switch style {
+	case "cline":
+		store, err := cline.LoadAccountStore(cline.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.RefreshTokens(), store.Path(), true, nil
+	case "alysis":
+		store, err := alysis.LoadAccountStore(alysis.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.GatewayKeys(), store.Path(), true, nil
+	case "codex":
+		store, err := codex.LoadAccountStore(codex.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.RefreshTokens(), store.Path(), true, nil
+	}
+	return nil, "", false, nil
 }
 
 func expandKeys(raw []string) []string {

@@ -18,23 +18,18 @@ import (
 //
 //	client reasoning map > client reasoning_effort / enable_thinking / thinking
 //	/ thinking_budget > route defaults
-var reasoningEffortAliases = map[string]string{
-	"none":    "none",
-	"minimal": "minimal",
-	"low":     "low",
-	"medium":  "medium",
-	"high":    "high",
-	"xhigh":   "xhigh",
-	"max":     "max",
-	"ultra":   "ultra",
+// reasoningEfforts is the whitelist of accepted reasoning_effort values.
+var reasoningEfforts = map[string]bool{
+	"none": true, "minimal": true, "low": true, "medium": true,
+	"high": true, "xhigh": true, "max": true, "ultra": true,
 }
 
 func normalizeReasoningEffort(v any) string {
 	s, ok := v.(string)
-	if !ok {
+	if !ok || !reasoningEfforts[s] {
 		return ""
 	}
-	return reasoningEffortAliases[s]
+	return s
 }
 
 func intValue(v any) int {
@@ -47,12 +42,6 @@ func intValue(v any) int {
 		return int(n)
 	}
 	return 0
-}
-
-// applyCanonicalDefaults folds client reasoning dialects plus route defaults
-// into the canonical keys (reasoning_effort/thinking_budget) on the body.
-func applyCanonicalDefaults(body map[string]any, defaults model.RequestDefaults) {
-	canonicalizeReasoning(body, defaults)
 }
 
 // canonicalizeReasoning folds every reasoning dialect on the body plus the

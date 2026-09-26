@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -229,7 +229,8 @@ func (m *Metrics) LastError(name string, since time.Duration) (int64, int, bool)
 			starts = append(starts, start)
 		}
 	}
-	sort.Slice(starts, func(i, j int) bool { return starts[i] > starts[j] })
+	slices.Sort(starts)
+	slices.Reverse(starts)
 
 	for _, start := range starts {
 		if b := src[start]; b.err > 0 {
@@ -264,7 +265,7 @@ func percentile(samples []int64, p float64) int64 {
 	}
 
 	sorted := append([]int64(nil), samples...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	idx := int(math.Ceil(p/100*float64(len(sorted)))) - 1
 	if idx < 0 {
 		idx = 0

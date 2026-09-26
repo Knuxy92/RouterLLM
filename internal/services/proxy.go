@@ -50,7 +50,11 @@ var openCodeTokenKeys = []string{"max_tokens", "max_completion_tokens", "max_out
 // the upstream call and the client gets an actionable 400 instead.
 const maxUpstreamTools = 128
 
-var errTooManyTools = errors.New("too many tools")
+var (
+	errTooManyTools     = errors.New("too many tools")
+	errModelNotFound    = errors.New("model not found")
+	errRequestCancelled = errors.New("request cancelled")
+)
 
 var deadStatuses = map[int]bool{
 	401: true, 402: true, 403: true,
@@ -419,7 +423,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	modelName, _ := body["model"].(string)
 	routes := p.registry.Load().Routes(modelName)
 	if len(routes) == 0 {
-		return nil, nil, nil, fmt.Errorf("model %q not found", modelName)
+		return nil, nil, nil, fmt.Errorf("%w: %q", errModelNotFound, modelName)
 	}
 
 	if path != "/v1/chat/completions" {
@@ -431,7 +435,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 		routes = filtered
 		if len(routes) == 0 {
-			return nil, nil, nil, fmt.Errorf("model %q not found for %s", modelName, path)
+			return nil, nil, nil, fmt.Errorf("%w for %s: %q", errModelNotFound, path, modelName)
 		}
 	}
 
@@ -473,7 +477,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			if lastResp != nil {
 				lastResp.Body.Close()
 			}
-			return nil, nil, nil, fmt.Errorf("request cancelled")
+			return nil, nil, nil, errRequestCancelled
 		}
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
@@ -584,7 +588,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = "/v1/chat/completions"
 		case "messages":
-			applyCanonicalDefaults(routeBody, route.Defaults)
+			canonicalizeReasoning(routeBody, route.Defaults)
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
 			reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
@@ -623,13 +627,13 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 
 	switch route.Dialect() {
 	case "messages":
-		applyCanonicalDefaults(routeBody, route.Defaults)
+		canonicalizeReasoning(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateRequestWithResolver(routeBody, route.ModelName, p.mediaResolver(pv))
 	case "google":
-		applyCanonicalDefaults(routeBody, route.Defaults)
+		canonicalizeReasoning(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
 	case "cline":
-		applyCanonicalDefaults(routeBody, route.Defaults)
+		canonicalizeReasoning(routeBody, route.Defaults)
 		delete(routeBody, "thinking_budget")
 		delete(routeBody, "reasoning_exclude")
 		routeBody["model"] = route.ModelName
@@ -651,7 +655,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		reqBody, err = json.Marshal(routeBody)
 		reqPath = "/v1/chat/completions"
 	case "codex":
-		applyCanonicalDefaults(routeBody, route.Defaults)
+		canonicalizeReasoning(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateCodexRequest(routeBody, route.ModelName)
 	case "responses":
 		if path == "/v1/responses" {
@@ -662,7 +666,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 			reqBody, err = json.Marshal(routeBody)
 			reqPath = path
 		} else {
-			applyCanonicalDefaults(routeBody, route.Defaults)
+			canonicalizeReasoning(routeBody, route.Defaults)
 			reqBody, reqPath, err = adapter.TranslateResponsesRequest(routeBody, route.ModelName)
 		}
 	default:
@@ -699,7 +703,7 @@ func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeB
 		return reverse, reqBody, path, err
 	}
 
-	applyCanonicalDefaults(routeBody, route.Defaults)
+	canonicalizeReasoning(routeBody, route.Defaults)
 	reverse := renameReservedToolNames(routeBody, openCodeReservedTools)
 	injectMissingTools(routeBody, opencode.RequiredTools())
 	routeBody["model"] = route.ModelName
@@ -865,10 +869,10 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 	}
 
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, errModelNotFound) {
 			util.WriteError(w, http.StatusNotFound, "model_not_found", err.Error())
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusNotFound, err.Error(), 0, ""))
-		} else if strings.Contains(err.Error(), "request cancelled") {
+		} else if errors.Is(err, errRequestCancelled) {
 			return
 		} else if errors.Is(err, errTooManyTools) {
 			util.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -1216,7 +1220,7 @@ func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, 
 	}
 
 	result := bufferStream(resp.Body)
-	writeJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
+	util.WriteJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
 }
 
 func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) {
@@ -1265,7 +1269,7 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 		return
 	}
 
-	writeJSON(w, http.StatusOK, restoreToolCallNamesJSON(openaiBody, toolNameRestore))
+	util.WriteJSON(w, http.StatusOK, restoreToolCallNamesJSON(openaiBody, toolNameRestore))
 }
 
 func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName string, w http.ResponseWriter) {
@@ -1514,13 +1518,6 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 	if err := adapter.StreamOpenAIToAnthropicSSE(resp.Body, newRestoringWriter(w, toolNameRestore), modelName); err != nil {
 		p.log.Printf("openai stream error: %v", err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	data, _ := json.Marshal(v)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(data)
 }
 
 func (p *Proxy) injectSystemPrompt(body map[string]any) {

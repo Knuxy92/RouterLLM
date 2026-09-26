@@ -82,10 +82,7 @@ function gotoModel(name) {
 
 function gotoProvider(name) {
   go("providers")
-  setTimeout(() => openProvider(name, () => {
-    $("#provider-drawer").classList.add("open")
-    $("#pd-scrim").classList.add("open")
-  }), 80)
+  setTimeout(() => openProvider(name), 80)
 }
 
 function draw(q) {

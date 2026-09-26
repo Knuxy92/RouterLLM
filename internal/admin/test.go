@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"routerllm/internal/services"
+	"routerllm/internal/util"
 )
 
 const (
@@ -85,5 +86,5 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		Timeout:   time.Duration(timeout) * time.Second,
 	})
 
-	writeJSON(w, http.StatusOK, result)
+	util.WriteJSON(w, http.StatusOK, result)
 }

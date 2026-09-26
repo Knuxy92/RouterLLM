@@ -15,6 +15,7 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/services"
 	"routerllm/internal/telemetry"
+	"routerllm/internal/util"
 )
 
 const adminDisabledMessage = "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it"
@@ -96,7 +97,7 @@ func (d Deps) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, nonce, expiresIn := d.Sessions.Challenge()
-	writeJSON(w, http.StatusOK, map[string]any{"challenge_id": id, "nonce": nonce, "expires_in": expiresIn})
+	util.WriteJSON(w, http.StatusOK, map[string]any{"challenge_id": id, "nonce": nonce, "expires_in": expiresIn})
 }
 
 func (d Deps) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
@@ -115,18 +116,18 @@ func (d Deps) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"session": session, "expires_in": expiresIn})
+	util.WriteJSON(w, http.StatusOK, map[string]any{"session": session, "expires_in": expiresIn})
 }
 
 func (d Deps) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	session := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	d.Sessions.Logout(session)
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, d.buildStatus())
+	util.WriteJSON(w, http.StatusOK, d.buildStatus())
 }
 
 // handleRequests serves the request log two ways: ?since=<seq> returns the raw
@@ -135,14 +136,14 @@ func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
 // newest-first slice — the console only pulls the page it renders.
 func (d Deps) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if d.Telemetry == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"entries": []telemetry.Event{}, "latest": uint64(0)})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"entries": []telemetry.Event{}, "latest": uint64(0)})
 		return
 	}
 
 	q := r.URL.Query()
 	if sinceStr := q.Get("since"); sinceStr != "" {
 		since, _ := strconv.ParseUint(sinceStr, 10, 64)
-		writeJSON(w, http.StatusOK, map[string]any{"entries": d.Telemetry.Since(since), "latest": d.Telemetry.Latest()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"entries": d.Telemetry.Since(since), "latest": d.Telemetry.Latest()})
 		return
 	}
 
@@ -165,12 +166,12 @@ func (d Deps) handleRequests(w http.ResponseWriter, r *http.Request) {
 	opts.Page, _ = strconv.Atoi(q.Get("page"))
 	opts.PerPage, _ = strconv.Atoi(q.Get("per_page"))
 
-	writeJSON(w, http.StatusOK, d.Telemetry.Query(opts))
+	util.WriteJSON(w, http.StatusOK, d.Telemetry.Query(opts))
 }
 
 func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if d.Telemetry == nil {
-		writeJSON(w, http.StatusOK, map[string]any{})
+		util.WriteJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
 
@@ -191,7 +192,7 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	util.WriteJSON(w, http.StatusOK, map[string]any{
 		"global":        m.Summary("g"),
 		"global_weekly": m.SummarySince("g", time.Now().Add(-7*24*time.Hour)),
 		"providers":     providers,
@@ -202,13 +203,9 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleReload forces an immediate config reload and answers with the new status.
 func (d Deps) handleReload(w http.ResponseWriter, r *http.Request) {
-	if err := d.Reload(); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, d.buildStatus())
+	d.applyNow(w)
 }
 
 func (d Deps) handleProviderToggle(w http.ResponseWriter, r *http.Request) {
@@ -297,7 +294,7 @@ func (d Deps) handleKeyToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, d.buildStatus())
+	util.WriteJSON(w, http.StatusOK, d.buildStatus())
 }
 
 func (d Deps) handleRouteMove(w http.ResponseWriter, r *http.Request) {
@@ -394,7 +391,7 @@ func (d Deps) applyNow(w http.ResponseWriter) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, d.buildStatus())
+	util.WriteJSON(w, http.StatusOK, d.buildStatus())
 }
 
 func decodeJSON(r *http.Request, target any) error {
@@ -403,12 +400,6 @@ func decodeJSON(r *http.Request, target any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(target)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(payload)
-}
-
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"message": message, "code": status}})
+	util.WriteJSON(w, status, map[string]any{"error": map[string]any{"message": message, "code": status}})
 }

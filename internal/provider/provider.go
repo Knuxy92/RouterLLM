@@ -2,7 +2,7 @@ package provider
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -165,7 +165,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 	for m := range modelSet {
 		models = append(models, m)
 	}
-	sort.Strings(models)
+	slices.Sort(models)
 
 	return &Registry{providers: providers, routes: routes, models: models, configs: configs, rules: rules, skipped: skipped}
 }
