@@ -56,6 +56,11 @@ func LoadFile(path string) (*Config, error) {
 	return loadYAML(path)
 }
 
+const (
+	defaultPort     = "1765"
+	defaultCooldown = 60 * time.Second
+)
+
 func loadYAML(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -99,10 +104,10 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 
 	port := yc.Port
 	if port == "" {
-		port = "1765"
+		port = defaultPort
 	}
 
-	cooldown := 60 * time.Second
+	cooldown := defaultCooldown
 	if yc.Cooldown != "" {
 		d, err := time.ParseDuration(yc.Cooldown)
 		if err != nil {

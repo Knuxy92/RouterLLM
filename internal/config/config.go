@@ -71,13 +71,21 @@ func validatePort(port string) error {
 	return nil
 }
 
+const (
+	transportMaxIdleConns        = 100
+	transportMaxIdleConnsPerHost = 10
+	transportIdleConnTimeout     = 90 * time.Second
+	transportRespHeaderTimeout   = 600 * time.Second
+	transportTLSHandshakeTimeout = 10 * time.Second
+)
+
 func newTransport() *http.Transport {
 	return &http.Transport{
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 600 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
+		MaxIdleConns:          transportMaxIdleConns,
+		MaxIdleConnsPerHost:   transportMaxIdleConnsPerHost,
+		IdleConnTimeout:       transportIdleConnTimeout,
+		ResponseHeaderTimeout: transportRespHeaderTimeout,
+		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
 	}
 }
 

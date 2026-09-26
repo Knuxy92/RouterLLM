@@ -24,6 +24,13 @@ import (
 	"routerllm/internal/util"
 )
 
+const (
+	serverReadHeaderTimeout = 10 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+	shutdownTimeout         = 10 * time.Second
+	metricsPruneInterval    = time.Hour
+)
+
 func main() {
 	_ = util.LoadDotenv(".env")
 
@@ -156,8 +163,8 @@ func main() {
 			Addr:              ":" + port,
 			Handler:           adminMux,
 			TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
-			ReadHeaderTimeout: 10 * time.Second,
-			IdleTimeout:       120 * time.Second,
+			ReadHeaderTimeout: serverReadHeaderTimeout,
+			IdleTimeout:       serverIdleTimeout,
 		}
 		go func() {
 			logger.Printf("admin console (TLS) on :%s — cert %s, key %s", port, certPath, keyPath)
@@ -183,7 +190,7 @@ func main() {
 	go reloader.Watch(watchCtx)
 
 	go func() {
-		ticker := time.NewTicker(time.Hour)
+		ticker := time.NewTicker(metricsPruneInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -198,8 +205,8 @@ func main() {
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		IdleTimeout:       serverIdleTimeout,
 	}
 
 	go func() {
@@ -214,7 +221,7 @@ func main() {
 	<-quit
 	logger.Println("shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Fatal("server forced to shutdown:", err)

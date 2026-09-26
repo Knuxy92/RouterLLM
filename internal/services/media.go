@@ -117,17 +117,22 @@ func (p *Proxy) fetchMedia(pv *provider.Provider, rawURL string, budget *mediaBu
 		req.Header.Set(key, value)
 	}
 	key := pv.Keys.LiveKey()
-	switch pv.AuthMode {
-	case "both":
-		req.Header.Set("Authorization", "Bearer "+key)
-		req.Header.Set("x-api-key", key)
-	case "x-api-key":
-		req.Header.Set("x-api-key", key)
-	default:
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
+	applyAuthHeaders(req.Header, key, pv.AuthMode)
 
 	return p.doMedia(req, budget)
+}
+
+// applyAuthHeaders attaches a provider credential in the configured auth mode.
+func applyAuthHeaders(h http.Header, key, authMode string) {
+	switch authMode {
+	case "both":
+		h.Set("Authorization", "Bearer "+key)
+		h.Set("x-api-key", key)
+	case "x-api-key":
+		h.Set("x-api-key", key)
+	default:
+		h.Set("Authorization", "Bearer "+key)
+	}
 }
 
 // fetchMediaNoAuth fetches a public URL without provider credentials.

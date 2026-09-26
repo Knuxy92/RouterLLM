@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// ttftReservoirCap bounds the TTFT samples kept per bucket.
+const ttftReservoirCap = 64
+
 // bucketStats accumulates one 5-minute slice of traffic for one series key.
 type bucketStats struct {
 	req      int
@@ -24,7 +27,7 @@ func (b *bucketStats) add(e Event) {
 	b.tokens += e.TokensOut
 	b.duration += e.DurationMS
 	if e.TTFTMS > 0 {
-		if len(b.ttft) < 64 {
+		if len(b.ttft) < ttftReservoirCap {
 			b.ttft = append(b.ttft, e.TTFTMS)
 		} else {
 			// Reservoir-of-one replacement keeps late samples fresh without

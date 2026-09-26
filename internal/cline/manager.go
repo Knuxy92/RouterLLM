@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	clientUserAgent = "Cline/3.0.47"
 	clientVersion   = "3.0.47"
+	clientUserAgent = "Cline/" + clientVersion
 )
 
 type Manager struct {

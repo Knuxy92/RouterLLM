@@ -29,6 +29,22 @@ import (
 
 const maxRetries = 3
 
+const (
+	// maxRequestBodyBytes caps the buffered client body per request.
+	maxRequestBodyBytes = 10 << 20
+	// maxBriefBodyLen caps how much of a request body is echoed into traces.
+	maxBriefBodyLen = 500
+	// retryBackoffBaseMS is the exponential backoff base between retries.
+	retryBackoffBaseMS = 100
+
+	// googleAPIKeyHeader carries Google-style credentials.
+	googleAPIKeyHeader = "x-goog-api-key"
+)
+
+// openCodeTokenKeys lists the token-cap fields the OpenCode gateway floor
+// applies to, across every inbound dialect.
+var openCodeTokenKeys = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
+
 // The alysis gateway enforces OpenAI's 128-tool cap and rejects larger
 // requests with a generic invalid-request error, so the guard fires before
 // the upstream call and the client gets an actionable 400 instead.
@@ -64,7 +80,7 @@ var hopByHopHeaders = map[string]bool{
 var clientCredentialHeaders = map[string]bool{
 	"authorization":       true,
 	"x-api-key":           true,
-	"x-goog-api-key":      true,
+	googleAPIKeyHeader:    true,
 	"cookie":              true,
 	"cookie2":             true,
 	"proxy-authorization": true,
@@ -549,7 +565,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	if pv.Style == "opencode" {
 		// The gateway rejects token caps below 16, which the admin test panel
 		// happily lets through.
-		clampOpenCodeMaxTokens(routeBody, "max_tokens", "max_completion_tokens", "max_output_tokens")
+		clampOpenCodeMaxTokens(routeBody, openCodeTokenKeys...)
 		switch route.Dialect() {
 		case "chat":
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
@@ -770,7 +786,7 @@ func servedKey(resp *http.Response, pv *provider.Provider) string {
 		return ""
 	}
 	if pv.Style == "google" {
-		return resp.Request.Header.Get("x-goog-api-key")
+		return resp.Request.Header.Get(googleAPIKeyHeader)
 	}
 	if key := strings.TrimPrefix(resp.Request.Header.Get("Authorization"), "Bearer "); key != "" && key != resp.Request.Header.Get("Authorization") {
 		return key
@@ -784,7 +800,7 @@ func requestID(r *http.Request) string {
 }
 
 func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, forceStream bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read request body: "+err.Error())
@@ -1011,20 +1027,12 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				}
 				codex.SetHeaders(req.Header, token)
 			} else if pv.Style == "google" {
-				req.Header.Set("x-goog-api-key", key)
+				req.Header.Set(googleAPIKeyHeader, key)
 			} else if pv.Style == "opencode" {
 				opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID())
 				req.Header.Set("Authorization", "Bearer "+key)
 			} else {
-				switch pv.AuthMode {
-				case "both":
-					req.Header["Authorization"] = []string{"Bearer " + key}
-					req.Header["x-api-key"] = []string{key}
-				case "x-api-key":
-					req.Header["x-api-key"] = []string{key}
-				default:
-					req.Header.Set("Authorization", "Bearer "+key)
-				}
+				applyAuthHeaders(req.Header, key, pv.AuthMode)
 			}
 
 			r2, err := p.client.Do(req)
@@ -1121,8 +1129,8 @@ func briefBody(body []byte) string {
 		return ""
 	}
 	s := string(body)
-	if len(s) > 500 {
-		s = s[:500] + "..."
+	if len(s) > maxBriefBodyLen {
+		s = s[:maxBriefBodyLen] + "..."
 	}
 	return s
 }
@@ -1179,7 +1187,7 @@ func respSummary(r *http.Response) string {
 }
 
 func (p *Proxy) backoff(ctx context.Context, retry int) bool {
-	d := time.Duration(100*(1<<retry)) * time.Millisecond
+	d := time.Duration(retryBackoffBaseMS*(1<<retry)) * time.Millisecond
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {

@@ -14,6 +14,12 @@ import (
 const (
 	WorkOSClientID = "client_01K3A541FN8TA3EPPHTD2325AR"
 	tokenSkew      = time.Minute
+	// pollIntervalFloor is the slowest cadence accepted for device polling.
+	pollIntervalFloor = 5 * time.Second
+	// slowDownBump adds to the poll interval after a slow_down response.
+	slowDownBump = 5 * time.Second
+	// deviceExpiryFallback seconds apply when the server omits ExpiresIn.
+	deviceExpiryFallback = 300
 )
 
 type Endpoints struct {
@@ -113,7 +119,7 @@ type workosToken struct {
 func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (string, string, error) {
 	minInterval := c.MinPollInterval
 	if minInterval <= 0 {
-		minInterval = 5 * time.Second
+		minInterval = pollIntervalFloor
 	}
 	interval := time.Duration(device.Interval) * time.Second
 	if interval < minInterval {
@@ -121,7 +127,7 @@ func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (string
 	}
 	expiresIn := device.ExpiresIn
 	if expiresIn <= 0 {
-		expiresIn = 300
+		expiresIn = deviceExpiryFallback
 	}
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
 
@@ -151,7 +157,7 @@ func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (string
 		switch token.Error {
 		case "authorization_pending":
 		case "slow_down":
-			interval += 5 * time.Second
+			interval += slowDownBump
 		default:
 			message := token.ErrorDesc
 			if message == "" {

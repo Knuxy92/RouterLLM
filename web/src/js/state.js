@@ -9,8 +9,10 @@ import { adaptLogs, adaptModels, adaptProviders } from "./data.js"
 // immediately, then is replaced by the API's fresh Status; on failure the
 // state rolls back by re-fetching /status.
 
-const POLL_MS = 3000
-const RING_CAP = 2000
+// Shared knobs: poll cadence (also rendered into the LIVE badge) and the
+// newest-first delta-ring cap (also the CSV export page size).
+export const POLL_MS = 3000
+export const RING_CAP = 2000
 
 let lastStatus = null
 let lastMetrics = null

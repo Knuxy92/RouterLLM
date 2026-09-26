@@ -28,6 +28,11 @@ const (
 	defaultTokenTTL   = 3600
 	defaultDeviceTTL  = 900
 	tokenSkew         = time.Minute
+
+	// pollIntervalFloor is the slowest cadence accepted for device polling.
+	pollIntervalFloor = 5 * time.Second
+	// slowDownBump adds to the poll interval after a slow_down response.
+	slowDownBump = 5 * time.Second
 )
 
 type Endpoints struct {
@@ -49,11 +54,11 @@ func DefaultEndpoints() Endpoints {
 }
 
 type DeviceAuth struct {
-	DeviceAuthID            string
-	UserCode                string
-	VerificationURI         string
-	Interval                int
-	ExpiresAt               time.Time
+	DeviceAuthID    string
+	UserCode        string
+	VerificationURI string
+	Interval        int
+	ExpiresAt       time.Time
 }
 
 type Token struct {
@@ -194,7 +199,7 @@ func (c *Client) PollDeviceToken(ctx context.Context, device DeviceAuth) (Token,
 		switch payload.Error.Code {
 		case "deviceauth_authorization_pending":
 		case "deviceauth_slow_down":
-			interval += 5 * time.Second
+			interval += slowDownBump
 		default:
 			if decodeErr != nil {
 				return Token{}, fmt.Errorf("decode codex device token: %w", decodeErr)
@@ -245,7 +250,7 @@ func (c *Client) exchangeDeviceCode(ctx context.Context, code, verifier string) 
 func (c *Client) pollInterval(device DeviceAuth) time.Duration {
 	minInterval := c.MinPollInterval
 	if minInterval <= 0 {
-		minInterval = 5 * time.Second
+		minInterval = pollIntervalFloor
 	}
 
 	interval := time.Duration(device.Interval) * time.Second

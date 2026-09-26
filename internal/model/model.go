@@ -72,6 +72,12 @@ type Message struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
+// Object types stamped on every OpenAI chat response shape.
+const (
+	ChatCompletionObject      = "chat.completion"
+	ChatCompletionChunkObject = "chat.completion.chunk"
+)
+
 type RequestDefaults struct {
 	ReasoningEffort string `yaml:"reasoning_effort"`
 	EnableThinking  *bool  `yaml:"enable_thinking,omitempty"`

@@ -29,7 +29,9 @@ const (
 	// so fresh records append instead of tripping rotation on every call.
 	maxRewriteBytes = maxFileSize / 2
 	// Longest jsonl line the replay reads; longer lines are skipped whole.
-	maxLineSize = 1 << 20
+	// defaultPerPage is the page size for Query when the caller omits one.
+	defaultPerPage = 50
+	maxLineSize    = 1 << 20
 	// Free-form identifier fields (model, request id, attempt note) are clamped
 	// to this many bytes.
 	maxFieldSize = 512
@@ -428,7 +430,7 @@ func (s *Store) Query(o QueryOpts) Page {
 
 	perPage := o.PerPage
 	if perPage <= 0 {
-		perPage = 50
+		perPage = defaultPerPage
 	}
 	if perPage > ringCapacity {
 		perPage = ringCapacity

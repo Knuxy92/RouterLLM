@@ -52,11 +52,14 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 	}
 	req["messages"] = messages
 
-	maxTokens := 4096
+	maxTokens := defaultAnthropicMaxTokens
 	explicitMaxTokens := false
-	if mt, ok := body["max_tokens"]; ok {
-		maxTokens = intValue(mt, maxTokens)
-		explicitMaxTokens = true
+	for _, key := range maxTokenKeys {
+		if mt, ok := body[key]; ok {
+			maxTokens = intValue(mt, maxTokens)
+			explicitMaxTokens = true
+			break
+		}
 	}
 	effort, _ := body["reasoning_effort"].(string)
 	budget := intValue(body["thinking_budget"], 0)
@@ -67,7 +70,7 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 				if explicitMaxTokens {
 					budget = maxTokens - 1
 				} else {
-					maxTokens = budget + 1024
+					maxTokens = budget + thinkingHeadroom
 				}
 			}
 			thinking["budget_tokens"] = budget
@@ -90,6 +93,15 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 	data, err := json.Marshal(req)
 	return data, "/v1/messages", err
 }
+
+// maxTokenKeys lists the OpenAI token-cap fields accepted on inbound bodies;
+// the first present key wins.
+var maxTokenKeys = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
+
+const (
+	defaultAnthropicMaxTokens = 4096
+	thinkingHeadroom          = 1024
+)
 
 func intValue(v any, fallback int) int {
 	switch n := v.(type) {
@@ -248,7 +260,7 @@ func BufferAnthropicToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 
 	result := model.ChatCompletionResponse{
 		ID:      msgID,
-		Object:  "chat.completion",
+		Object:  model.ChatCompletionObject,
 		Created: time.Now().Unix(),
 		Model:   upModel,
 		Choices: []model.Choice{{
@@ -283,7 +295,7 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 	writeDelta := func(delta model.Delta, finish *string) {
 		writeChunk(model.StreamChunk{
 			ID:      msgID,
-			Object:  "chat.completion.chunk",
+			Object:  model.ChatCompletionChunkObject,
 			Created: created,
 			Model:   modelName,
 			Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
@@ -352,7 +364,7 @@ func StreamAnthropicToOpenAI(src io.Reader, dst http.ResponseWriter, modelName s
 				}
 				writeChunk(model.StreamChunk{
 					ID:      msgID,
-					Object:  "chat.completion.chunk",
+					Object:  model.ChatCompletionChunkObject,
 					Created: created,
 					Model:   modelName,
 					Choices: []model.StreamChoice{{

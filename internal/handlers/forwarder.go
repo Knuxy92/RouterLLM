@@ -13,6 +13,9 @@ import (
 	"routerllm/internal/util"
 )
 
+// chatCompletionsPath is the OpenAI chat endpoint the handler forwards.
+const chatCompletionsPath = "/v1/chat/completions"
+
 type Handlers struct {
 	proxy *services.Proxy
 }
@@ -22,7 +25,7 @@ func New(proxy *services.Proxy) *Handlers {
 }
 
 func (h *Handlers) ChatCompletions(w http.ResponseWriter, r *http.Request) {
-	h.proxy.Forward("/v1/chat/completions", w, r)
+	h.proxy.Forward(chatCompletionsPath, w, r)
 }
 
 func (h *Handlers) Responses(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +63,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	modelName := extractModel(raw)
 	reqID := r.Header.Get("X-Request-Id")
 
-	resp, route, toolNameRestore, err := h.proxy.ForwardRaw("/v1/chat/completions", r, reqBody)
+	resp, route, toolNameRestore, err := h.proxy.ForwardRaw(chatCompletionsPath, r, reqBody)
 	if resp != nil {
 		defer resp.Body.Close()
 

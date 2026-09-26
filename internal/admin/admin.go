@@ -17,6 +17,8 @@ import (
 	"routerllm/internal/telemetry"
 )
 
+const adminDisabledMessage = "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it"
+
 type Deps struct {
 	Registry  func() *provider.Registry
 	Reload    func() error
@@ -72,7 +74,7 @@ func (d Deps) requireSession() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(os.Getenv("ROUTERLLM_ADMIN_TOKEN")) == "" {
-				writeError(w, http.StatusForbidden, "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it")
+				writeError(w, http.StatusForbidden, adminDisabledMessage)
 				return
 			}
 
@@ -89,7 +91,7 @@ func (d Deps) requireSession() func(http.Handler) http.Handler {
 
 func (d Deps) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(os.Getenv("ROUTERLLM_ADMIN_TOKEN")) == "" {
-		writeError(w, http.StatusForbidden, "admin API is disabled — set ROUTERLLM_ADMIN_TOKEN to enable it")
+		writeError(w, http.StatusForbidden, adminDisabledMessage)
 		return
 	}
 

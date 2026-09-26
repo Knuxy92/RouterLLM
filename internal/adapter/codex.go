@@ -66,7 +66,7 @@ func TranslateCodexRequest(body map[string]any, modelName string) ([]byte, strin
 			name, _ := msg["name"].(string)
 			input = append(input, map[string]any{
 				"type":    "function_call_output",
-				"call_id": "fc_" + name,
+				"call_id": functionCallIDPrefix + name,
 				"output":  codexTextContent(msg["content"]),
 			})
 		}
@@ -204,7 +204,7 @@ func codexAssistantCalls(msg map[string]any) []any {
 		args, _ := legacy["arguments"].(string)
 		items = append(items, map[string]any{
 			"type":      "function_call",
-			"call_id":   "fc_" + name,
+			"call_id":   functionCallIDPrefix + name,
 			"name":      name,
 			"arguments": args,
 		})
@@ -632,7 +632,7 @@ func newCodexStreamSink(dst io.Writer, modelName string) *codexStreamSink {
 func (s *codexStreamSink) write(delta model.Delta, finish *string, usage json.RawMessage) {
 	data, _ := json.Marshal(model.StreamChunk{
 		ID:      s.id,
-		Object:  "chat.completion.chunk",
+		Object:  model.ChatCompletionChunkObject,
 		Created: s.created,
 		Model:   s.model,
 		Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
@@ -770,7 +770,7 @@ func BufferCodexToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 
 	result := model.ChatCompletionResponse{
 		ID:      newCodexChatID(),
-		Object:  "chat.completion",
+		Object:  model.ChatCompletionObject,
 		Created: time.Now().Unix(),
 		Model:   modelName,
 		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
@@ -792,10 +792,17 @@ func StreamCodexToAnthropicSSE(src io.Reader, dst http.ResponseWriter, modelName
 	_ = StreamOpenAIToAnthropicSSE(pr, dst, modelName)
 }
 
+const (
+	// functionCallIDPrefix is the legacy Responses function-call id prefix.
+	functionCallIDPrefix = "fc_"
+	// chatCompletionIDPrefix starts every synthesized chat completion id.
+	chatCompletionIDPrefix = "chatcmpl-"
+)
+
 func newCodexChatID() string {
 	var buf [12]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		return fmt.Sprintf("chatcmpl-%024x", time.Now().UnixNano())
+		return chatCompletionIDPrefix + fmt.Sprintf("%024x", time.Now().UnixNano())
 	}
-	return "chatcmpl-" + hex.EncodeToString(buf[:])
+	return chatCompletionIDPrefix + hex.EncodeToString(buf[:])
 }

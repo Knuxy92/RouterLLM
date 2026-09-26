@@ -82,11 +82,10 @@ func TranslateResponsesRequest(body map[string]any, modelName string) ([]byte, s
 
 	req["input"] = input
 
-	if v, ok := body["max_tokens"]; ok {
-		req["max_output_tokens"] = intValue(v, 0)
-	}
-	if v, ok := body["max_completion_tokens"]; ok {
-		req["max_output_tokens"] = intValue(v, 0)
+	for _, key := range maxTokenKeys {
+		if v, ok := body[key]; ok {
+			req["max_output_tokens"] = intValue(v, 0)
+		}
 	}
 	for _, key := range []string{"temperature", "top_p"} {
 		if v, ok := body[key]; ok {
@@ -431,7 +430,7 @@ func BufferResponsesToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 	}
 
 	if msgID == "" && content.Len() == 0 && reasoning.Len() == 0 && len(toolCalls) == 0 {
-		return json.Marshal(map[string]any{"object": "chat.completion", "choices": []any{}})
+		return json.Marshal(map[string]any{"object": model.ChatCompletionObject, "choices": []any{}})
 	}
 
 	for i := range toolCalls {
@@ -450,7 +449,7 @@ func BufferResponsesToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 
 	result := model.ChatCompletionResponse{
 		ID:      msgID,
-		Object:  "chat.completion",
+		Object:  model.ChatCompletionObject,
 		Created: created,
 		Model:   modelName,
 		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
@@ -472,11 +471,11 @@ func StreamResponsesToOpenAI(src io.Reader, dst io.Writer, modelName string) err
 
 	writeChunk := func(delta map[string]any, finish *string, usage json.RawMessage) {
 		if msgID == "" {
-			msgID = fmt.Sprintf("chatcmpl-responses-%d", created)
+			msgID = chatCompletionIDPrefix + fmt.Sprintf("responses-%d", created)
 		}
 		data, _ := json.Marshal(responsesChunk{
 			ID:      msgID,
-			Object:  "chat.completion.chunk",
+			Object:  model.ChatCompletionChunkObject,
 			Created: created,
 			Model:   modelName,
 			Choices: []responsesChoice{{Index: 0, Delta: delta, FinishReason: finish}},

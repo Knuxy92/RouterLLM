@@ -20,6 +20,8 @@ import {
   getStatus,
   getUptimeSeconds,
   loadLogsPage,
+  POLL_MS,
+  RING_CAP,
   moveLeg,
   reloadConfig,
   removeLeg,
@@ -32,6 +34,21 @@ import {
 } from "./state.js";
 
 export const $ = (s) => document.querySelector(s);
+
+// Mirrors the server-side reasoning whitelist (internal/admin editor.go).
+const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const STYLECALLS = ["chat", "responses", "messages"];
+
+// Mirrors the server caps in internal/admin/test.go.
+const TEST_MAX_TOKENS = 8192;
+const TEST_DEFAULT_TOKENS = 256;
+const TEST_TIMEOUT_FLOOR = 5;
+const TEST_TIMEOUT_CEILING = 120;
+const TEST_DEFAULT_TIMEOUT = 20;
+const TEST_DEFAULT_PROMPT = "Say 'pong' and nothing else.";
+
+const ALL_PROVIDERS = "All providers";
+const ALL_MODELS = "All models";
 
 export const $$ = (s) => document.querySelectorAll(s);
 
@@ -693,9 +710,9 @@ export function openProvider(name, onOpened) {
           <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Call style</span><div id="pd-test-stylecall" class="dd"></div></div>
-          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc("Say 'pong' and nothing else.")}</textarea></div>
-          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="8192" value="256" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
-          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="5" max="120" value="20" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc(TEST_DEFAULT_PROMPT)}</textarea></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="${TEST_MAX_TOKENS}" value="${TEST_DEFAULT_TOKENS}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="${TEST_TIMEOUT_FLOOR}" max="${TEST_TIMEOUT_CEILING}" value="${TEST_DEFAULT_TIMEOUT}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
         </div>
         <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
         <div id="pd-test-result" class="mt-3 hidden"></div>
@@ -748,7 +765,7 @@ export function openProvider(name, onOpened) {
     });
     buildDD(
       "pd-test-effort",
-      ["(none)", "none", "low", "medium", "high", "xhigh", "max", "ultra"],
+      ["(none)", ...EFFORTS],
       "(none)",
       (v) => {
         testEffort = v === "(none)" ? "" : v;
@@ -756,7 +773,7 @@ export function openProvider(name, onOpened) {
     );
     buildDD(
       "pd-test-stylecall",
-      ["(auto)", "chat", "responses", "messages"],
+      ["(auto)", ...STYLECALLS],
       "(auto)",
       (v) => {
         testStylecall = v === "(auto)" ? "" : v;
@@ -773,9 +790,9 @@ export function openProvider(name, onOpened) {
       const body = {
         model: testModel,
         prompt: $("#pd-test-prompt").value,
-        max_tokens: clamp($("#pd-test-max-tokens").value, 1, 8192, 256),
+        max_tokens: clamp($("#pd-test-max-tokens").value, 1, TEST_MAX_TOKENS, TEST_DEFAULT_TOKENS),
         effort: testEffort,
-        timeout_seconds: clamp($("#pd-test-timeout").value, 5, 120, 20),
+        timeout_seconds: clamp($("#pd-test-timeout").value, TEST_TIMEOUT_FLOOR, TEST_TIMEOUT_CEILING, TEST_DEFAULT_TIMEOUT),
       };
       if (testStylecall) body.stylecall = testStylecall;
       e.currentTarget.disabled = true;
@@ -850,12 +867,12 @@ export function openLegDialog(modelName) {
   );
   buildDD(
     "leg-dialog-effort",
-    ["(none)", "none", "low", "medium", "high", "xhigh", "max"],
+    ["(none)", ...EFFORTS],
     "(none)",
   );
   buildDD(
     "leg-dialog-stylecall",
-    ["(auto)", "chat", "responses", "messages"],
+    ["(auto)", ...STYLECALLS],
     "(auto)",
   );
   $("#leg-dialog-upstream").value = "";
@@ -893,8 +910,8 @@ const csvQuote = (v) => {
 function logFilterFromState() {
   const f = getLogFilters();
   return {
-    provider: f.provider || "All providers",
-    model: f.model || "All models",
+    provider: f.provider || ALL_PROVIDERS,
+    model: f.model || ALL_MODELS,
     level: f.level || "All",
     range:
       Object.entries(RANGE_HOURS).find(([, h]) => h === (f.hours || 24))?.[0] ??
@@ -990,11 +1007,11 @@ function buildLogDropdowns() {
   const f = logFilterFromState();
   const stale = {};
   if (!providers.some((p) => p.name === f.provider)) {
-    f.provider = "All providers";
+    f.provider = ALL_PROVIDERS;
     if (getLogFilters().provider) stale.provider = "";
   }
   if (!models.some((m) => m.name === f.model)) {
-    f.model = "All models";
+    f.model = ALL_MODELS;
     if (getLogFilters().model) stale.model = "";
   }
 
@@ -1005,22 +1022,22 @@ function buildLogDropdowns() {
 
   buildDD(
     "dd-provider",
-    ["All providers", ...providers.map((p) => p.name)],
+    [ALL_PROVIDERS, ...providers.map((p) => p.name)],
     f.provider,
     (v) => {
       const cur = logFilterFromState();
       if (v === cur.provider) return;
-      setLogFilter({ provider: v === "All providers" ? "" : v });
+      setLogFilter({ provider: v === ALL_PROVIDERS ? "" : v });
     },
   );
   buildDD(
     "dd-model",
-    ["All models", ...models.map((m) => m.name)],
+    [ALL_MODELS, ...models.map((m) => m.name)],
     f.model,
     (v) => {
       const cur = logFilterFromState();
       if (v === cur.model) return;
-      setLogFilter({ model: v === "All models" ? "" : v });
+      setLogFilter({ model: v === ALL_MODELS ? "" : v });
     },
   );
 }
@@ -1172,7 +1189,7 @@ export function initDynamic() {
     badge.className = paused ? "badge tone-warn" : "badge tone-ok";
     badge.innerHTML = paused
       ? `<span class="dot dot-warn"></span>PAUSED`
-      : `<span class="dot dot-live"></span>LIVE · auto-refresh 3s`;
+      : `<span class="dot dot-live"></span>LIVE · auto-refresh ${POLL_MS / 1000}s`;
     refreshIcons();
   });
 
@@ -1184,7 +1201,7 @@ export function initDynamic() {
       const f = getLogFilters();
       const res = await api.requestsPage({
         page: 1,
-        perPage: 2000,
+        perPage: RING_CAP,
         provider: f.provider,
         model: f.model,
         level: f.level,

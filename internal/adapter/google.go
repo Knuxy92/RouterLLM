@@ -94,11 +94,10 @@ func TranslateGoogleRequestWithResolver(body map[string]any, modelName string, r
 	}
 
 	gen := map[string]any{}
-	if v, ok := body["max_tokens"]; ok {
-		gen["maxOutputTokens"] = intValue(v, 0)
-	}
-	if v, ok := body["max_completion_tokens"]; ok {
-		gen["maxOutputTokens"] = intValue(v, 0)
+	for _, key := range maxTokenKeys {
+		if v, ok := body[key]; ok {
+			gen["maxOutputTokens"] = intValue(v, 0)
+		}
 	}
 	for _, key := range []string{"temperature", "top_p", "presence_penalty", "frequency_penalty"} {
 		if v, ok := body[key]; ok {
@@ -567,7 +566,7 @@ func BufferGoogleToOpenAI(src io.Reader, modelName string) ([]byte, error) {
 
 	result := model.ChatCompletionResponse{
 		ID:      msgID,
-		Object:  "chat.completion",
+		Object:  model.ChatCompletionObject,
 		Created: time.Now().Unix(),
 		Model:   modelName,
 		Choices: []model.Choice{{Index: 0, Message: msg, FinishReason: finish}},
@@ -590,7 +589,7 @@ func StreamGoogleToOpenAI(src io.Reader, dst io.Writer, modelName string) error 
 	writeChunk := func(delta model.Delta, finish *string) {
 		data, _ := json.Marshal(model.StreamChunk{
 			ID:      msgID,
-			Object:  "chat.completion.chunk",
+			Object:  model.ChatCompletionChunkObject,
 			Created: created,
 			Model:   modelName,
 			Choices: []model.StreamChoice{{Index: 0, Delta: delta, FinishReason: finish}},
@@ -621,7 +620,7 @@ func StreamGoogleToOpenAI(src io.Reader, dst io.Writer, modelName string) error 
 		if msgID == "" {
 			msgID = chunk.ResponseID
 			if msgID == "" {
-				msgID = fmt.Sprintf("chatcmpl-google-%d", created)
+				msgID = chatCompletionIDPrefix + fmt.Sprintf("google-%d", created)
 			}
 		}
 		if chunk.UsageMetadata != nil {
@@ -680,7 +679,7 @@ func StreamGoogleToOpenAI(src io.Reader, dst io.Writer, modelName string) error 
 
 	if usage != nil {
 		data, _ := json.Marshal(model.StreamChunk{
-			ID: msgID, Object: "chat.completion.chunk", Created: created, Model: modelName,
+			ID: msgID, Object: model.ChatCompletionChunkObject, Created: created, Model: modelName,
 			Choices: []model.StreamChoice{{Index: 0, Delta: model.Delta{}}},
 			Usage:   usage,
 		})
