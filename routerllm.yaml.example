@@ -10,8 +10,9 @@
 #   - If the env var contains commas, it auto-splits into multiple keys
 #   - Also supports .env file (loaded automatically if present)
 #
-# All provider fields (style, base_url, headers, auth_mode, share, query)
-# must be specified in YAML — there are no hardcoded defaults.
+# All provider fields (style, base_url, headers, share, query) must be
+# specified in YAML. Only auth_mode (bearer) and reasoning_style (openai)
+# fall back to code defaults.
 # =============================================================================
 
 # --- Server settings ---------------------------------------------------------

@@ -8,7 +8,7 @@
 <link rel="icon" href="/admin/favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <script src="/admin/vendor/lucide.min.js"></script>
   <script type="module" crossorigin src="/admin/assets/index-DFcmJObW.js"></script>
   <link rel="stylesheet" crossorigin href="/admin/assets/index-DrTfncZw.css">
@@ -174,7 +174,7 @@
         <div class="mb-5 grid gap-3 lg:grid-cols-3">
           <div class="min-w-0 rounded-lg border bg-card p-5 shadow-sm lg:col-span-2">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-y-1">
-              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p id="traffic-sub" class="text-xs text-muted-foreground">Requests vs upstream errors · 2-hour buckets</p></div>
+              <div><p class="text-sm font-medium">Traffic &amp; failures</p><p id="traffic-sub" class="text-xs text-muted-foreground">Requests vs upstream errors · hourly buckets</p></div>
               <div class="flex items-center gap-3 text-xs text-muted-foreground">
                 <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-primary"></span>requests</span>
                 <span class="flex items-center gap-1.5"><span class="h-0.5 w-3 rounded bg-destructive"></span>errors</span>
@@ -328,7 +328,7 @@
     <button id="pd-close" class="rounded-md border p-1.5 hover:bg-accent"><i data-lucide="x" class="size-4"></i></button>
   </div>
   <div id="pd-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
-</aside>
+</aside>
 
 <!-- global search / command palette -->
 <dialog id="cmdk" class="cmdk-dialog">

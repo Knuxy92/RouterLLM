@@ -433,7 +433,7 @@ The repository includes `requests.http` for VS Code REST Client or JetBrains HTT
 
 1. Start the server: `go run ./cmd/routerllm`
 2. Open `requests.http`
-3. Set your `ROUTERLLM_AUTH` variable (e.g. `Authorization: Bearer <key>`)
+3. Set your `AUTHTOKEN` variable (e.g. `Authorization: Bearer <key>`)
 4. Send requests via the inline "Send Request" links
 
 Or use curl directly:
