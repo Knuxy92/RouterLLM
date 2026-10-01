@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 )
 
 type errorResponse struct {
@@ -34,47 +33,26 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 	}})
 }
 
-func WriteUpstreamError(w http.ResponseWriter, status int, body []byte) {
-	var response errorResponse
-	if err := json.Unmarshal(body, &response); err == nil && response.Error.Message != "" {
-		if response.Error.Code == "" {
-			response.Error.Code = "upstream_error"
-		}
-		if response.Error.Type == "" {
-			response.Error.Type = errorType(status)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(response)
+func WriteOverloadedError(w http.ResponseWriter) {
+	WriteError(w, http.StatusServiceUnavailable, "model_overloaded", "model is currently overloaded, please retry shortly")
+}
+
+// WriteUpstreamError maps an upstream failure to a generic client-facing
+// error. The upstream body is intentionally not reflected: it may carry
+// provider names, model mappings, or quota internals. Raw detail stays in
+// server logs and admin telemetry.
+func WriteUpstreamError(w http.ResponseWriter, status int) {
+	if status == http.StatusTooManyRequests {
+		WriteError(w, status, "rate_limited", "rate limit exceeded, please retry shortly")
 		return
 	}
 
-	var anthropicResponse struct {
-		Error errorBody `json:"error"`
-	}
-	if err := json.Unmarshal(body, &anthropicResponse); err == nil && anthropicResponse.Error.Message != "" {
-		code := anthropicResponse.Error.Code
-		if code == "" {
-			code = "upstream_error"
-		}
-		WriteError(w, status, code, anthropicResponse.Error.Message)
+	if status >= 400 && status < 500 {
+		WriteError(w, status, "invalid_request", http.StatusText(status))
 		return
 	}
 
-	var googleResponse struct {
-		Error struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &googleResponse); err == nil && googleResponse.Error.Message != "" {
-		WriteError(w, status, "upstream_error", googleResponse.Error.Message)
-		return
-	}
-
-	message := strings.TrimSpace(string(body))
-	WriteError(w, status, "upstream_error", message)
+	WriteError(w, http.StatusBadGateway, "upstream_error", "service temporarily unavailable, please retry shortly")
 }
 
 func errorType(status int) string {

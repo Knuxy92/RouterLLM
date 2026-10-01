@@ -175,7 +175,7 @@ func TestMessagesNormalizesUpstreamErrors(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"code":"upstream_error"`) || !strings.Contains(w.Body.String(), `"message":"bad request"`) {
+	if !strings.Contains(w.Body.String(), `"code":"invalid_request"`) || !strings.Contains(w.Body.String(), `"message":"Bad Request"`) {
 		t.Fatalf("unexpected error body: %s", w.Body.String())
 	}
 }

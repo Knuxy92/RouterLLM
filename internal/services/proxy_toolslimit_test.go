@@ -67,8 +67,11 @@ func TestAlysisRejectsRequestsOverToolLimit(t *testing.T) {
 	if captured() != nil {
 		t.Fatalf("upstream must not be called for requests over the tool limit")
 	}
-	if !strings.Contains(rec.Body.String(), "too many tools") || !strings.Contains(rec.Body.String(), "129") {
-		t.Fatalf("error should name the limit and the tool count; body: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "too many tools") {
+		t.Fatalf("error should be actionable without internals; body: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "129") || strings.Contains(rec.Body.String(), "alysis") {
+		t.Fatalf("error leaked tool count or provider; body: %s", rec.Body.String())
 	}
 }
 

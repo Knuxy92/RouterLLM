@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -52,7 +53,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 
 	var reqBody map[string]any
 	if err := json.Unmarshal(openaiBody, &reqBody); err != nil {
-		util.WriteError(w, http.StatusInternalServerError, "translation_error", "internal translation error: "+err.Error())
+		util.WriteError(w, http.StatusInternalServerError, "translation_error", "internal translation error")
 		return
 	}
 	reqBody["stream"] = true
@@ -70,7 +71,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 		ct := resp.Header.Get("Content-Type")
 		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
 			eb := services.ReadErrorBody(resp.Body)
-			util.WriteUpstreamError(w, resp.StatusCode, services.TruncateErrorBody(eb))
+			util.WriteUpstreamError(w, resp.StatusCode)
 
 			note := ""
 			if err != nil {
@@ -103,8 +104,13 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
-		h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, ""))
+		if errors.Is(err, services.ErrModelOverloaded) {
+			util.WriteOverloadedError(w)
+			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusServiceUnavailable, err.Error(), 0, ""))
+		} else {
+			util.WriteError(w, http.StatusBadGateway, "upstream_error", "service temporarily unavailable, please retry shortly")
+			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, ""))
+		}
 		return
 	}
 }

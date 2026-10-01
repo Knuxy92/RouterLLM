@@ -1,5 +1,6 @@
 import { STATUS_META, adaptLogs, esc, fmtDur } from "./data.js"
 import { getRequests, getState } from "./state.js"
+import { go } from "./router.js"
 import { $, closeDialog, openDialog, openProvider, openTrace, refreshIcons } from "./render.js"
 
 // Global ⌘K palette: pages, models, providers and log lines — usable from any page.
@@ -62,11 +63,6 @@ function collect(q) {
   }
 
   return out
-}
-
-function go(page) {
-  if (location.hash === "#/" + page) return
-  location.hash = "#/" + page
 }
 
 function gotoModel(name) {

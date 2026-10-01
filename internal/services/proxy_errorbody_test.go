@@ -38,10 +38,10 @@ func TestTruncateErrorBodyCapsAt16KiB(t *testing.T) {
 	}
 }
 
-// TestUpstreamErrorBodyEchoIsBounded serves a 1 MiB error body from a fake
-// upstream and checks the client-visible error payload stays within the
-// 16 KiB echo cap.
-func TestUpstreamErrorBodyEchoIsBounded(t *testing.T) {
+// TestUpstreamErrorBodyNotReflected serves a 1 MiB error body from a fake
+// upstream and checks the client gets a small generic error instead of any
+// upstream content.
+func TestUpstreamErrorBodyNotReflected(t *testing.T) {
 	huge := strings.Repeat("x", 1<<20)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -62,20 +62,18 @@ func TestUpstreamErrorBodyEchoIsBounded(t *testing.T) {
 
 	var parsed struct {
 		Error struct {
+			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
 		t.Fatalf("client error payload is not JSON: %v", err)
 	}
-	if parsed.Error.Message == "" {
-		t.Fatal("client error message is empty")
+	if parsed.Error.Code != "invalid_request" || parsed.Error.Message != "Bad Request" {
+		t.Fatalf("client error not generic: %+v", parsed.Error)
 	}
-	if len(parsed.Error.Message) > maxClientErrorBytes {
-		t.Fatalf("client error message = %d bytes, want <= %d", len(parsed.Error.Message), maxClientErrorBytes)
-	}
-	if w.Body.Len() > maxClientErrorBytes+512 {
-		t.Fatalf("client error payload = %d bytes, want bounded", w.Body.Len())
+	if strings.Contains(w.Body.String(), huge[:64]) {
+		t.Fatal("client error reflected upstream body")
 	}
 }
 

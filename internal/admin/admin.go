@@ -195,6 +195,16 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	util.WriteJSON(w, http.StatusOK, map[string]any{
 		"global":        m.Summary("g"),
 		"global_weekly": m.SummarySince("g", time.Now().Add(-7*24*time.Hour)),
+		"global_prev": m.SummaryBetween(
+			"g",
+			time.Now().Add(-48*time.Hour),
+			time.Now().Add(-24*time.Hour),
+		),
+		"global_weekly_prev": m.SummaryBetween(
+			"g",
+			time.Now().Add(-14*24*time.Hour),
+			time.Now().Add(-7*24*time.Hour),
+		),
 		"providers":     providers,
 		"legs":          legs,
 		"models":        models,

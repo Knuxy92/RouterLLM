@@ -237,10 +237,10 @@ func TestGoogleUpstreamErrorIsNormalized(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), `"message":"Invalid JSON payload received."`) {
-		t.Fatalf("google error not normalized: %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("google error not sanitized to generic: %s", w.Body.String())
 	}
-	if strings.Contains(w.Body.String(), "INVALID_ARGUMENT") {
+	if strings.Contains(w.Body.String(), "INVALID_ARGUMENT") || strings.Contains(w.Body.String(), "Invalid JSON payload") {
 		t.Fatalf("raw google error leaked: %s", w.Body.String())
 	}
 }

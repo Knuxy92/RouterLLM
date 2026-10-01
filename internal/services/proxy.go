@@ -54,6 +54,11 @@ var (
 	errTooManyTools     = errors.New("too many tools")
 	errModelNotFound    = errors.New("model not found")
 	errRequestCancelled = errors.New("request cancelled")
+
+	// ErrModelOverloaded marks exhaustion of every route leg. The wrapped
+	// detail (provider, status) stays in logs and telemetry; the client
+	// funnel maps this sentinel to a generic 503.
+	ErrModelOverloaded = errors.New("model overloaded")
 )
 
 var deadStatuses = map[int]bool{
@@ -481,7 +486,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		}
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
-			lastErr = fmt.Errorf("all keys exhausted for %s via %s (status=%d)", modelName, pv.Name, status)
+			lastErr = fmt.Errorf("%w: all keys exhausted for %s via %s (status=%d)", ErrModelOverloaded, modelName, pv.Name, status)
 			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted", RespBody: telemetry.ClampBody(errBody, telemetry.RespBodyCap)}
 			if trace != nil && attempt.RespBody != "" {
 				trace.setLastBody(attempt.RespBody)
@@ -832,7 +837,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 
 		if resp.StatusCode != http.StatusOK {
 			eb := ReadErrorBody(resp.Body)
-			util.WriteUpstreamError(w, resp.StatusCode, TruncateErrorBody(eb))
+			util.WriteUpstreamError(w, resp.StatusCode)
 			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0, telemetry.ClampBody(eb, telemetry.RespBodyCap)))
 			return
 		}
@@ -875,10 +880,13 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		} else if errors.Is(err, errRequestCancelled) {
 			return
 		} else if errors.Is(err, errTooManyTools) {
-			util.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			util.WriteError(w, http.StatusBadRequest, "invalid_request", "too many tools: reduce the number of tools or split the request")
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadRequest, err.Error(), 0, ""))
+		} else if errors.Is(err, ErrModelOverloaded) {
+			util.WriteOverloadedError(w)
+			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusServiceUnavailable, err.Error(), 0, trace.LastBody()))
 		} else {
-			util.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+			util.WriteError(w, http.StatusBadGateway, "upstream_error", "service temporarily unavailable, please retry shortly")
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, trace.LastBody()))
 		}
 		return
@@ -1142,7 +1150,9 @@ func briefBody(body []byte) string {
 const (
 	// maxErrorBodyRead bounds how much of an upstream error body is captured.
 	maxErrorBodyRead = 64 << 10
-	// maxClientErrorBytes bounds the upstream error text echoed to a client.
+	// maxClientErrorBytes bounds the upstream error text kept for the
+	// TruncateErrorBody helper (unit-tested, no live callers since client
+	// errors went generic).
 	maxClientErrorBytes = 16 << 10
 )
 
@@ -1265,7 +1275,8 @@ func (p *Proxy) serveAnthropic(resp *http.Response, clientStream bool, modelName
 
 	openaiBody, err := adapter.BufferAnthropicToOpenAI(resp.Body, modelName)
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		p.log.Printf("failed to translate anthropic response: %v", err)
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response")
 		return
 	}
 
@@ -1285,7 +1296,8 @@ func (p *Proxy) serveGoogle(resp *http.Response, clientStream bool, modelName st
 
 	openaiBody, err := adapter.BufferGoogleToOpenAI(resp.Body, modelName)
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		p.log.Printf("failed to translate google response: %v", err)
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response")
 		return
 	}
 
@@ -1310,7 +1322,8 @@ func (p *Proxy) serveResponsesAsChat(resp *http.Response, clientStream bool, mod
 
 	data, err := adapter.BufferResponsesToOpenAI(resp.Body, modelName)
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		p.log.Printf("failed to translate responses response: %v", err)
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response")
 		return
 	}
 
@@ -1334,7 +1347,8 @@ func (p *Proxy) serveCodex(resp *http.Response, clientStream bool, modelName str
 
 	openaiBody, err := adapter.BufferCodexToOpenAI(resp.Body, modelName)
 	if err != nil {
-		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response: "+err.Error())
+		p.log.Printf("failed to translate codex response: %v", err)
+		util.WriteError(w, http.StatusBadGateway, "translation_error", "failed to translate response")
 		return
 	}
 

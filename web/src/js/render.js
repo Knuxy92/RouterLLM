@@ -103,7 +103,7 @@ function providerCard(p, agg) {
   const s = STATUS_META[p.status];
   const p50 = agg[p.name];
   return `
-    <div data-provider="${esc(p.name)}" title="Click to see TTFT by model" class="cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md${p.on ? "" : " opacity-60"}">
+    <div data-provider="${esc(p.name)}" class="cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md${p.on ? "" : " opacity-60"}">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2"><span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${esc(p.name)}</p><span class="badge ${s.badge}">${s.label}</span></div>
         <input type="checkbox" class="sw" data-action="provider-toggle" data-name="${esc(p.name)}" ${p.on ? "checked" : ""} />
@@ -111,7 +111,7 @@ function providerCard(p, agg) {
       <dl class="mt-3 flex flex-col gap-1.5 text-xs">
         <div class="flex justify-between"><dt class="text-muted-foreground">Keys</dt><dd class="font-mono">${keyLine(p)}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Requests 24h</dt><dd class="font-mono">${p.req}</dd></div>
-        <div class="flex justify-between"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="font-mono">${p50 ? fmtDur(p50) : "—"}</dd></div>
+        <div class="flex justify-between"><dt class="text-muted-foreground"><span class="has-tip" data-tip="Median time to first token, weighted by request count across this provider's models · click the card for the per-model breakdown">TTFT p50 · weighted</span></dt><dd class="font-mono">${p50 ? fmtDur(p50) : "—"}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Errors 24h</dt><dd class="font-mono">${p.err}</dd></div>
         <div class="flex justify-between"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="font-mono">${p.up}</dd></div>
       </dl>
@@ -246,8 +246,8 @@ function renderTrafficChart() {
   if (dashSub)
     dashSub.textContent =
       chartRange === "7d"
-        ? "Live overview of the router — last 7 days."
-        : "Live overview of the router — last 24 hours.";
+        ? "Live overview of the router | last 7 days."
+        : "Live overview of the router | last 24 hours.";
 
   if (!series.some((s) => s.req > 0)) {
     wrap.innerHTML = `<p class="flex h-56 items-center justify-center text-xs text-muted-foreground">No traffic recorded yet.</p>`;
@@ -273,34 +273,56 @@ function renderTrafficChart() {
 
 function renderKpis() {
   const weekly = chartRange === "7d";
-  const g = weekly ? getMetrics()?.global_weekly : getMetrics()?.global;
+  const metrics = getMetrics();
+  const g = weekly ? metrics?.global_weekly : metrics?.global;
+  const prev = weekly ? metrics?.global_weekly_prev : metrics?.global_prev;
   const set = (id, html) => {
     const el = $("#" + id);
     if (el) el.innerHTML = html;
   };
+
+  const hasPrev = prev && prev.req > 0;
+
+  const deltaChip = (cur, before, fmt, invert) => {
+    if (cur == null || before == null || !hasPrev) return "";
+    const d = cur - before;
+    if (d === 0) return `<span class="delta delta-flat has-tip" data-tip="No change vs previous ${weekly ? "7 days" : "24 hours"}">±0</span>`;
+    const good = invert ? d < 0 : d > 0;
+    const cls = good ? "delta-up" : "delta-down";
+    const arrow = d > 0 ? "↑" : "↓";
+    return `<span class="delta ${cls} has-tip" data-tip="vs previous ${weekly ? "7 days" : "24 hours"}">${arrow}${fmt(Math.abs(d))}</span>`;
+  };
+
   const errPct = g && g.req > 0 ? ((g.err / g.req) * 100).toFixed(2) : null;
   set("kpi-req-label", `Requests ${weekly ? "7d" : "24h"}`);
-  set("kpi-req", fmtInt(g?.req ?? 0));
+  set("kpi-req", `${fmtInt(g?.req ?? 0)}${deltaChip(g?.req ?? 0, prev?.req, fmtInt)}`);
   set("kpi-req-sub", `${getStatus()?.models_serving ?? 0} models serving`);
   set(
     "kpi-success",
-    g && g.req > 0 ? `${g.success_pct}<span class="text-sm">%</span>` : "—",
+    g && g.req > 0
+      ? `${g.success_pct}<span class="text-sm">%</span>${deltaChip(g.success_pct, prev?.success_pct, (v) => v.toFixed(1) + "%")}`
+      : "—",
   );
   set(
     "kpi-success-sub",
     g && g.req > 0 ? `${fmtInt(g.req - g.err)} ok` : "no traffic yet",
   );
-  set("kpi-ttft", g?.ttft_p50_ms ? fmtDur(g.ttft_p50_ms) : "—");
+  set(
+    "kpi-ttft",
+    g?.ttft_p50_ms
+      ? `${fmtDur(g.ttft_p50_ms)}${deltaChip(g.ttft_p50_ms, prev?.ttft_p50_ms, fmtDur, true)}`
+      : "—",
+  );
   set("kpi-ttft-sub", g?.ttft_p95_ms ? `p95 ${fmtDur(g.ttft_p95_ms)}` : "");
   set(
     "kpi-tok",
     g?.tok_per_sec
-      ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>`
+      ? `${fmtInt(Math.round(g.tok_per_sec))}<span class="text-sm"> tok/s</span>${deltaChip(g.tok_per_sec, prev?.tok_per_sec, (v) => fmtInt(Math.round(v)))}`
       : "—",
   );
   set("kpi-tok-sub", g?.tokens ? `${fmtInt(g.tokens)} tokens out` : "");
   set("kpi-err-label", `Errors ${weekly ? "7d" : "24h"}`);
-  set("kpi-err", fmtInt(g?.err ?? 0));
+  set("kpi-err", `${fmtInt(g?.err ?? 0)}${deltaChip(g?.err ?? 0, prev?.err, fmtInt, true)}`);
   set("kpi-err-sub", errPct != null ? `${errPct}% of requests` : "");
 }
 
@@ -379,7 +401,15 @@ export function openTrace(e) {
   }
 
   // Captured upstream error bodies (2 KB cap per attempt) — this is the
-  // debugging payload when a request fails.
+  // debugging payload when a request fails. Pretty-print JSON bodies so an
+  // error like {"error":{...}} reads indented instead of one long line.
+  const formatBody = (s) => {
+    try {
+      return JSON.stringify(JSON.parse(s), null, 2);
+    } catch {
+      return s;
+    }
+  };
   const bodies = [];
   (e.attempts || []).forEach((a) => {
     if (a.resp_body)
@@ -404,7 +434,7 @@ export function openTrace(e) {
             (b) => `
         <div class="mb-2 rounded-md border bg-muted/30 p-3">
           <p class="mb-1.5 font-mono text-[11px] font-medium text-muted-foreground">${esc(b.label)}</p>
-          <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-foreground">${esc(b.body)}</pre>
+          <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-foreground">${esc(formatBody(b.body))}</pre>
         </div>`,
           )
           .join("");
@@ -623,13 +653,13 @@ export function openProvider(name) {
     `<span class="dot ${s.dot}"></span><p class="text-sm font-semibold">${esc(p.name)}</p><span class="badge ${s.badge}">${s.label}</span>`;
 
   const summary = `
-    <dl class="mb-4 grid grid-cols-3 gap-2.5 text-xs">
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">TTFT p50 · weighted</dt><dd class="mt-1 font-mono text-lg font-semibold">${agg ? fmtDur(agg) : "—"}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Requests 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.req}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Errors 24h</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.err}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Keys</dt><dd class="mt-1 font-mono">${keyLine(p)}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Uptime 24h</dt><dd class="mt-1 font-mono">${p.up}</dd></div>
-      <div class="rounded-md border bg-muted/30 p-2.5"><dt class="text-muted-foreground">Models served</dt><dd class="mt-1 font-mono text-lg font-semibold">${p.model_count ?? rows.length}</dd></div>
+    <dl class="mb-5 grid grid-cols-3 gap-3 text-xs">
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="Median time to first token, weighted by request count across this provider's models">TTFT p50 · weighted</span></dt><dd class="mt-1.5 font-mono text-base font-semibold">${agg ? fmtDur(agg) : "—"}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="Total routed requests in the last 24 hours">Requests 24h</span></dt><dd class="mt-1.5 font-mono text-base font-semibold">${p.req}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="Upstream failures in the last 24 hours">Errors 24h</span></dt><dd class="mt-1.5 font-mono text-base font-semibold">${p.err}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="API keys enabled out of configured total">Keys</span></dt><dd class="mt-1.5 font-mono">${keyLine(p)}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="Share of 5-minute buckets with at least one success">Uptime 24h</span></dt><dd class="mt-1.5 font-mono">${p.up}</dd></div>
+      <div class="rounded-md border bg-muted/30 p-3"><dt class="text-muted-foreground"><span class="has-tip tip-below" data-tip="Distinct upstream models routed through this provider">Models served</span></dt><dd class="mt-1.5 font-mono text-base font-semibold">${p.model_count ?? rows.length}</dd></div>
     </dl>`;
 
   const table =
@@ -637,14 +667,14 @@ export function openProvider(name) {
       ? `<div class="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">No models are currently routed through this provider.</div>`
       : `
     <div class="overflow-x-auto rounded-md border">
-      <table class="w-full min-w-[520px] text-left text-xs">
+      <table class="w-full min-w-[480px] text-left text-xs">
         <thead>
           <tr class="border-b bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-            <th class="px-3 py-2 font-medium">Model</th>
-            <th class="px-3 py-2 text-right font-medium">Requests</th>
-            <th class="px-3 py-2 font-medium">TTFT p50</th>
-            <th class="px-3 py-2 text-right font-medium">p95</th>
-            <th class="px-3 py-2 text-right font-medium">Tok/s</th>
+            <th class="px-4 py-2.5 font-medium">Model</th>
+            <th class="px-4 py-2.5 text-right font-medium"><span class="has-tip tip-below" data-tip="Requests through this model in the last 24 hours, with share of provider total">Requests</span></th>
+            <th class="px-4 py-2.5 font-medium"><span class="has-tip tip-below tip-left" data-tip="Median time to first token for this model">TTFT p50</span></th>
+            <th class="px-4 py-2.5 text-right font-medium"><span class="has-tip tip-below" data-tip="95th percentile time to first token — the slow tail">p95</span></th>
+            <th class="px-4 py-2.5 text-right font-medium"><span class="has-tip tip-below tip-right" data-tip="Output tokens per second">Tok/s</span></th>
           </tr>
         </thead>
         <tbody class="divide-y">
@@ -653,13 +683,13 @@ export function openProvider(name) {
               const slowest = rows.length > 1 && r.p50 === slowestP50;
               return `
             <tr>
-              <td class="px-3 py-2 font-mono">${esc(r.modelId)}
-                <div class="mt-1.5 h-1.5 w-28 rounded-full bg-muted"><div class="h-1.5 rounded-full ${slowest ? "bg-amber-500" : "bg-primary"}" style="width:${Math.round((r.p50 / maxP50) * 100)}%"></div></div>
+              <td class="px-4 py-2.5 font-mono">${esc(r.modelId)}
+                <div class="mt-1.5 h-1.5 w-full max-w-28 rounded-full bg-muted"><div class="h-1.5 rounded-full ${slowest ? "bg-amber-500" : "bg-primary"}" style="width:${Math.round((r.p50 / maxP50) * 100)}%"></div></div>
               </td>
-              <td class="px-3 py-2 text-right font-mono">${fmtInt(r.req)}<span class="block text-[10px] text-muted-foreground">${totalReq ? Math.round((r.req / totalReq) * 100) : 0}% share</span></td>
-              <td class="px-3 py-2 font-mono">${r.p50 ? fmtDur(r.p50) : "—"}${slowest ? ' <span class="badge tone-warn">slowest</span>' : ""}</td>
-              <td class="px-3 py-2 text-right font-mono">${r.p95 ? fmtDur(r.p95) : "—"}</td>
-              <td class="px-3 py-2 text-right font-mono">${r.tps || "—"}</td>
+              <td class="px-4 py-2.5 text-right font-mono">${fmtInt(r.req)}<span class="block text-[10px] text-muted-foreground">${totalReq ? Math.round((r.req / totalReq) * 100) : 0}% share</span></td>
+              <td class="px-4 py-2.5 font-mono">${r.p50 ? `<span class="${slowest ? "font-semibold text-amber-500" : ""} has-tip tip-below" data-tip="${slowest ? "Slowest TTFT p50 in this provider · bar is relative to this value" : "Median time to first token"}">${fmtDur(r.p50)}</span>` : "—"}</td>
+              <td class="px-4 py-2.5 text-right font-mono">${r.p95 ? fmtDur(r.p95) : "—"}</td>
+              <td class="px-4 py-2.5 text-right font-mono">${r.tps || "—"}</td>
             </tr>`;
             })
             .join("")}
@@ -726,13 +756,16 @@ export function openProvider(name) {
     </div>
     <div id="pd-analytics" class="mt-3 hidden"></div>`;
 
-  $("#pd-body").innerHTML =
+  const body = $("#pd-body");
+  body.classList.add("fresh");
+  body.innerHTML =
     summary +
     `<p class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">TTFT by model</p>` +
     table +
     keysSection +
     testSection +
     analyticsBar;
+  requestAnimationFrame(() => body.classList.remove("fresh"));
 
   $("#pd-analytics-btn").addEventListener("click", () => {
     const box = $("#pd-analytics");
@@ -1178,10 +1211,11 @@ export function initDynamic() {
       ? `<i data-lucide="play" class="size-3.5"></i>Resume`
       : `<i data-lucide="pause" class="size-3.5"></i>Pause`;
     const badge = $("#log-live-badge");
-    badge.className = paused ? "badge tone-warn" : "badge tone-ok";
+    badge.className =
+      "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground";
     badge.innerHTML = paused
-      ? `<span class="dot dot-warn"></span>PAUSED`
-      : `<span class="dot dot-live"></span>LIVE · auto-refresh ${POLL_MS / 1000}s`;
+      ? `<span class="dot dot-warn"></span>paused`
+      : `<span class="dot dot-live"></span>auto-refresh ${POLL_MS / 1000}s`;
     refreshIcons();
   });
 

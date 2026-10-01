@@ -65,8 +65,8 @@ func TestErrorEventCapturesUpstreamBody(t *testing.T) {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
 	e := events[0]
-	if e.Status != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", e.Status)
+	if e.Status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", e.Status)
 	}
 	if !strings.Contains(e.RespBody, "credit balance too low") {
 		t.Fatalf("event resp_body missing upstream message: %q", e.RespBody)

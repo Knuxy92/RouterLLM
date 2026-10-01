@@ -174,6 +174,17 @@
 .chart-tip { display: none; position: absolute; z-index: 20; top: 4px; transform: translateX(-50%); pointer-events: none; border-radius: .375rem; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); padding: .375rem .5rem; font-size: 11px; line-height: 1.5; white-space: nowrap; box-shadow: 0 4px 12px hsl(240 10% 4% / .25); }
 .chart-tip.show, .chart-guide.show { display: block; }
 
+.has-tip { position: relative; cursor: help; }
+.has-tip::after { content: attr(data-tip); display: none; position: absolute; z-index: 60; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); max-width: min(16rem, calc(100vw - 3rem)); width: max-content; white-space: normal; overflow-wrap: anywhere; border-radius: .375rem; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); padding: .375rem .5rem; font-size: 11px; font-weight: 400; line-height: 1.5; text-align: left; box-shadow: 0 4px 12px hsl(240 10% 4% / .25); }
+.has-tip:hover::after, .has-tip:focus-visible::after { display: block; }
+.tip-below::after { bottom: auto; top: calc(100% + 6px); }
+.tip-left::after { left: 0; transform: none; }
+.tip-right::after { left: auto; right: 0; transform: none; }
+.delta { font-size: 10px; font-weight: 500; margin-left: .375rem; white-space: nowrap; }
+.delta-up { color: hsl(142 70% 45%); }
+.delta-down { color: hsl(var(--destructive)); }
+.delta-flat { color: hsl(var(--muted-foreground)); }
+
 /* --- add-failover-leg dialog + small animations ---------------------------- */
 
 .leg-dialog { margin: auto; overflow: visible; border: 1px solid hsl(var(--border)); border-radius: .5rem; background: hsl(var(--card)); color: hsl(var(--foreground)); padding: 0; width: min(24rem, calc(100vw - 2rem)); box-shadow: 0 20px 40px -12px hsl(240 10% 4% / .35); }
@@ -182,7 +193,7 @@
 .leg-dialog .dd { display: block; }
 .leg-dialog .dd-btn { width: 100%; justify-content: space-between; padding: .5rem .625rem; font-size: .875rem; }
 .leg-dialog .dd-menu { width: 100%; }
-#pd-body > * { animation: dd-fade-up .28s ease both; }
+#pd-body.fresh > * { animation: dd-fade-up .28s ease both; }
 
 @keyframes dd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes dd-pop { from { opacity: 0; transform: translateY(8px) scale(.97) } to { opacity: 1; transform: none } }

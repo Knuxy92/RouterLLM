@@ -1,5 +1,6 @@
 import { api, clearToken, getToken } from "./api.js"
 import { closeDrawers, stopUptimeTicker } from "./render.js"
+import { go } from "./router.js"
 import { resetState, stopPolling } from "./state.js"
 
 // Auth gate: challenge–response handshake. The admin secret never crosses the
@@ -75,7 +76,7 @@ export function wireAuth({ onAuthed }) {
     clearToken()
     resetState()
     closeDrawers()
-    location.hash = "#/dashboard"
+    go("dashboard")
     showLogin()
   })
 

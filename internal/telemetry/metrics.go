@@ -175,14 +175,20 @@ func (m *Metrics) Summary(name string) Summary {
 // SummarySince rolls the series over the buckets at or after since (5-minute
 // bucket granularity).
 func (m *Metrics) SummarySince(name string, since time.Time) Summary {
+	return m.SummaryBetween(name, since, time.Now().Add(time.Hour))
+}
+
+// SummaryBetween rolls the series over buckets in [from, to).
+func (m *Metrics) SummaryBetween(name string, from time.Time, to time.Time) Summary {
 	src := m.series(name)
-	cutoff := bucketStart(since)
+	lo := bucketStart(from)
+	hi := bucketStart(to)
 
 	var acc bucketStats
 	up := 0
 	total := 0
 	for start, b := range src {
-		if start < cutoff {
+		if start < lo || start >= hi {
 			continue
 		}
 		acc.req += b.req
