@@ -54,19 +54,20 @@ providers:
     # share: ""                             # shared key group name (optional)
     # disabled: false                       # skip this provider entirely (optional)
 
-  # --- OpenCode Zen ---
-  # style: opencode targets the OpenCode gateway: it injects the tool set the
-  # gateway requires (renaming client tools whose names collide with those),
-  # and sends the OpenCode client identity headers (User-Agent plus a fresh
-  # x-opencode-session / x-opencode-request per request). Auth is always
-  # Authorization: Bearer <api_key> — auth_mode is ignored for this style.
-  # Each model speaks its own dialect, so pick per leg with stylecall:
+  # --- OpenCode ---
+  # style: opencode targets the OpenCode inference gateway: it injects the tool
+  # set the gateway requires (renaming client tools whose names collide with
+  # those), and sends the OpenCode client identity headers (User-Agent plus a
+  # fresh x-opencode-session / x-opencode-request per request — x-session-id
+  # and x-opencode-session-id aliases ride along with the same value). Auth is
+  # always Authorization: Bearer <api_key> — auth_mode is ignored for this
+  # style. Each model speaks its own dialect, so pick per leg with stylecall:
   # responses (default) / chat / messages.
 
   - name: opencode
     api_key: ${OPENCODE_API_KEY}
     style: opencode
-    base_url: https://opencode.ai/zen
+    base_url: https://opencode.ai/inference/openai
     headers:
       Content-Type: application/json
 
