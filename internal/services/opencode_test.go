@@ -51,6 +51,8 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	}
 	for _, h := range []struct{ name, prefix string }{
 		{"x-opencode-session", "ses_"},
+		{"x-session-id", "ses_"},
+		{"x-opencode-session-id", "ses_"},
 		{"x-opencode-request", "msg_"},
 	} {
 		got := r.Header.Get(h.name)

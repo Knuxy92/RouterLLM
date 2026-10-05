@@ -58,11 +58,13 @@ func TestSetHeaders(t *testing.T) {
 	SetHeaders(h, "ses_abc", "msg_def")
 
 	want := map[string]string{
-		"User-Agent":         UserAgent,
-		"X-Opencode-Session": "ses_abc",
-		"X-Opencode-Request": "msg_def",
-		"X-Opencode-Project": "global",
-		"X-Opencode-Client":  "cli",
+		"User-Agent":            UserAgent,
+		"X-Opencode-Session":    "ses_abc",
+		"X-Session-Id":          "ses_abc",
+		"X-Opencode-Session-Id": "ses_abc",
+		"X-Opencode-Request":    "msg_def",
+		"X-Opencode-Project":    "global",
+		"X-Opencode-Client":     "cli",
 	}
 	if len(h) != len(want) {
 		t.Fatalf("headers = %v, want exactly %d entries", h, len(want))

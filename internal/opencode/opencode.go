@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-const UserAgent = "opencode/1.18.32 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14"
+const UserAgent = "opencode/latest/2.0.23/cli"
 
 const (
 	// The gateway validates the session/request id shape: 26 lowercase hex
@@ -52,6 +52,10 @@ func NewRequestID() string {
 func SetHeaders(header http.Header, sessionID, requestID string) {
 	header.Set("User-Agent", UserAgent)
 	header.Set("x-opencode-session", sessionID)
+	// Alternate spellings of the session header seen on the wire; the
+	// gateway keys off whichever it knows and ignores the rest.
+	header.Set("x-session-id", sessionID)
+	header.Set("x-opencode-session-id", sessionID)
 	header.Set("x-opencode-request", requestID)
 	header.Set("x-opencode-project", "global")
 	header.Set("x-opencode-client", "cli")
