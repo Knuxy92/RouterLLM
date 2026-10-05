@@ -154,7 +154,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
@@ -209,7 +209,7 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
 		`{"model":"test-model","stream":true,"input":[{"type":"function_call","call_id":"call_0","name":"bash","arguments":"{}"}],`+
@@ -248,7 +248,7 @@ func TestForwardOpenCodeWithoutClientTools(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
@@ -400,7 +400,7 @@ func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
@@ -410,5 +410,34 @@ func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestForwardOpenCodeDefaultsToChat(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %q, want /v1/chat/completions (default dialect)", r.URL.Path)
+		}
+		assertOpenCodeHeaders(t, r)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "ok") {
+		t.Fatalf("content missing:\n%s", w.Body.String())
 	}
 }

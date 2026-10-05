@@ -71,7 +71,7 @@ func (r Route) Dialect() string {
 	case "google":
 		return "google"
 	case "opencode":
-		return "responses"
+		return "chat"
 	}
 
 	return r.Provider.Style

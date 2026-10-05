@@ -692,10 +692,11 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	return reqBody, reqPath, sessionID, toolNameRestore, err
 }
 
-// translateOpenCodeRoute builds the outbound request for style: opencode legs.
-// The gateway always speaks the Responses dialect and rejects requests without
-// its own tool set, so the required tools are injected and client tools whose
-// names collide with them are renamed (restored on the way back).
+// translateOpenCodeRoute builds the outbound request for style: opencode legs
+// whose dialect is responses (stylecall: responses — chat is the default).
+// The gateway rejects requests without its own tool set, so the required tools
+// are injected and client tools whose names collide with them are renamed
+// (restored on the way back).
 func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeBody map[string]any) (map[string]string, []byte, string, error) {
 	if path == "/v1/responses" {
 		applyLegacyDefaults(routeBody, route.Defaults)
