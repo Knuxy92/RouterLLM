@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,6 +133,67 @@ func TestRotateOnOversize(t *testing.T) {
 	}
 	if info.Size() > maxFileSize+1<<20 {
 		t.Fatalf("file did not rotate: %d bytes", info.Size())
+	}
+}
+
+func TestFailedRotationLeavesAUsableFileHandle(t *testing.T) {
+	// A rename that fails (Windows keeps the destination locked by another
+	// handle) must not leave a closed handle behind: writes would then fail
+	// silently for the rest of the process lifetime.
+	dir := t.TempDir()
+	destination := filepath.Join(dir, "telemetry.jsonl")
+
+	scratch, err := os.Create(filepath.Join(dir, "scratch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scratch.Close()
+
+	if err := os.Mkdir(destination, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "blocker"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Store{path: destination, file: scratch, metrics: NewMetrics()}
+
+	if err := s.rewrite(nil); err == nil {
+		t.Fatal("rewrite() = nil, want the rename to fail against a directory")
+	}
+
+	if s.file != nil {
+		if _, err := s.file.Write([]byte("probe\n")); err != nil {
+			t.Fatalf("file handle after a failed rotation is dead: %v", err)
+		}
+	}
+
+	// Recording must keep working either way (on disk when the handle lives,
+	// in memory when reopening failed).
+	s.Record(testEvent("alpha", "up", 200, 10))
+	if s.next != 1 {
+		t.Fatalf("seq = %d, want recording to continue after a failed rotation", s.next)
+	}
+}
+
+func TestModelSeriesAreCapped(t *testing.T) {
+	m := NewMetrics()
+
+	for i := range maxModelSeries + 200 {
+		m.Record(Event{Time: time.Now(), Model: fmt.Sprintf("client-model-%d", i), Provider: "alpha", Status: 200})
+	}
+
+	models := 0
+	for key := range m.buckets {
+		if strings.HasPrefix(key, "m:") {
+			models++
+		}
+	}
+	if models > maxModelSeries {
+		t.Fatalf("model series = %d, want at most %d — client-supplied names must not grow the map forever", models, maxModelSeries)
+	}
+	if _, ok := m.buckets["p:alpha"]; !ok {
+		t.Fatal("provider series was evicted; only client-supplied model series should be capped")
 	}
 }
 

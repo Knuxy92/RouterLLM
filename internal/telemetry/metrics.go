@@ -3,12 +3,17 @@ package telemetry
 import (
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
 // ttftReservoirCap bounds the TTFT samples kept per bucket.
 const ttftReservoirCap = 64
+
+// maxModelSeries bounds the per-model series. Model names come from the request
+// body, so without a cap a caller could grow the metrics map indefinitely.
+const maxModelSeries = 256
 
 // bucketStats accumulates one 5-minute slice of traffic for one series key.
 type bucketStats struct {
@@ -75,6 +80,9 @@ func (m *Metrics) Record(e Event) {
 	for _, key := range seriesKeys(e) {
 		series, ok := m.buckets[key]
 		if !ok {
+			if strings.HasPrefix(key, "m:") {
+				m.trimModelSeries()
+			}
 			series = make(map[int64]*bucketStats)
 			m.buckets[key] = series
 		}
@@ -85,6 +93,60 @@ func (m *Metrics) Record(e Event) {
 		}
 		b.add(e)
 	}
+}
+
+// trimModelSeries keeps the map bounded. Model names arrive from the request,
+// so a caller can mint an unlimited number of them (every 404 records the
+// client-supplied string); provider and leg series come from the config and are
+// never evicted.
+func (m *Metrics) trimModelSeries() {
+	for m.modelSeriesCount() >= maxModelSeries {
+		victim := ""
+		var victimAt int64
+
+		for key, series := range m.buckets {
+			if !strings.HasPrefix(key, "m:") {
+				continue
+			}
+			at, ok := newestBucket(series)
+			if !ok {
+				// An empty series holds no data: evict it first.
+				victim = key
+				break
+			}
+			if victim == "" || at < victimAt {
+				victim, victimAt = key, at
+			}
+		}
+		if victim == "" {
+			return
+		}
+		delete(m.buckets, victim)
+	}
+}
+
+func (m *Metrics) modelSeriesCount() int {
+	count := 0
+	for key := range m.buckets {
+		if strings.HasPrefix(key, "m:") {
+			count++
+		}
+	}
+
+	return count
+}
+
+func newestBucket(series map[int64]*bucketStats) (int64, bool) {
+	var newest int64
+	found := false
+
+	for at := range series {
+		if !found || at > newest {
+			newest, found = at, true
+		}
+	}
+
+	return newest, found
 }
 
 // Window is one contiguous slice of a series.
