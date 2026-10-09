@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -130,8 +129,11 @@ func TestClampToolSchemaDepthsFlattensDeepChatTool(t *testing.T) {
 	body := chatToolBody("deep", nestedSchema(12))
 
 	touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
-	if !reflect.DeepEqual(touched, []string{"deep"}) {
-		t.Fatalf("clamped = %v, want [deep]", touched)
+	if len(touched) != 1 || touched[0].Name != "deep" {
+		t.Fatalf("clamped = %+v, want the deep tool", touched)
+	}
+	if touched[0].After > defaultToolSchemaMaxDepth {
+		t.Fatalf("after depth = %d, want <= %d", touched[0].After, defaultToolSchemaMaxDepth)
 	}
 
 	schema := toolParameters(t, body)
@@ -189,6 +191,14 @@ func findFlattenedStub(node map[string]any) map[string]any {
 		}
 	}
 
+	for _, key := range schemaUnaryKeys {
+		if child, ok := node[key].(map[string]any); ok {
+			if found := findFlattenedStub(child); found != nil {
+				return found
+			}
+		}
+	}
+
 	for _, key := range schemaBranchKeys {
 		branches, ok := node[key].([]any)
 		if !ok {
@@ -208,9 +218,9 @@ func findFlattenedStub(node map[string]any) map[string]any {
 
 func TestClampToolSchemaDepthsKeepsDescriptiveFields(t *testing.T) {
 	parameters := map[string]any{
-		"type":        "object",
-		"properties":  map[string]any{"config": map[string]any{"type": "object", "description": "deep config", "properties": nestedSchema(10)}},
-		"required":    []any{"config"},
+		"type":                 "object",
+		"properties":           map[string]any{"config": map[string]any{"type": "object", "description": "deep config", "properties": nestedSchema(10)}},
+		"required":             []any{"config"},
 		"additionalProperties": false,
 	}
 
@@ -241,8 +251,8 @@ func TestClampToolSchemaDepthsHandlesFlatResponsesToolShape(t *testing.T) {
 	}
 
 	touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
-	if !reflect.DeepEqual(touched, []string{"flat_deep"}) {
-		t.Fatalf("clamped = %v, want [flat_deep]", touched)
+	if len(touched) != 1 || touched[0].Name != "flat_deep" {
+		t.Fatalf("clamped = %+v, want the flat_deep tool", touched)
 	}
 
 	tool := body["tools"].([]any)[0].(map[string]any)
@@ -360,4 +370,32 @@ func marshalBody(t *testing.T, body map[string]any) []byte {
 	}
 
 	return data
+}
+
+// A schema can hide its depth behind the single-schema keywords. Those were
+// neither counted nor clamped, so such a tool reached the upstream untouched
+// and the whole request came back as "nesting depth of 10 levels".
+func TestClampFlattensSchemasHiddenBehindUnaryKeywords(t *testing.T) {
+	build := func(keyword string, levels int) map[string]any {
+		schema := map[string]any{"type": "string"}
+		for i := 0; i < levels; i++ {
+			schema = map[string]any{"type": "object", keyword: schema}
+		}
+
+		return schema
+	}
+
+	for _, keyword := range []string{"additionalProperties", "not", "contains", "items"} {
+		body := chatToolBody("hidden_"+keyword, build(keyword, 12))
+
+		touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
+		if len(touched) != 1 {
+			t.Fatalf("%s: clamped = %+v, want the deep tool to be caught", keyword, touched)
+		}
+
+		schema := toolParameters(t, body)
+		if got := schemaDepth(schema); got > defaultToolSchemaMaxDepth {
+			t.Errorf("%s: depth after clamp = %d, want <= %d", keyword, got, defaultToolSchemaMaxDepth)
+		}
+	}
 }

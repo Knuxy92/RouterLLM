@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"strings"
 
 	"routerllm/internal/config"
@@ -26,20 +27,32 @@ var (
 
 	// schemaBranchKeys hold a schema or a list of alternative schemas.
 	schemaBranchKeys = []string{"anyOf", "oneOf", "allOf", "prefixItems"}
+
+	// schemaUnaryKeys hold a single sub-schema directly (not a named map). They
+	// are easy to miss and were: a tool that nested through one of them kept its
+	// full depth past the clamp, because the counter never walked in.
+	schemaUnaryKeys = []string{"additionalProperties", "additionalItems", "not", "if", "then", "else", "contains", "propertyNames", "unevaluatedItems", "unevaluatedProperties"}
 )
 
+// ClampedTool records what the clamp did to one tool, so the log line can show
+// the depth that triggered it and the depth the upstream will actually see.
+type ClampedTool struct {
+	Name   string
+	Before int
+	After  int
+}
+
 // clampToolSchemaDepths flattens every tool schema in body that nests deeper
-// than maxDepth and returns the names of the tools it touched. Both the chat
-// shape (parameters under "function") and the flat Responses shape are
-// handled, so the clamp can run once on the inbound body before the dialect
-// translation.
-func clampToolSchemaDepths(body map[string]any, maxDepth int) []string {
+// than maxDepth. Both the chat shape (parameters under "function") and the flat
+// Responses shape are handled, so the clamp can run once on the inbound body
+// before the dialect translation.
+func clampToolSchemaDepths(body map[string]any, maxDepth int) []ClampedTool {
 	tools, ok := body["tools"].([]any)
 	if !ok || maxDepth <= 0 {
 		return nil
 	}
 
-	var touched []string
+	var touched []ClampedTool
 
 	for _, entry := range tools {
 		tool, ok := entry.(map[string]any)
@@ -53,24 +66,31 @@ func clampToolSchemaDepths(body map[string]any, maxDepth int) []string {
 		}
 
 		schema, ok := holder["parameters"].(map[string]any)
-		if !ok || schemaDepth(schema) <= maxDepth {
+		if !ok {
 			continue
 		}
 
+		before := schemaDepth(schema)
+		if before <= maxDepth {
+			continue
+		}
 		if !clampSchemaInPlace(schema, 1, maxDepth) {
 			continue
 		}
 
 		name, _ := holder["name"].(string)
-		touched = append(touched, name)
+		touched = append(touched, ClampedTool{Name: name, Before: before, After: schemaDepth(schema)})
 	}
 
 	return touched
 }
 
 // schemaDepth reports how many levels a schema nests: the node itself is 1 and
-// its properties, items and branch alternatives count as the next level.
-// Anything that is not an object is a leaf.
+// every sub-schema it reaches counts as the next level — named properties,
+// array items, branch alternatives and the single-schema keywords. Anything
+// that is not an object is a leaf. The walk is deliberately exhaustive: a key
+// this function ignores is a key the clamp would let through untouched, and the
+// upstream would reject the whole request for it.
 func schemaDepth(schema any) int {
 	node, ok := schema.(map[string]any)
 	if !ok {
@@ -116,6 +136,17 @@ func schemaDepth(schema any) int {
 					depth = d
 				}
 			}
+		}
+	}
+
+	for _, key := range schemaUnaryKeys {
+		// additionalProperties is usually the boolean false, which is not a schema.
+		child, ok := node[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if d := schemaDepth(child) + 1; d > depth {
+			depth = d
 		}
 	}
 
@@ -200,6 +231,19 @@ func clampSchemaInPlace(node map[string]any, depth, maxDepth int) bool {
 		}
 	}
 
+	// The single-schema keywords must be walked here too: schemaDepth sees
+	// through them, and a key only one of the two walks knows about means a
+	// schema that looks clamped upstream but never was.
+	for _, key := range schemaUnaryKeys {
+		child, ok := node[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if clampSchemaInPlace(child, depth+1, maxDepth) {
+			changed = true
+		}
+	}
+
 	return changed
 }
 
@@ -216,6 +260,11 @@ func hasSubSchemas(node map[string]any) bool {
 	}
 	for _, key := range schemaBranchKeys {
 		if _, ok := node[key]; ok {
+			return true
+		}
+	}
+	for _, key := range schemaUnaryKeys {
+		if _, ok := node[key].(map[string]any); ok {
 			return true
 		}
 	}
@@ -243,14 +292,25 @@ func flattenedStub(node map[string]any) map[string]any {
 	return stub
 }
 
-// describeClampedTools renders clamped tool names for the log line, capped so a
-// pathological request cannot flood the log.
-func describeClampedTools(names []string) string {
+// describeClampedTools renders the clamped tools for the log line, capped so a
+// pathological request cannot flood the log. The before → after depths are
+// included because they are the only way to tell "the clamp flattened this"
+// from "the clamp missed this entirely".
+func describeClampedTools(clamped []ClampedTool) string {
 	const maxLogged = 5
 
-	if len(names) <= maxLogged {
-		return strings.Join(names, ", ")
+	parts := make([]string, 0, len(clamped))
+	for i, tool := range clamped {
+		if i == maxLogged {
+			parts = append(parts, fmt.Sprintf("+%d more", len(clamped)-maxLogged))
+			break
+		}
+		name := tool.Name
+		if name == "" {
+			name = "(unnamed)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d→%d", name, tool.Before, tool.After))
 	}
 
-	return strings.Join(names[:maxLogged], ", ") + ", …"
+	return strings.Join(parts, ", ")
 }
