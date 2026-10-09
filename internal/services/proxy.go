@@ -605,11 +605,21 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		// The gateway rejects token caps below 16, which the admin test panel
 		// happily lets through.
 		clampOpenCodeMaxTokens(routeBody, openCodeTokenKeys...)
+
+		// The gateway accepts only "auto"; "none" is honoured further down, once
+		// the required tool set has been injected.
+		forbidToolUse := clientForbidsToolUse(routeBody)
+		if replaced := forceAutoToolChoice(routeBody); replaced != "" {
+			p.log.Printf("route %s/%s: tool_choice %s rewritten to auto — the gateway rejects every other value", route.ModelName, pv.Name, replaced)
+		}
 		switch route.Dialect() {
 		case "chat":
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
 			injectMissingTools(routeBody, opencode.RequiredTools())
+			if forbidToolUse {
+				dropToolUse(routeBody)
+			}
 			routeBody["model"] = route.ModelName
 			if pv.ReasoningStyle == "raw" {
 				applyLegacyDefaults(routeBody, route.Defaults)
@@ -649,9 +659,12 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 				}
 			}
 			injectMissingAnthropicTools(doc, openCodeAnthropicTools())
+			if forbidToolUse {
+				delete(doc, "tools")
+			}
 			reqBody, err = json.Marshal(doc)
 		default: // responses
-			restore, reqBytes, reqPath2, err2 := p.translateOpenCodeRoute(route, path, routeBody)
+			restore, reqBytes, reqPath2, err2 := p.translateOpenCodeRoute(route, path, routeBody, forbidToolUse)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
 
 			return reqBytes, reqPath2, "", toolNameRestore, err2
@@ -727,11 +740,14 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 // The gateway rejects requests without its own tool set, so the required tools
 // are injected and client tools whose names collide with them are renamed
 // (restored on the way back).
-func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeBody map[string]any) (map[string]string, []byte, string, error) {
+func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeBody map[string]any, forbidToolUse bool) (map[string]string, []byte, string, error) {
 	if path == "/v1/responses" {
 		applyLegacyDefaults(routeBody, route.Defaults)
 		reverse := renameReservedResponsesNames(routeBody, openCodeReservedTools)
 		injectMissingResponsesTools(routeBody, openCodeResponsesTools())
+		if forbidToolUse {
+			dropToolUse(routeBody)
+		}
 		routeBody["model"] = route.ModelName
 
 		reqBody, err := json.Marshal(routeBody)
@@ -742,11 +758,46 @@ func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeB
 	canonicalizeReasoning(routeBody, route.Defaults)
 	reverse := renameReservedToolNames(routeBody, openCodeReservedTools)
 	injectMissingTools(routeBody, opencode.RequiredTools())
+	if forbidToolUse {
+		dropToolUse(routeBody)
+	}
 	routeBody["model"] = route.ModelName
 
 	reqBody, reqPath, err := adapter.TranslateResponsesRequest(routeBody, route.ModelName)
 
 	return reverse, reqBody, reqPath, err
+}
+
+// clientForbidsToolUse reports whether the client sent tool_choice "none".
+func clientForbidsToolUse(routeBody map[string]any) bool {
+	choice, ok := routeBody["tool_choice"].(string)
+
+	return ok && choice == "none"
+}
+
+// forceAutoToolChoice rewrites the tool_choice values the OpenCode gateway
+// rejects — everything except "auto", and "none" which is honoured by removing
+// the tools instead. It returns a description of what it replaced for the log
+// line, or an empty string when nothing needed rewriting.
+func forceAutoToolChoice(routeBody map[string]any) string {
+	choice, ok := routeBody["tool_choice"]
+	if !ok {
+		return ""
+	}
+	if text, isText := choice.(string); isText && (text == "auto" || text == "none") {
+		return ""
+	}
+
+	routeBody["tool_choice"] = "auto"
+
+	return fmt.Sprintf("%v", choice)
+}
+
+// dropToolUse removes the tool surface entirely — the only way to honour
+// tool_choice "none" on a gateway that accepts nothing but "auto".
+func dropToolUse(body map[string]any) {
+	delete(body, "tools")
+	delete(body, "tool_choice")
 }
 
 // openCodeReservedTools holds the tool names the OpenCode gateway injects

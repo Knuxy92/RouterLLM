@@ -319,6 +319,73 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 	}
 }
 
+func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
+	var upstreamBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		assertOpenCodeHeaders(t, r)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"none",`+
+			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := upstreamBody["tools"]; ok {
+		t.Errorf("upstream tools = %v, want none when the client asked for no tool use", upstreamBody["tools"])
+	}
+	if _, ok := upstreamBody["tool_choice"]; ok {
+		t.Errorf("upstream tool_choice = %v, want the field removed", upstreamBody["tool_choice"])
+	}
+}
+
+func TestForwardOpenCodeForcesAutoToolChoice(t *testing.T) {
+	var upstreamBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		assertOpenCodeHeaders(t, r)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"required",`+
+			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if got := upstreamBody["tool_choice"]; got != "auto" {
+		t.Errorf("upstream tool_choice = %v, want auto (the gateway rejects every other value)", got)
+	}
+}
+
 func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 	sanitized := openCodeSanitizedBash()
 	anthropicSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
