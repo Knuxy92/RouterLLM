@@ -173,3 +173,47 @@ func TestSanitizedToolNamesRestoredOnAnthropicFrames(t *testing.T) {
 		t.Fatalf("client must see its original tool name on Anthropic frames:\n%s", got)
 	}
 }
+
+// force_stream on a messages-dialect leg passes the upstream Anthropic frames
+// through untouched, so the restore path has to understand content_block shapes
+// as well as chat chunks.
+func TestSanitizedToolNamesRestoredOnRawAnthropicFrames(t *testing.T) {
+	longName := strings.Repeat("b", 70)
+	sanitized := uniqueSanitizedToolName(longName, map[string]bool{})
+	if sanitized == longName {
+		t.Fatalf("sanitized = %q, want a rewritten name", sanitized)
+	}
+
+	sse := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"" + sanitized + "\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, sse)
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name:    "anthropic-test",
+		BaseURL: upstream.URL,
+		Style:   "anthropic",
+		Keys:    []string{"provider-key"},
+	}}, []model.Rule{{
+		ModelID: "test-model",
+		Routes:  []model.Spec{{Provider: "anthropic-test", Model: "claude-upstream", SanitizeToolNames: true}},
+	}}, time.Minute)
+
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, false, nil, "")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":false,"messages":[{"role":"user","content":"hi"}],`+
+			`"tools":[{"type":"function","function":{"name":"`+longName+`","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if got := w.Body.String(); !strings.Contains(got, longName) {
+		t.Fatalf("client must see its original tool name on raw Anthropic frames:\n%s", got)
+	}
+}

@@ -526,11 +526,15 @@ func RestoreToolNamesWriter(w http.ResponseWriter, reverse map[string]string) ht
 }
 
 func (w *restoringWriter) Write(p []byte) (int, error) {
-	if !strings.Contains(string(p), `"tool_calls"`) {
+	payload := string(p)
+	// Two frame shapes reach this writer: chat chunks from the converters, and
+	// raw Anthropic frames on the pass-through paths (force_stream and
+	// /v1/messages), which carry content_block instead of tool_calls.
+	if !strings.Contains(payload, `"tool_calls"`) && !strings.Contains(payload, `"content_block"`) {
 		return w.ResponseWriter.Write(p)
 	}
 
-	restored := restoreSSEFrames(string(p), w.reverse)
+	restored := restoreSSEFrames(payload, w.reverse)
 	if _, err := w.ResponseWriter.Write([]byte(restored)); err != nil {
 		return 0, err
 	}
