@@ -32,6 +32,8 @@ type yamlConfig struct {
 	Cooldown             string         `yaml:"cooldown,omitempty"`
 	ForceStream          bool           `yaml:"force_stream,omitempty"`
 	DedupeTools          bool           `yaml:"dedupe_tools,omitempty"`
+	ClampToolSchemas     bool           `yaml:"clamp_tool_schemas,omitempty"`
+	ToolSchemaMaxDepth   int            `yaml:"tool_schema_max_depth,omitempty"`
 	ForwardClientHeaders *bool          `yaml:"forward_client_headers,omitempty"`
 	AllowClientHeaders   []string       `yaml:"allow_client_headers,omitempty"`
 	SystemPromptFile     string         `yaml:"system_prompt_file,omitempty"`
@@ -59,6 +61,12 @@ func LoadFile(path string) (*Config, error) {
 const (
 	defaultPort     = "1765"
 	defaultCooldown = 60 * time.Second
+
+	// DefaultToolSchemaMaxDepth is the depth budget applied to outbound tool
+	// schemas when clamp_tool_schemas is on and tool_schema_max_depth is unset.
+	// It matches the proxy-side default and stays below the gateways' own limit
+	// of 10 because the counters disagree at the edges.
+	DefaultToolSchemaMaxDepth = 8
 )
 
 func loadYAML(path string) (*Config, error) {
@@ -170,11 +178,18 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		forwardClientHeaders = *yc.ForwardClientHeaders
 	}
 
+	toolSchemaMaxDepth := yc.ToolSchemaMaxDepth
+	if toolSchemaMaxDepth <= 0 {
+		toolSchemaMaxDepth = DefaultToolSchemaMaxDepth
+	}
+
 	return &Config{
 		Port:                 port,
 		Cooldown:             cooldown,
 		ForceStream:          yc.ForceStream,
 		DedupeTools:          yc.DedupeTools,
+		ClampToolSchemas:     yc.ClampToolSchemas,
+		ToolSchemaMaxDepth:   toolSchemaMaxDepth,
 		ForwardClientHeaders: forwardClientHeaders,
 		AllowClientHeaders:   yc.AllowClientHeaders,
 		SystemPrompt:         systemPrompt,

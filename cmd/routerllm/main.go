@@ -86,6 +86,7 @@ func main() {
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
 	proxy := services.NewProxy(registry, cfg.Client, logger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt)
 	proxy.SetDedupeTools(cfg.DedupeTools)
+	proxy.SetClampToolSchemas(cfg.ClampToolSchemas, cfg.ToolSchemaMaxDepth)
 	logRegistry(logger, registry)
 	logger.Printf("loaded %d provider(s) (%d active), %d model(s), debug=%t, advanced_debug=%t, log_file=%t", registry.TotalProviders(), registry.ActiveProviders(), len(registry.AllModels()), debug, advancedDebug, logFile != nil)
 
@@ -113,6 +114,7 @@ func main() {
 		proxy.Apply(reloaded, next.SystemPrompt)
 		proxy.ApplySettings(next.ForceStream, next.ForwardClientHeaders, next.AllowClientHeaders)
 		proxy.SetDedupeTools(next.DedupeTools)
+		proxy.SetClampToolSchemas(next.ClampToolSchemas, next.ToolSchemaMaxDepth)
 		logRegistry(logger, reloaded)
 		reloadTracker.RecordSuccess()
 		logger.Printf("config reloaded: %d provider(s) (%d active), %d model(s)", reloaded.TotalProviders(), reloaded.ActiveProviders(), len(reloaded.AllModels()))

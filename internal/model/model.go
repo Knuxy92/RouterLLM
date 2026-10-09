@@ -91,6 +91,7 @@ type Spec struct {
 	StyleCall         string          `yaml:"stylecall,omitempty"`
 	SanitizeToolNames bool            `yaml:"sanitize_tool_names,omitempty"`
 	DedupeTools       bool            `yaml:"dedupe_tools,omitempty"`
+	ClampToolSchemas  bool            `yaml:"clamp_tool_schemas,omitempty"`
 	Defaults          RequestDefaults `yaml:"defaults,omitempty"`
 }
 

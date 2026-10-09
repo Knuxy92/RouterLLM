@@ -54,6 +54,7 @@ type Route struct {
 	StyleCall         string
 	SanitizeToolNames bool
 	DedupeTools       bool
+	ClampToolSchemas  bool
 	Defaults          model.RequestDefaults
 }
 
@@ -153,7 +154,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 				continue
 			}
 
-			rts = append(rts, Route{Provider: p, ModelName: spec.Model, StyleCall: spec.StyleCall, SanitizeToolNames: spec.SanitizeToolNames, DedupeTools: spec.DedupeTools, Defaults: spec.Defaults})
+			rts = append(rts, Route{Provider: p, ModelName: spec.Model, StyleCall: spec.StyleCall, SanitizeToolNames: spec.SanitizeToolNames, DedupeTools: spec.DedupeTools, ClampToolSchemas: spec.ClampToolSchemas, Defaults: spec.Defaults})
 		}
 		if len(rts) > 0 {
 			routes[rule.ModelID] = rts
