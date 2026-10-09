@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"routerllm/internal/adapter"
 	"routerllm/internal/model"
 )
 
@@ -809,27 +810,8 @@ func injectMissingAnthropicTools(doc map[string]any, required []map[string]any) 
 }
 
 // chatToolToAnthropicTool converts one chat-shaped function tool to the
-// Anthropic definition shape ({name, description, input_schema}).
+// Anthropic definition shape. The conversion lives in the adapter because the
+// request translator needs it too, and two implementations would drift.
 func chatToolToAnthropicTool(entry map[string]any) (map[string]any, bool) {
-	fn, ok := entry["function"].(map[string]any)
-	if !ok {
-		return nil, false
-	}
-
-	name, _ := fn["name"].(string)
-	if name == "" {
-		return nil, false
-	}
-
-	tool := map[string]any{"name": name}
-	if d, ok := fn["description"].(string); ok {
-		tool["description"] = d
-	}
-	if p, ok := fn["parameters"]; ok && p != nil {
-		tool["input_schema"] = p
-	} else {
-		tool["input_schema"] = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
-
-	return tool, true
+	return adapter.ChatToolToAnthropicTool(entry)
 }

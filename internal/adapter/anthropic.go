@@ -24,6 +24,16 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 
 	var systemParts []string
 	var messages []any
+	var pendingResults []any
+
+	flushResults := func() {
+		if len(pendingResults) == 0 {
+			return
+		}
+		messages = append(messages, map[string]any{"role": "user", "content": pendingResults})
+		pendingResults = nil
+	}
+
 	if msgs, ok := body["messages"].([]any); ok {
 		for _, m := range msgs {
 			msg, ok := m.(map[string]any)
@@ -37,20 +47,55 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 				}
 				continue
 			}
-			if content, ok := msg["content"]; ok {
-				converted, err := translateOpenAIContent(content, resolve)
-				if err != nil {
-					return nil, "", fmt.Errorf("message content: %w", err)
-				}
-				msg["content"] = converted
+			// Tool results arrive as their own "tool" turns; Anthropic wants them
+			// as one user turn holding every result block.
+			if role == "tool" {
+				pendingResults = append(pendingResults, toolResultBlock(msg))
+				continue
 			}
+
+			flushResults()
+
+			blocks, err := translateOpenAIContent(msg["content"], resolve)
+			if err != nil {
+				return nil, "", fmt.Errorf("message content: %w", err)
+			}
+			if calls, ok := msg["tool_calls"].([]any); ok && len(calls) > 0 {
+				blocks = append(blocks, toolUseBlocks(calls)...)
+				// Anthropic rejects unknown message fields.
+				delete(msg, "tool_calls")
+			}
+			blocks = dropEmptyTextBlocks(blocks)
+
+			msg["content"] = blocks
 			messages = append(messages, msg)
 		}
 	}
+	flushResults()
+
 	if len(systemParts) > 0 {
 		req["system"] = strings.Join(systemParts, "\n\n")
 	}
 	req["messages"] = messages
+
+	if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
+		converted := make([]any, 0, len(tools))
+		for _, entry := range tools {
+			tool, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			if convertedTool, ok := ChatToolToAnthropicTool(tool); ok {
+				converted = append(converted, convertedTool)
+			}
+		}
+		if len(converted) > 0 {
+			req["tools"] = converted
+		}
+	}
+	if choice, ok := anthropicToolChoice(body["tool_choice"]); ok {
+		req["tool_choice"] = choice
+	}
 
 	maxTokens := defaultAnthropicMaxTokens
 	explicitMaxTokens := false
@@ -97,6 +142,121 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 // maxTokenKeys lists the OpenAI token-cap fields accepted on inbound bodies;
 // the first present key wins.
 var maxTokenKeys = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
+
+// ChatToolToAnthropicTool converts one chat-shaped function tool to the
+// Anthropic definition shape ({name, description, input_schema}).
+func ChatToolToAnthropicTool(entry map[string]any) (map[string]any, bool) {
+	fn, ok := entry["function"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+
+	name, _ := fn["name"].(string)
+	if name == "" {
+		return nil, false
+	}
+
+	tool := map[string]any{"name": name}
+	if d, ok := fn["description"].(string); ok {
+		tool["description"] = d
+	}
+	if p, ok := fn["parameters"]; ok && p != nil {
+		tool["input_schema"] = p
+	} else {
+		tool["input_schema"] = map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+
+	return tool, true
+}
+
+// anthropicToolChoice maps the chat tool_choice values onto the Anthropic
+// object form. Anything it cannot place is dropped rather than guessed at.
+func anthropicToolChoice(choice any) (map[string]any, bool) {
+	switch value := choice.(type) {
+	case string:
+		switch value {
+		case "auto":
+			return map[string]any{"type": "auto"}, true
+		case "required", "any":
+			return map[string]any{"type": "any"}, true
+		case "none":
+			return map[string]any{"type": "none"}, true
+		}
+	case map[string]any:
+		fn, _ := value["function"].(map[string]any)
+		if name, _ := fn["name"].(string); name != "" {
+			return map[string]any{"type": "tool", "name": name}, true
+		}
+	}
+
+	return nil, false
+}
+
+// toolUseBlocks turns an assistant turn's tool_calls into the tool_use content
+// blocks Anthropic expects, parsing the JSON arguments into an object.
+func toolUseBlocks(calls []any) []any {
+	blocks := make([]any, 0, len(calls))
+
+	for _, entry := range calls {
+		call, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, _ := call["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		if name == "" {
+			continue
+		}
+
+		block := map[string]any{"type": "tool_use", "name": name, "input": map[string]any{}}
+		if id, _ := call["id"].(string); id != "" {
+			block["id"] = id
+		}
+		if args, _ := fn["arguments"].(string); args != "" {
+			var parsed any
+			if err := json.Unmarshal([]byte(args), &parsed); err == nil && parsed != nil {
+				block["input"] = parsed
+			}
+		}
+		blocks = append(blocks, block)
+	}
+
+	return blocks
+}
+
+// toolResultBlock turns one role:"tool" message into a tool_result block.
+func toolResultBlock(msg map[string]any) map[string]any {
+	block := map[string]any{"type": "tool_result"}
+	if id, _ := msg["tool_call_id"].(string); id != "" {
+		block["tool_use_id"] = id
+	}
+	if content, ok := msg["content"]; ok && content != nil {
+		block["content"] = content
+	} else {
+		block["content"] = ""
+	}
+
+	return block
+}
+
+// dropEmptyTextBlocks removes text blocks with no text so a tool-only assistant
+// turn does not carry a blank block into the Anthropic payload.
+func dropEmptyTextBlocks(blocks []any) []any {
+	kept := make([]any, 0, len(blocks))
+
+	for _, block := range blocks {
+		if bm, ok := block.(map[string]any); ok {
+			if kind, _ := bm["type"].(string); kind == "text" {
+				if text, _ := bm["text"].(string); text == "" {
+					continue
+				}
+			}
+		}
+		kept = append(kept, block)
+	}
+
+	return kept
+}
 
 const (
 	defaultAnthropicMaxTokens = 4096
