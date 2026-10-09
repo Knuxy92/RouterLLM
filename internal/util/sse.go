@@ -2,11 +2,36 @@ package util
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// ErrorFrame is the error object an upstream embeds in a stream it opened with
+// HTTP 200.
+type ErrorFrame struct {
+	Code    string `json:"code"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// ParseErrorFrame reports whether an SSE payload carries an upstream error and
+// returns its fields. Gateways that answer 200 and only then fail the model
+// call signal it this way instead of with a status code, so a stream carrying
+// one is a failure, not an empty completion.
+func ParseErrorFrame(payload string) (ErrorFrame, bool) {
+	var doc struct {
+		Error *ErrorFrame `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(payload), &doc); err != nil || doc.Error == nil {
+		return ErrorFrame{}, false
+	}
+
+	return *doc.Error, true
+}
 
 func hasChoices(payload string) bool {
 	return strings.Contains(payload, `"choices"`)

@@ -223,7 +223,7 @@ func bufferedTestContent(body io.Reader, dialect, modelName string) (string, err
 		return contentFromOpenAIJSON(data)
 	}
 
-	completion := bufferStream(body)
+	completion, _ := bufferStream(body)
 	if len(completion.Choices) == 0 {
 		return "", nil
 	}

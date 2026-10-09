@@ -947,8 +947,9 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		default:
 			if path == "/v1/responses" {
 				serveResponses(resp, clientStream, w, toolNameRestore)
-			} else {
-				serveOpenAI(resp, clientStream, w, toolNameRestore)
+			} else if upstreamErr := p.serveOpenAI(resp, clientStream, w, toolNameRestore); upstreamErr != "" {
+				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap)))
+				return
 			}
 		}
 		p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
@@ -1300,7 +1301,11 @@ func writeStreamHeaders(w http.ResponseWriter) {
 	w.Header().Set("Connection", "keep-alive")
 }
 
-func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) {
+// serveOpenAI serves an openai-dialect leg to the client. It returns the raw
+// upstream payload when the stream carried an error frame instead of content,
+// so the caller can record it; the client itself only ever sees the sanitized
+// error.
+func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) string {
 	defer resp.Body.Close()
 	if clientStream {
 		writeStreamHeaders(w)
@@ -1308,11 +1313,20 @@ func serveOpenAI(resp *http.Response, clientStream bool, w http.ResponseWriter, 
 		if err := util.StreamSSETransform(resp.Body, w, true, streamRestoreTransform(toolNameRestore)); err != nil {
 			log.Printf("stream error: %v", err)
 		}
-		return
+		return ""
 	}
 
-	result := bufferStream(resp.Body)
+	result, upstreamErr := bufferStream(resp.Body)
+	if upstreamErr != "" {
+		p.log.Printf("upstream answered 200 but streamed an error frame: %s", briefBody([]byte(upstreamErr)))
+		util.WriteError(w, http.StatusBadGateway, "upstream_error", "the upstream returned an error")
+
+		return upstreamErr
+	}
+
 	util.WriteJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
+
+	return ""
 }
 
 func serveResponses(resp *http.Response, clientStream bool, w http.ResponseWriter, toolNameRestore map[string]string) {
@@ -1439,7 +1453,11 @@ func (p *Proxy) serveCodex(resp *http.Response, clientStream bool, modelName str
 	w.Write(openaiBody)
 }
 
-func bufferStream(body io.Reader) *model.ChatCompletionResponse {
+// bufferStream folds an upstream SSE body into one chat completion. Gateways
+// that answer 200 and only then fail the model call stream an error frame
+// instead; the raw payload of the first one is returned so the caller can
+// surface the failure rather than hand the client an empty completion.
+func bufferStream(body io.Reader) (*model.ChatCompletionResponse, string) {
 	content := make(map[int]string)
 	reasoning := make(map[int]string)
 	finish := make(map[int]string)
@@ -1449,8 +1467,16 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	var resultID, modelName, systemFP string
 	var created int64
 	sawMeta := false
+	upstreamErr := ""
 
 	_, _ = util.IterDataLines(body, func(payload string) bool {
+		if _, isError := util.ParseErrorFrame(payload); isError {
+			if upstreamErr == "" {
+				upstreamErr = payload
+			}
+			return true
+		}
+
 		var chunk model.StreamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			return true
@@ -1491,10 +1517,14 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 	})
 
 	if !sawMeta {
+		if upstreamErr != "" {
+			return nil, upstreamErr
+		}
+
 		return &model.ChatCompletionResponse{
 			Object:  "chat.completion",
 			Choices: []model.Choice{},
-		}
+		}, ""
 	}
 
 	indices := make(map[int]bool)
@@ -1533,6 +1563,12 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 		})
 	}
 
+	// An error frame only decides the outcome when the stream carried no content
+// at all: real output that arrived before the failure is still the answer.
+	if upstreamErr != "" && len(choices) == 0 {
+		return nil, upstreamErr
+	}
+
 	return &model.ChatCompletionResponse{
 		ID:                resultID,
 		Object:            "chat.completion",
@@ -1541,7 +1577,7 @@ func bufferStream(body io.Reader) *model.ChatCompletionResponse {
 		SystemFingerprint: systemFP,
 		Choices:           choices,
 		Usage:             usage,
-	}
+	}, ""
 }
 
 // mergeToolCallFragment folds one streaming tool_call delta into the

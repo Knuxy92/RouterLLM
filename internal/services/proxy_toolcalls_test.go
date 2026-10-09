@@ -102,7 +102,7 @@ func TestBufferStreamOrdersToolCallsByIndex(t *testing.T) {
 		"data: {\"id\":\"c2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]}}]}\n\n" +
 		"data: [DONE]\n\n"
 
-	result := bufferStream(strings.NewReader(sse))
+	result, _ := bufferStream(strings.NewReader(sse))
 
 	if len(result.Choices) != 1 {
 		t.Fatalf("choices = %d, want 1", len(result.Choices))
