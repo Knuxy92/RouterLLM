@@ -24,6 +24,8 @@ port: 1765                          # listen port (default: 1765)
 cooldown: 60s                       # key cooldown duration (default: 60s)
 force_stream: false                 # force Anthropic SSE format on all responses (default: false)
 dedupe_tools: false                 # drop duplicate tool definitions on every leg (default: false)
+clamp_tool_schemas: false            # flatten tool schemas nested deeper than the budget (default: false)
+tool_schema_max_depth: 8             # depth budget for the clamp (default: 8, gateways reject >10)
 forward_client_headers: true        # forward safe client headers upstream (default: true)
 # allow_client_headers:             # if set, ONLY these client headers pass through
 #   - X-Request-ID                  # (case-insensitive; hop-by-hop headers always blocked)
@@ -328,6 +330,7 @@ routes:
   #       model: gpt-5.6-tools
   #       sanitize_tool_names: true         # normalize tool names for strict upstreams
   #       dedupe_tools: true                # drop duplicate tool definitions
+  #       clamp_tool_schemas: true           # flatten tool schemas nested deeper than the budget
 
 
 # --- Route spec reference ----------------------------------------------------
@@ -341,6 +344,7 @@ routes:
 #       stylecall: string                   # OPTIONAL — upstream dialect: chat|responses|messages (empty = provider style)
 #       sanitize_tool_names: bool           # OPTIONAL — normalize outbound tool names on this leg (default false)
 #       dedupe_tools: bool                  # OPTIONAL — drop duplicate outbound tool definitions (the top-level dedupe_tools turns this on for every leg)
+#       clamp_tool_schemas: bool            # OPTIONAL — flatten outbound tool schemas nested deeper than the budget
 #       disabled: bool                      # OPTIONAL — skip just this entry
 #       defaults:                           # OPTIONAL — request defaults
 #         reasoning_effort: string          # none|minimal|low|medium|high|xhigh|max
