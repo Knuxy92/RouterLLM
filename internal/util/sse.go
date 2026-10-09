@@ -37,10 +37,6 @@ func hasChoices(payload string) bool {
 	return strings.Contains(payload, `"choices"`)
 }
 
-func hasError(payload string) bool {
-	return strings.Contains(payload, `"error"`)
-}
-
 func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err error) {
 	br := bufio.NewReader(r)
 	for {
@@ -66,23 +62,38 @@ func IterDataLines(r io.Reader, fn func(payload string) bool) (sawDone bool, err
 	}
 }
 
+// SanitizedErrorFrame replaces an upstream error object on its way to the
+// client. The shape is unchanged so client parsers keep working, but the
+// upstream's own text — provider names, account ids, model mapping — stays on
+// the server, in the logs and in telemetry.
+const SanitizedErrorFrame = `{"error":{"code":"upstream_error","message":"the upstream returned an error","type":"upstream_error"}}`
+
 // StreamSSETransform forwards data frames, skipping non-choice frames when
-// filterChoices is set (frames carrying "error" always pass), and passes every
-// payload through transform (nil keeps the payload verbatim) before it is
-// written, which lets callers rewrite response fields per frame.
+// filterChoices is set, and passes every payload through transform (nil keeps
+// the payload verbatim) before it is written, which lets callers rewrite
+// response fields per frame. Upstream error frames are replaced by
+// SanitizedErrorFrame; the server log keeps the original.
 func StreamSSETransform(src io.Reader, dst http.ResponseWriter, filterChoices bool, transform func(payload string) string) error {
 	flusher, _ := dst.(http.Flusher)
 	sawDone, err := IterDataLines(src, func(payload string) bool {
-		if filterChoices && !hasChoices(payload) && !hasError(payload) {
+		write := func(frame string) {
+			fmt.Fprintf(dst, "data: %s\n\n", frame)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
+		if _, isError := ParseErrorFrame(payload); isError {
+			write(SanitizedErrorFrame)
+			return true
+		}
+		if filterChoices && !hasChoices(payload) {
 			return true
 		}
 		if transform != nil {
 			payload = transform(payload)
 		}
-		fmt.Fprintf(dst, "data: %s\n\n", payload)
-		if flusher != nil {
-			flusher.Flush()
-		}
+		write(payload)
 		return true
 	})
 	if sawDone {
