@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"io"
 	"log"
 	"net/http"
@@ -180,55 +179,3 @@ func TestMessagesNormalizesUpstreamErrors(t *testing.T) {
 	}
 }
 
-func TestFilesRequiresModelQuery(t *testing.T) {
-	proxy := services.NewProxy(nil, nil, log.New(io.Discard, "", 0), false, false, false, true, nil, "")
-	h := New(proxy)
-	req := httptest.NewRequest(http.MethodGet, "/v1/files", nil)
-	w := httptest.NewRecorder()
-
-	h.Files(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestFilesPassesThroughSelectedOpenAIProvider(t *testing.T) {
-	const payload = `{"id":"file-1","object":"file"}`
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/files" {
-			t.Errorf("request = %s %s, want POST /v1/files", r.Method, r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer key" {
-			t.Errorf("authorization = %q, want Bearer key", got)
-		}
-		body, _ := io.ReadAll(r.Body)
-		if !bytes.Equal(body, []byte("file-bytes")) {
-			t.Errorf("body = %q, want file-bytes", body)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, payload)
-	}))
-	defer upstream.Close()
-
-	registry := provider.NewRegistry([]config.ProviderConfig{{
-		Name: "test", BaseURL: upstream.URL, Style: "openai", Keys: []string{"key"},
-	}}, []model.Rule{{
-		ModelID: "test-model", Routes: []model.Spec{{Provider: "test", Model: "upstream-model"}},
-	}}, time.Minute)
-	proxy := services.NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, true, nil, "")
-	h := New(proxy)
-	req := httptest.NewRequest(http.MethodPost, "/v1/files?model=test-model", strings.NewReader("file-bytes"))
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
-	w := httptest.NewRecorder()
-
-	h.Files(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
-	}
-	if w.Body.String() != payload {
-		t.Fatalf("body = %q, want %q", w.Body.String(), payload)
-	}
-}

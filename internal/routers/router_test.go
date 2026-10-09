@@ -42,6 +42,43 @@ func TestRemovedRoutesReturnNotFound(t *testing.T) {
 	}
 }
 
+func TestFilesEndpointIsGone(t *testing.T) {
+	// The Files API passthrough was removed: it was reachable without a bearer
+	// token (the auth gate waives GET/HEAD/OPTIONS), replayed every upstream
+	// header back to the client, and had no failover. Probing an upstream
+	// account's stored files must not be possible through this proxy at all.
+	router := New(handlers.New(nil), nil, func() string { return "test-token" }, nil)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		token  string
+	}{
+		{name: "list without token", method: http.MethodGet, path: "/v1/files?model=m"},
+		{name: "list with token", method: http.MethodGet, path: "/v1/files?model=m", token: "test-token"},
+		{name: "download with token", method: http.MethodGet, path: "/v1/files/file-1", token: "test-token"},
+		{name: "upload with token", method: http.MethodPost, path: "/v1/files?model=m", token: "test-token"},
+		{name: "delete with token", method: http.MethodDelete, path: "/v1/files/file-1", token: "test-token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestAuditLogUsesConfiguredLogger(t *testing.T) {
 	var output bytes.Buffer
 	router := New(handlers.New(nil), log.New(&output, "", 0), nil, nil)

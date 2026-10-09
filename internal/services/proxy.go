@@ -396,49 +396,6 @@ func (p *Proxy) Forward(path string, w http.ResponseWriter, r *http.Request) {
 	p.forward(path, w, r, p.forceStream.Load())
 }
 
-func (p *Proxy) ForwardFile(w http.ResponseWriter, r *http.Request) {
-	modelName := r.URL.Query().Get("model")
-	if modelName == "" {
-		util.WriteError(w, http.StatusBadRequest, "invalid_request", "model query parameter is required")
-		return
-	}
-	routes := p.registry.Load().Routes(modelName)
-	if len(routes) == 0 {
-		util.WriteError(w, http.StatusNotFound, "model_not_found", fmt.Sprintf("model %q not found", modelName))
-		return
-	}
-
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxResolvedMediaSize))
-	if err != nil {
-		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read file request: "+err.Error())
-		return
-	}
-	path := r.URL.Path
-	for _, route := range routes {
-		if route.Provider.Style != "openai" {
-			continue
-		}
-		resp, status, errBody, served := p.tryKeys(route.Provider, upstreamCall{
-			method:      r.Method,
-			path:        path,
-			body:        body,
-			contentType: r.Header.Get("Content-Type"),
-		}, r)
-
-		if served {
-			return
-		}
-		if resp == nil {
-			p.logErr("file upstream failed", status, errBody)
-			continue
-		}
-		defer resp.Body.Close()
-		copyResponse(w, resp)
-		return
-	}
-	util.WriteError(w, http.StatusBadGateway, "unsupported_file", "no OpenAI-compatible file route is configured")
-}
-
 // ForwardRaw does routing, default injection, and upstream call.
 // Returns the upstream *http.Response even for non-2xx — the caller must check
 // resp.StatusCode. The caller MUST close resp.Body when non-nil.
