@@ -38,6 +38,7 @@ type RouteLeg struct {
 	StyleCall         string `json:"stylecall,omitempty"`
 	SanitizeToolNames bool   `json:"sanitize_tool_names,omitempty"`
 	DedupeTools       bool   `json:"dedupe_tools,omitempty"`
+	ClampToolSchemas  bool   `json:"clamp_tool_schemas,omitempty"`
 	Disabled          bool   `json:"disabled"`
 	Active            bool   `json:"active"`
 	ProviderDisabled  bool   `json:"provider_disabled"`
@@ -170,6 +171,7 @@ func (d Deps) buildModels(reg *provider.Registry) []ModelStatus {
 				StyleCall:         spec.StyleCall,
 				SanitizeToolNames: spec.SanitizeToolNames,
 				DedupeTools:       spec.DedupeTools,
+				ClampToolSchemas:  spec.ClampToolSchemas,
 				Disabled:          spec.Disabled,
 				ProviderDisabled:  !providerLive,
 			}

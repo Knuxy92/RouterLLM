@@ -105,6 +105,8 @@ type Proxy struct {
 	forceStream          atomic.Bool
 	forceStreamUsage     bool
 	dedupeTools          atomic.Bool
+	clampTools           atomic.Bool
+	toolSchemaMaxDepth   atomic.Int64
 	forwardClientHeaders atomic.Bool
 	allowClientHeaders   atomic.Pointer[[]string]
 	systemPrompt         atomic.Pointer[string]
@@ -232,6 +234,27 @@ func (p *Proxy) ApplySettings(forceStream, forwardClientHeaders bool, allowClien
 // dedupes.
 func (p *Proxy) SetDedupeTools(enabled bool) {
 	p.dedupeTools.Store(enabled)
+}
+
+// SetClampToolSchemas turns the global tool-schema depth clamp on or off and
+// sets the depth budget every leg is held to. A non-positive maxDepth falls
+// back to defaultToolSchemaMaxDepth.
+func (p *Proxy) SetClampToolSchemas(enabled bool, maxDepth int) {
+	p.clampTools.Store(enabled)
+	if maxDepth <= 0 {
+		maxDepth = defaultToolSchemaMaxDepth
+	}
+	p.toolSchemaMaxDepth.Store(int64(maxDepth))
+}
+
+// schemaDepthBudget is the depth budget for one request, defaulting when the
+// config left it unset.
+func (p *Proxy) schemaDepthBudget() int {
+	if depth := p.toolSchemaMaxDepth.Load(); depth > 0 {
+		return int(depth)
+	}
+
+	return defaultToolSchemaMaxDepth
 }
 
 func (p *Proxy) storeAllowClientHeaders(allow []string) {
@@ -557,6 +580,13 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 		if route.SanitizeToolNames {
 			toolNameRestore = restore
+		}
+	}
+
+	if route.ClampToolSchemas || p.clampTools.Load() {
+		budget := p.schemaDepthBudget()
+		if clamped := clampToolSchemaDepths(routeBody, budget); len(clamped) > 0 {
+			p.log.Printf("route %s/%s: flattened %d tool schema(s) deeper than %d levels: %s", route.ModelName, pv.Name, len(clamped), budget, describeClampedTools(clamped))
 		}
 	}
 

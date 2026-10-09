@@ -30,6 +30,8 @@ type Config struct {
 	Cooldown             time.Duration
 	ForceStream          bool
 	DedupeTools          bool
+	ClampToolSchemas     bool
+	ToolSchemaMaxDepth   int
 	ForwardClientHeaders bool
 	AllowClientHeaders   []string
 	SystemPrompt         string
