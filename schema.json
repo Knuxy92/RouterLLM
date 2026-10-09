@@ -37,6 +37,17 @@
       "default": false,
       "description": "Drop duplicate outbound tool definitions (same function name, first wins) on every leg. A leg's own dedupe_tools still works when this is off."
     },
+    "clamp_tool_schemas": {
+      "type": "boolean",
+      "default": false,
+      "description": "Flatten outbound tool schemas nested deeper than tool_schema_max_depth on every leg. Upstreams reject the whole request when one tool nests too deep (OpenCode: 10 levels). A leg's own clamp_tool_schemas still works when this is off."
+    },
+    "tool_schema_max_depth": {
+      "type": "integer",
+      "default": 8,
+      "minimum": 1,
+      "description": "Depth budget for the tool-schema clamp. Counts nested schema levels; the node at the budget is replaced by a stub keeping type/description."
+    },
     "forward_client_headers": {
       "type": "boolean",
       "default": true,
@@ -278,6 +289,11 @@
           "type": "boolean",
           "default": false,
           "description": "Drop duplicate outbound tool definitions on this leg, keeping the first occurrence."
+        },
+        "clamp_tool_schemas": {
+          "type": "boolean",
+          "default": false,
+          "description": "Flatten outbound tool schemas nested deeper than the top-level tool_schema_max_depth on this leg."
         }
       }
     },
