@@ -209,3 +209,34 @@ routes:
 - ชุด tool ที่ inject ให้ opencode, default dialect, endpoint และ identity headers (รวมไว้ใน PR ก่อนหน้าแล้ว)
 - admin console ยังไม่มี editor สำหรับ toggle ใหม่ (ตั้งผ่าน YAML เหมือน `sanitize_tool_names`)
 - buffer path ของ dialect อื่น, `StreamRawSSE`, และ error frame ที่ adapter สร้างเอง — บันทึกไว้เป็นงานรอบถัดไป
+---
+
+# บทต่อที่ 2 — Edge-case audit (PR-2)
+
+ตรวจ edge case ทั้งระบบด้วย subagent 4 ตัว (แยกตามโดเมน: config/reload, key+retry+failover, adapter/translation, auth+telemetry+admin) แล้ว**ผมยืนยันข้อสำคัญด้วยการเปิดโค้ดดูเอง 11 ข้อ** — ที่เหลือมาจาก subagent และยังไม่ยืนยัน
+
+## ที่แก้ใน PR-2 (Tier A)
+
+| ปัญหา | หลักฐาน | การแก้ |
+|---|---|---|
+| **`GET /v1/files` ไม่มี auth** — endpoint ลงทะเบียนทุก method แต่ gate ข้าม GET/HEAD/OPTIONS ใครก็ดึงไฟล์จาก account ของเราได้ | `router.go:41-42` + `:60` | ถอด endpoint ออกทั้งหมด (route + handler + `ForwardFile` + `copyResponse`) — `/v1/files` ตอบ 404 ทุกกรณี · การดึง `/v1/files/{id}/content` ไป upstream ของ media resolver ยังอยู่ |
+| **system prompt ไม่เข้า `/v1/responses` เลย** (อ่านแค่ `messages`) | `proxy.go:1660` | แยกสาขา: `messages` → prepend system message, `input` → prepend `instructions`; ถ้า client ส่ง system/`instructions` เองก็ข้ามแล้ว log (ไม่กด prompt ของ client ลงไป) |
+| **config ที่ถูกปฏิเสธถูกกิน hash** → พอไฟล์ที่อ้างถึงกลับมา hot-reload ก็ตายเงียบตลอด | `watcher.go` `applyLocked` | เขียน hash เฉพาะทางที่ parse สำเร็จ + log error ซ้ำไม่ขึ้น (เดิมรัวทุก 3 วินาที) |
+| **telemetry หยุดเขียนถาวรหลัง rename ล้มเหลว** (handle ถูกปิดแล้วคง non-nil) | `telemetry.go` rotate | ปิด handle → nil แล้วเปิดใหม่; ถ้าเปิดไม่ได้ก็เป็น memory-only (มองเห็นได้) · หมุนที่ล้มเหลวถอยหลัง 1 นาที แต่ที่สำเร็จยังทันทีเพื่อไม่ให้ไฟล์ล้นเพดาน |
+| **metrics map โตไม่จำกัดจาก `model` ที่ client ส่ง** | `metrics.go` `seriesKeys` | จำกัดเฉพาะ series `m:*` ที่ 256 รายการ ( evict อันเก่าสุด) — provider/leg มาจาก config ไม่ถูกแตะ |
+| **messages dialect ตัด tools/tool_choice ทิ้ง + ส่ง `tool_calls` ของ assistant ไป verbatim** (Anthropic ตอบ 400) | `adapter/anthropic.go` ไม่มีคำว่า `tools` เลย | แปลง tools → `input_schema`, `tool_choice` → `{type:auto|any|none|tool}`, assistant `tool_calls` → `tool_use` blocks, role `tool` → user turn ที่รวม `tool_result` ติดกัน · ย้ายตัวแปลงไป `adapter` ให้ services ใช้ตัวเดียวกัน |
+| **ชื่อ tool ที่ sanitize ไม่ถูกคืนบนเฟรม Anthropic ดิบ** | `toolnames.go` `restoringWriter` | gate เดิมมองหาแค่ `"tool_calls"` เลยไม่เอา path ที่ส่งเฟรมดิบ (force_stream, `/v1/messages`) → รับ `content_block` เพิ่ม |
+
+## ที่ตรวจแล้ว "ไม่ต้องแก้"
+
+- **clamp บน leg ของ opencode ที่ใช้ `stylecall: messages`**: ทีม audit รายงานว่าช่องโหว่ แต่ทดสอบจริงแล้ว **ไม่เกิด** — clamp ทำงานที่ `translateRoute` ก่อนแปลง dialect ทำให้ client tool ถูก flatten ตั้งแต่ต้น และชุด required ที่ inject หลังแปลงมีความลึก 1 อยู่แล้ว เหลือแค่เทสต์ล็อกพฤติกรรมไว้ทั้งสองทาง (เปิด/ปิด clamp)
+
+## ที่เหลือ (ไม่ได้ทำรอบนี้)
+
+**Tier C — validation ยังไม่เข้ม** (เลือกไว้ว่าจะทำรอบถัดไป): route ที่ชี้ provider ที่ `disabled` แล้วผ่าน validation แล้วโมเดลหายเงียบ · `api_key: [""]` ผ่าน validation · `api_key: "k1,k2"` ที่เขียนตรงไม่ถูกแยก (แยกเฉพาะ `${VAR}`) · `share:` ไม่ validate (ตัวที่สองแย่ง key ของตัวแรกเงียบ) · `tool_schema_max_depth` ไม่มีเพดานบน · `cooldown: 0s` ทำให้ key ที่ตายกลับมาทันที · `base_url` ผิดรูปผ่าน validation · ทุก provider disabled แต่ startup ผ่าน
+
+**Tier D — adapter edge**: `data:` ไม่มีเว้นวรรคหลัง colon ถูกทิ้งทั้งเฟรม · upstream ตอบ `200 text/html` → 200 stream เปล่า + telemetry `200 OK` · Anthropic `{"type":"error"}` ไม่มี case (error หายแล้วยังปิด `[DONE]`) · `response.incomplete` ไม่ถูกจัดการ · `content: null` กลายเป็น `"content": null` · arguments ของ tool call ที่ stream ถูกตัดกลางยังส่ง JSON เพี้ยน · reasoning-only stream → `choices: []` · ชื่อ tool ยาวตัดกลาง UTF-8 rune · `sawDone` ถูกทิ้งทุก converter
+
+**จากการตรวจรอบนี้เจอเพิ่ม**: `MarkDead` รีเซ็ตนาฬิกาทุกครั้งที่ fail (key ที่กำลังจะฟื้นไม่ฟื้น) · ไม่มี cap ต่อ request ของการยิง upstream (ทฤษฎี 90 ครั้ง) · 429 ถูก retry ซ้ำบน key เดิมโดยไม่สน `Retry-After` · ไม่มี multi-leg failover test เลย
+
+**ที่ทำใน PR-3**: จำกัดงาน upstream ต่อ request + idle timeout, ตรวจ Content-Type ก่อนแปลง SSE, redact header ใน audit log ให้ครบ (`x-goog-api-key`, `Cookie`, `proxy-authorization`), หยุดแปลงเมื่อ client หลุด
