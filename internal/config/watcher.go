@@ -39,8 +39,9 @@ type Reloader struct {
 	apply  func(*Config)
 	reject func(error)
 
-	mu      sync.Mutex
-	current [32]byte
+	mu         sync.Mutex
+	current    [32]byte
+	lastReject string
 }
 
 func NewReloader(path string, baseline [32]byte, logger *log.Logger, apply func(*Config), reject func(error)) *Reloader {
@@ -77,23 +78,35 @@ func (r *Reloader) Reload() error {
 func (r *Reloader) applyLocked(data []byte, next [32]byte) error {
 	cfg, err := ParseBytes(data)
 	if err != nil {
-		r.current = next
+		// The hash stays where it was: a rejection is often caused by
+		// something outside the config file (a system_prompt_file that is
+		// briefly missing, an account store mid-rotation), and recording the
+		// hash here would make that fix invisible — the poll would treat the
+		// broken content as already seen and never try again.
 		r.fail(err)
 
 		return err
 	}
 
 	r.current = next
+	r.lastReject = ""
 	r.apply(cfg)
 
 	return nil
 }
 
+// fail reports a rejection once per distinct message. Without the dedupe a
+// config that stays broken logs the same line every poll tick.
 func (r *Reloader) fail(err error) {
+	message := err.Error()
+	if message == r.lastReject {
+		return
+	}
+	r.lastReject = message
+
 	if r.logger != nil {
 		r.logger.Printf("config reload rejected: %v", err)
 	}
-
 	if r.reject != nil {
 		r.reject(err)
 	}

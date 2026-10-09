@@ -297,6 +297,43 @@ func TestReloadIsIdempotentForUnchangedContent(t *testing.T) {
 	}
 }
 
+func TestReloadRetriesWhenOnlyAReferencedFileAppeared(t *testing.T) {
+	// The config bytes stop changing after the edit that broke them: only the
+	// file they point at comes back. Pinning the hash of a rejected config
+	// would make that fix invisible for the rest of the process lifetime.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routerllm.yaml")
+	promptPath := filepath.Join(dir, "prompt.txt")
+	writeConfig(t, path, validConfig)
+
+	var applied []*Config
+	reloader := NewReloader(path, Hash(path), log.New(&syncBuffer{}, "", 0), func(cfg *Config) {
+		applied = append(applied, cfg)
+	}, nil)
+
+	writeConfig(t, path, validConfig+"\nsystem_prompt_file: "+filepath.ToSlash(promptPath)+"\n")
+	if err := reloader.Reload(); err == nil {
+		t.Fatal("Reload() = nil, want an error while system_prompt_file is missing")
+	}
+	if len(applied) != 0 {
+		t.Fatalf("applies = %d, want 0 while the config is invalid", len(applied))
+	}
+
+	if err := os.WriteFile(promptPath, []byte("PROMPT-CONTENT"), 0o600); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	if err := reloader.Reload(); err != nil {
+		t.Fatalf("Reload() after the prompt file appeared = %v, want the config to apply", err)
+	}
+	if len(applied) != 1 {
+		t.Fatalf("applies = %d, want 1 — the same config bytes must be retried once the failure clears", len(applied))
+	}
+	if applied[0].SystemPrompt != "PROMPT-CONTENT" {
+		t.Fatalf("SystemPrompt = %q, want the newly readable file", applied[0].SystemPrompt)
+	}
+}
+
 func TestConfigPathHonoursEnv(t *testing.T) {
 	t.Setenv("ROUTERLLM_CONFIG_FILE", "custom.yaml")
 	if got := ConfigPath(); got != "custom.yaml" {
