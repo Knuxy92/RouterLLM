@@ -1609,18 +1609,60 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 	}
 }
 
+// injectSystemPrompt puts the configured prompt in front of whatever the client
+// sent, in the field the inbound dialect uses for it. A client that already
+// carries its own system prompt is left alone rather than demoted below ours.
 func (p *Proxy) injectSystemPrompt(body map[string]any) {
 	prompt := *p.systemPrompt.Load()
 	if prompt == "" {
 		return
 	}
+
+	if _, isResponses := body["input"]; isResponses {
+		p.injectIntoInstructions(body, prompt)
+		return
+	}
+
 	msgs, ok := body["messages"].([]any)
 	if !ok {
 		return
 	}
-	sysMsg := map[string]any{"role": "system", "content": prompt}
-	body["messages"] = append([]any{sysMsg}, msgs...)
+	if hasSystemMessage(msgs) {
+		p.log.Printf("system prompt skipped: the client already sent a system message")
+		return
+	}
+
+	body["messages"] = append([]any{map[string]any{"role": "system", "content": prompt}}, msgs...)
 	if p.advancedDebug {
 		p.log.Printf("injected system prompt: len=%d chars, messages=%d", len(prompt), len(body["messages"].([]any)))
 	}
+}
+
+// injectIntoInstructions prepends the configured prompt to a Responses-shaped
+// body, where that dialect carries its system prompt instead of messages.
+func (p *Proxy) injectIntoInstructions(body map[string]any, prompt string) {
+	existing, _ := body["instructions"].(string)
+	if existing != "" {
+		prompt += "\n\n" + existing
+	}
+	body["instructions"] = prompt
+
+	if p.advancedDebug {
+		p.log.Printf("injected system prompt into instructions: len=%d chars", len(prompt))
+	}
+}
+
+func hasSystemMessage(msgs []any) bool {
+	for _, entry := range msgs {
+		msg, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		if role == "system" || role == "developer" {
+			return true
+		}
+	}
+
+	return false
 }
