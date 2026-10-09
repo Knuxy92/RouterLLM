@@ -263,6 +263,73 @@ func TestClampToolSchemaDepthsSkipsWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestForwardClampsAnthropicToolSchemasOnOpenCodeMessagesLeg(t *testing.T) {
+	upstreamDepth := runAnthropicLeg(t, true)
+
+	if upstreamDepth == 0 {
+		t.Fatal("client tool never reached the upstream messages payload")
+	}
+	if upstreamDepth > defaultToolSchemaMaxDepth {
+		t.Fatalf("upstream input_schema depth = %d, want <= %d", upstreamDepth, defaultToolSchemaMaxDepth)
+	}
+}
+
+// The clamp-off case proves the assertion above is not vacuous: without the
+// clamp the very same schema reaches the upstream intact.
+func TestForwardLeavesAnthropicToolSchemasWhenClampOff(t *testing.T) {
+	if depth := runAnthropicLeg(t, false); depth <= defaultToolSchemaMaxDepth {
+		t.Fatalf("upstream input_schema depth = %d, want the schema untouched while the clamp is off", depth)
+	}
+}
+
+func runAnthropicLeg(t *testing.T, clamp bool) int {
+	t.Helper()
+
+	var upstreamDepth int
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+
+		for _, entry := range body["tools"].([]any) {
+			tool, _ := entry.(map[string]any)
+			if name, _ := tool["name"].(string); name == "deep_probe" {
+				upstreamDepth = schemaDepth(tool["input_schema"])
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n")
+		io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}\n\n")
+		io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name:    "oc-clamp",
+		BaseURL: upstream.URL,
+		Style:   "opencode",
+		Keys:    []string{"oc_sk_key"},
+	}}, []model.Rule{{
+		ModelID: "test-model",
+		Routes:  []model.Spec{{Provider: "oc-clamp", Model: "up-model", StyleCall: "messages", ClampToolSchemas: clamp}},
+	}}, time.Minute)
+
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(marshalBody(t, chatToolBody("deep_probe", nestedSchema(12)))))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	return upstreamDepth
+}
+
 func clampTestRegistry(t *testing.T, upstreamURL string, clamp bool) *provider.Registry {
 	t.Helper()
 

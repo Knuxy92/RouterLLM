@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -147,5 +148,147 @@ func TestStreamToolCallsLogsMultiChoiceWarning(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, `"text":"a"`) {
 		t.Errorf("expected first choice content only:\n%s", body)
+	}
+}
+
+func TestTranslateRequestCarriesTools(t *testing.T) {
+	body := map[string]any{
+		"model":    "m",
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools": []any{
+			map[string]any{"type": "function", "function": map[string]any{
+				"name":        "get_weather",
+				"description": "weather",
+				"parameters":  map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}},
+			}},
+			map[string]any{"type": "function", "function": map[string]any{"name": "no_params"}},
+		},
+		"tool_choice": "required",
+	}
+
+	data, path, err := TranslateRequest(body, "claude-upstream")
+	if err != nil {
+		t.Fatalf("TranslateRequest: %v", err)
+	}
+	if path != "/v1/messages" {
+		t.Fatalf("path = %q", path)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	tools, _ := req["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("tools = %v, want both client tools carried over", req["tools"])
+	}
+	first, _ := tools[0].(map[string]any)
+	if first["name"] != "get_weather" || first["description"] != "weather" {
+		t.Errorf("first tool = %v, want name/description carried", first)
+	}
+	schema, ok := first["input_schema"].(map[string]any)
+	if !ok || schema["type"] != "object" {
+		t.Errorf("input_schema = %v, want the client parameters moved across", first["input_schema"])
+	}
+	second, _ := tools[1].(map[string]any)
+	if schema, ok := second["input_schema"].(map[string]any); !ok || schema["type"] != "object" {
+		t.Errorf("tool without parameters = %v, want an empty object schema", second)
+	}
+
+	choice, _ := req["tool_choice"].(map[string]any)
+	if choice["type"] != "any" {
+		t.Errorf("tool_choice = %v, want {type:any} for required", req["tool_choice"])
+	}
+}
+
+func TestTranslateRequestFoldsToolHistory(t *testing.T) {
+	body := map[string]any{
+		"model": "m",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "weather?"},
+			map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+				map[string]any{"id": "call_1", "type": "function", "function": map[string]any{
+					"name": "get_weather", "arguments": `{"city":"Paris"}`,
+				}},
+			}},
+			map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "18C"},
+			map[string]any{"role": "user", "content": "thanks"},
+		},
+	}
+
+	data, _, err := TranslateRequest(body, "claude-upstream")
+	if err != nil {
+		t.Fatalf("TranslateRequest: %v", err)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	messages, _ := req["messages"].([]any)
+	if len(messages) != 4 {
+		t.Fatalf("messages = %d, want user / assistant / tool_result / user: %v", len(messages), messages)
+	}
+
+	assistant, _ := messages[1].(map[string]any)
+	blocks, _ := assistant["content"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("assistant content = %v, want one tool_use block", assistant["content"])
+	}
+	toolUse, _ := blocks[0].(map[string]any)
+	if toolUse["type"] != "tool_use" || toolUse["id"] != "call_1" || toolUse["name"] != "get_weather" {
+		t.Errorf("tool_use = %v, want the assistant call carried across", toolUse)
+	}
+	input, _ := toolUse["input"].(map[string]any)
+	if input["city"] != "Paris" {
+		t.Errorf("tool_use input = %v, want the parsed arguments", toolUse["input"])
+	}
+
+	resultTurn, _ := messages[2].(map[string]any)
+	if role, _ := resultTurn["role"].(string); role != "user" {
+		t.Fatalf("tool result role = %q, want a user turn", resultTurn["role"])
+	}
+	resultBlocks, _ := resultTurn["content"].([]any)
+	if len(resultBlocks) != 1 {
+		t.Fatalf("tool result content = %v, want one tool_result block", resultTurn["content"])
+	}
+	result, _ := resultBlocks[0].(map[string]any)
+	if result["type"] != "tool_result" || result["tool_use_id"] != "call_1" || result["content"] != "18C" {
+		t.Errorf("tool_result = %v, want the tool output carried across", result)
+	}
+}
+
+func TestTranslateRequestMergesConsecutiveToolResults(t *testing.T) {
+	body := map[string]any{
+		"model": "m",
+		"messages": []any{
+			map[string]any{"role": "assistant", "tool_calls": []any{
+				map[string]any{"id": "call_1", "function": map[string]any{"name": "a", "arguments": "{}"}},
+				map[string]any{"id": "call_2", "function": map[string]any{"name": "b", "arguments": "{}"}},
+			}},
+			map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "one"},
+			map[string]any{"role": "tool", "tool_call_id": "call_2", "content": "two"},
+		},
+	}
+
+	data, _, err := TranslateRequest(body, "claude-upstream")
+	if err != nil {
+		t.Fatalf("TranslateRequest: %v", err)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	messages, _ := req["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want the two tool results merged into one user turn: %v", len(messages), messages)
+	}
+	blocks, _ := messages[1].(map[string]any)["content"].([]any)
+	if len(blocks) != 2 {
+		t.Fatalf("merged content = %v, want two tool_result blocks", messages[1])
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"routerllm/internal/adapter"
 	"routerllm/internal/model"
 )
 
@@ -525,11 +526,15 @@ func RestoreToolNamesWriter(w http.ResponseWriter, reverse map[string]string) ht
 }
 
 func (w *restoringWriter) Write(p []byte) (int, error) {
-	if !strings.Contains(string(p), `"tool_calls"`) {
+	payload := string(p)
+	// Two frame shapes reach this writer: chat chunks from the converters, and
+	// raw Anthropic frames on the pass-through paths (force_stream and
+	// /v1/messages), which carry content_block instead of tool_calls.
+	if !strings.Contains(payload, `"tool_calls"`) && !strings.Contains(payload, `"content_block"`) {
 		return w.ResponseWriter.Write(p)
 	}
 
-	restored := restoreSSEFrames(string(p), w.reverse)
+	restored := restoreSSEFrames(payload, w.reverse)
 	if _, err := w.ResponseWriter.Write([]byte(restored)); err != nil {
 		return 0, err
 	}
@@ -809,27 +814,8 @@ func injectMissingAnthropicTools(doc map[string]any, required []map[string]any) 
 }
 
 // chatToolToAnthropicTool converts one chat-shaped function tool to the
-// Anthropic definition shape ({name, description, input_schema}).
+// Anthropic definition shape. The conversion lives in the adapter because the
+// request translator needs it too, and two implementations would drift.
 func chatToolToAnthropicTool(entry map[string]any) (map[string]any, bool) {
-	fn, ok := entry["function"].(map[string]any)
-	if !ok {
-		return nil, false
-	}
-
-	name, _ := fn["name"].(string)
-	if name == "" {
-		return nil, false
-	}
-
-	tool := map[string]any{"name": name}
-	if d, ok := fn["description"].(string); ok {
-		tool["description"] = d
-	}
-	if p, ok := fn["parameters"]; ok && p != nil {
-		tool["input_schema"] = p
-	} else {
-		tool["input_schema"] = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
-
-	return tool, true
+	return adapter.ChatToolToAnthropicTool(entry)
 }

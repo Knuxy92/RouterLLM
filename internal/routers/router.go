@@ -38,8 +38,6 @@ func New(h *handlers.Handlers, logger *log.Logger, authToken func() string, moun
 		r.Post("/chat/completions", h.ChatCompletions)
 		r.Post("/messages", h.Messages)
 		r.Post("/responses", h.Responses)
-		r.HandleFunc("/files", h.Files)
-		r.HandleFunc("/files/*", h.Files)
 	})
 
 	if mountAdmin != nil {

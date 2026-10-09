@@ -115,3 +115,105 @@ func TestBufferStreamOrdersToolCallsByIndex(t *testing.T) {
 		t.Fatalf("tool_calls not ordered by index: %+v", calls)
 	}
 }
+
+// A leg that sanitizes tool names must hand the names back on every response
+// shape, including the Anthropic frames a messages-dialect leg produces.
+func TestSanitizedToolNamesRestoredOnAnthropicFrames(t *testing.T) {
+	longName := strings.Repeat("a", 70)
+	sanitized := uniqueSanitizedToolName(longName, map[string]bool{})
+	if sanitized == longName {
+		t.Fatalf("sanitized = %q, want a rewritten name", sanitized)
+	}
+
+	sse := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"" + sanitized + "\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	var upstreamToolName string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+		for _, entry := range body["tools"].([]any) {
+			tool, _ := entry.(map[string]any)
+			upstreamToolName, _ = tool["name"].(string)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, sse)
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name:    "anthropic-test",
+		BaseURL: upstream.URL,
+		Style:   "anthropic",
+		Keys:    []string{"provider-key"},
+	}}, []model.Rule{{
+		ModelID: "test-model",
+		Routes:  []model.Spec{{Provider: "anthropic-test", Model: "claude-upstream", SanitizeToolNames: true}},
+	}}, time.Minute)
+
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
+			`"tools":[{"type":"function","function":{"name":"`+longName+`","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if upstreamToolName != sanitized {
+		t.Fatalf("upstream tool name = %q, want the sanitized %q", upstreamToolName, sanitized)
+	}
+	if got := w.Body.String(); !strings.Contains(got, longName) {
+		t.Fatalf("client must see its original tool name on Anthropic frames:\n%s", got)
+	}
+}
+
+// force_stream on a messages-dialect leg passes the upstream Anthropic frames
+// through untouched, so the restore path has to understand content_block shapes
+// as well as chat chunks.
+func TestSanitizedToolNamesRestoredOnRawAnthropicFrames(t *testing.T) {
+	longName := strings.Repeat("b", 70)
+	sanitized := uniqueSanitizedToolName(longName, map[string]bool{})
+	if sanitized == longName {
+		t.Fatalf("sanitized = %q, want a rewritten name", sanitized)
+	}
+
+	sse := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"" + sanitized + "\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, sse)
+	}))
+	defer upstream.Close()
+
+	registry := provider.NewRegistry([]config.ProviderConfig{{
+		Name:    "anthropic-test",
+		BaseURL: upstream.URL,
+		Style:   "anthropic",
+		Keys:    []string{"provider-key"},
+	}}, []model.Rule{{
+		ModelID: "test-model",
+		Routes:  []model.Spec{{Provider: "anthropic-test", Model: "claude-upstream", SanitizeToolNames: true}},
+	}}, time.Minute)
+
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, true, false, nil, "")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":false,"messages":[{"role":"user","content":"hi"}],`+
+			`"tools":[{"type":"function","function":{"name":"`+longName+`","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if got := w.Body.String(); !strings.Contains(got, longName) {
+		t.Fatalf("client must see its original tool name on raw Anthropic frames:\n%s", got)
+	}
+}

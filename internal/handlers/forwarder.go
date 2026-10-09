@@ -33,10 +33,6 @@ func (h *Handlers) Responses(w http.ResponseWriter, r *http.Request) {
 	h.proxy.Forward("/v1/responses", w, r)
 }
 
-func (h *Handlers) Files(w http.ResponseWriter, r *http.Request) {
-	h.proxy.ForwardFile(w, r)
-}
-
 func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	raw, err := io.ReadAll(r.Body)

@@ -28,6 +28,9 @@ const (
 	// A rewrite keeps only the newest events up to this size, leaving headroom
 	// so fresh records append instead of tripping rotation on every call.
 	maxRewriteBytes = maxFileSize / 2
+	// A rotation that fails (locked destination, read-only directory) is not
+	// retried on every single record; the file keeps growing until one succeeds.
+	rotateRetryInterval = time.Minute
 	// Longest jsonl line the replay reads; longer lines are skipped whole.
 	// defaultPerPage is the page size for Query when the caller omits one.
 	defaultPerPage = 50
@@ -135,6 +138,12 @@ type Store struct {
 	file    *os.File
 	size    int64
 	metrics *Metrics
+
+	// rotateFailedAt backs off a failing rotation. A rotation that succeeds
+	// must stay immediate — the file has to come back under the cap on the very
+	// next record — but one that keeps failing (locked destination, read-only
+	// directory) should not be retried on every single event.
+	rotateFailedAt time.Time
 }
 
 // NewStore opens (or creates) the jsonl at path and replays the retained tail
@@ -335,8 +344,16 @@ func (s *Store) rewrite(kept []Event) error {
 
 	if s.file != nil {
 		s.file.Close()
+		s.file = nil
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
+		// Reopen the current file so recording continues. Leaving a closed
+		// handle in place would make every later write fail for the rest of
+		// the process lifetime without a single log line; nil means the store
+		// falls back to memory, which is at least visible.
+		s.file, _ = os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		s.rotateFailedAt = time.Now()
+
 		return err
 	}
 
@@ -378,8 +395,10 @@ func (s *Store) Record(e Event) {
 		return
 	}
 	s.size += int64(n)
-	if s.size >= maxFileSize {
-		s.rewrite(s.ring)
+	if s.size >= maxFileSize && (s.rotateFailedAt.IsZero() || time.Since(s.rotateFailedAt) > rotateRetryInterval) {
+		if err := s.rewrite(s.ring); err != nil && s.rotateFailedAt.IsZero() {
+			s.rotateFailedAt = time.Now()
+		}
 	}
 }
 
