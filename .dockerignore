@@ -10,6 +10,7 @@ routerllm.yaml.bak
 cline-accounts.json
 alysis-accounts.json
 codex-accounts.json
+opencode-accounts.json
 routerllm-telemetry.jsonl*
 .zcode/
 data/
