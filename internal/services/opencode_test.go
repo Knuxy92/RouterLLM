@@ -57,9 +57,10 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 		{"x-opencode-request", "msg_"},
 	} {
 		got := r.Header.Get(h.name)
-		body := strings.TrimPrefix(got, h.prefix)
-		if !strings.HasPrefix(got, h.prefix) || len(body) != 26 || strings.ToLower(body) != body || !isHex(body) {
-			t.Errorf("%s = %q, want %s + 26 lowercase hex chars", h.name, got, h.prefix)
+		// Only the prefix is this layer's business; the id shape is owned and
+		// tested by internal/opencode.
+		if !strings.HasPrefix(got, h.prefix) || len(got) <= len(h.prefix) {
+			t.Errorf("%s = %q, want a value starting with %q", h.name, got, h.prefix)
 		}
 	}
 	if got := r.Header.Get("x-opencode-project"); got != "global" {
@@ -74,16 +75,6 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("x-api-key"); got != "" {
 		t.Errorf("x-api-key = %q, want empty (opencode auth is Bearer-only)", got)
 	}
-}
-
-func isHex(s string) bool {
-	for _, c := range s {
-		if !strings.ContainsRune("0123456789abcdef", c) {
-			return false
-		}
-	}
-
-	return len(s) > 0
 }
 
 func assertRequiredToolsPresent(t *testing.T, tools []any) {

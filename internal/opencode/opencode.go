@@ -1,20 +1,10 @@
 package opencode
 
 import (
-	"crypto/rand"
 	"net/http"
 )
 
 const UserAgent = "opencode/latest/2.0.23/cli"
-
-const (
-	// The gateway validates the session/request id shape: 26 lowercase hex
-	// characters after the prefix. Anything else (mixed case, dashes) fails
-	// the free-tier client check with a 403.
-	idLength = 26
-
-	idCharset = "0123456789abcdef"
-)
 
 func RequiredToolNames() []string {
 	return []string{"bash", "read", "task", "todowrite", "webfetch", "websearch", "write"}
@@ -41,12 +31,15 @@ func RequiredTools() []map[string]any {
 	return tools
 }
 
+// NewSessionID returns the session header value. The gateway validates its
+// shape, so it comes from newIdentifier rather than random hex.
 func NewSessionID() string {
-	return newID("ses_")
+	return newIdentifier("ses_")
 }
 
+// NewRequestID returns the per-attempt header value, same shape as the session.
 func NewRequestID() string {
-	return newID("msg_")
+	return newIdentifier("msg_")
 }
 
 func SetHeaders(header http.Header, sessionID, requestID, orgID string) {
@@ -64,17 +57,4 @@ func SetHeaders(header http.Header, sessionID, requestID, orgID string) {
 	if orgID != "" {
 		header.Set("x-org-id", orgID)
 	}
-}
-
-func newID(prefix string) string {
-	buf := make([]byte, idLength)
-	if _, err := rand.Read(buf); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	// 256 % 16 == 0, so the modulo stays unbiased.
-	for i := range buf {
-		buf[i] = idCharset[int(buf[i])%len(idCharset)]
-	}
-
-	return prefix + string(buf)
 }

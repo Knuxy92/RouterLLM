@@ -2,17 +2,58 @@ package opencode
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
+// idSuffixValid checks the two-part shape the gateway decodes: 12 hex
+// characters carrying the timestamp and counter, then 14 base62 characters.
 func idSuffixValid(s string) bool {
 	if len(s) != idLength {
 		return false
 	}
-	return strings.IndexFunc(s, func(r rune) bool {
+	hexPart, randomPart := s[:idHexBytes*2], s[idHexBytes*2:]
+	for _, r := range hexPart {
+		if !strings.ContainsRune(hexDigits, r) {
+			return false
+		}
+	}
+	return strings.IndexFunc(randomPart, func(r rune) bool {
 		return !strings.ContainsRune(idCharset, r)
 	}) == -1
+}
+
+// decodeTimestamp reverses the hex prefix: the id encodes
+// ~(timestamp<<12 | counter), so inverting and shifting gives back the
+// millisecond clock.
+func decodeTimestamp(t *testing.T, hexPart string) int64 {
+	t.Helper()
+
+	v, err := strconv.ParseUint(hexPart, 16, 64)
+	if err != nil {
+		t.Fatalf("hex prefix %q: %v", hexPart, err)
+	}
+
+	return int64(^v >> idCounterShift)
+}
+
+// TestIDPrefixDecodesToRecentTimestamp pins the property the gateway actually
+// leans on. A plain-random id would satisfy the shape assertions above and
+// still be refused with a 403 FreeTierError, so the prefix has to decode to
+// roughly now.
+func TestIDPrefixDecodesToRecentTimestamp(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		id := strings.TrimPrefix(NewSessionID(), "ses_")
+		drift := time.Since(time.UnixMilli(decodeTimestamp(t, id[:idHexBytes*2])))
+		if drift < 0 {
+			drift = -drift
+		}
+		if drift > time.Minute {
+			t.Fatalf("id %q decodes %dms from now, want it close to now", id, drift.Milliseconds())
+		}
+	}
 }
 
 func TestNewSessionIDFormat(t *testing.T) {
@@ -22,7 +63,8 @@ func TestNewSessionIDFormat(t *testing.T) {
 			t.Fatalf("id = %q, want ses_ prefix", id)
 		}
 		if !idSuffixValid(strings.TrimPrefix(id, "ses_")) {
-			t.Fatalf("id = %q, want %d chars from %q after prefix", id, idLength, idCharset)
+			t.Fatalf("id = %q, want %d chars as %d hex + %d base62 after the prefix",
+				id, idLength, idHexBytes*2, idRandom)
 		}
 	}
 }
@@ -34,7 +76,8 @@ func TestNewRequestIDFormat(t *testing.T) {
 			t.Fatalf("id = %q, want msg_ prefix", id)
 		}
 		if !idSuffixValid(strings.TrimPrefix(id, "msg_")) {
-			t.Fatalf("id = %q, want %d chars from %q after prefix", id, idLength, idCharset)
+			t.Fatalf("id = %q, want %d chars as %d hex + %d base62 after the prefix",
+				id, idLength, idHexBytes*2, idRandom)
 		}
 	}
 }
