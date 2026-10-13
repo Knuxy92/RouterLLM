@@ -17,12 +17,11 @@ import (
 
 const testSystemPrompt = "SYSTEM-PROMPT-FROM-CONFIG"
 
-// systemPromptProxy serves one openai-style upstream and records the last body it
-// received, so the injected prompt can be asserted on the wire.
-func systemPromptProxy(t *testing.T, upstream *httptest.Server, prompt string) (*Proxy, *map[string]any) {
+// systemPromptProxy builds a Proxy pointed at one openai-style upstream. The
+// body that upstream receives is captured by capturingUpstream, not here.
+func systemPromptProxy(t *testing.T, upstream *httptest.Server, prompt string) *Proxy {
 	t.Helper()
 
-	var captured map[string]any
 	registry := provider.NewRegistry([]config.ProviderConfig{{
 		Name:    "sp-test",
 		BaseURL: upstream.URL,
@@ -33,10 +32,7 @@ func systemPromptProxy(t *testing.T, upstream *httptest.Server, prompt string) (
 		Routes:  []model.Spec{{Provider: "sp-test", Model: "up-model"}},
 	}}, time.Minute)
 
-	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, prompt)
-	_ = captured
-
-	return proxy, &captured
+	return NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, prompt)
 }
 
 func capturingUpstream(t *testing.T, body *map[string]any) *httptest.Server {
@@ -74,7 +70,7 @@ func forwardBody(t *testing.T, p *Proxy, path, requestBody string) {
 func TestSystemPromptReachesResponsesClients(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
-	proxy, _ := systemPromptProxy(t, upstreamServer, testSystemPrompt)
+	proxy := systemPromptProxy(t, upstreamServer, testSystemPrompt)
 
 	forwardBody(t, proxy, "/v1/responses", `{"model":"test-model","input":"hi"}`)
 
@@ -87,7 +83,7 @@ func TestSystemPromptReachesResponsesClients(t *testing.T) {
 func TestSystemPromptKeepsClientInstructions(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
-	proxy, _ := systemPromptProxy(t, upstreamServer, testSystemPrompt)
+	proxy := systemPromptProxy(t, upstreamServer, testSystemPrompt)
 
 	forwardBody(t, proxy, "/v1/responses", `{"model":"test-model","instructions":"CLIENT-INSTRUCTIONS","input":"hi"}`)
 
@@ -106,7 +102,7 @@ func TestSystemPromptKeepsClientInstructions(t *testing.T) {
 func TestSystemPromptPrependsEvenWhenClientSentSystemMessage(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
-	proxy, _ := systemPromptProxy(t, upstreamServer, testSystemPrompt)
+	proxy := systemPromptProxy(t, upstreamServer, testSystemPrompt)
 
 	forwardBody(t, proxy, "/v1/chat/completions",
 		`{"model":"test-model","messages":[{"role":"system","content":"CLIENT-SYSTEM"},{"role":"user","content":"hi"}]}`)
@@ -141,7 +137,7 @@ func TestSystemPromptPrependsEvenWhenClientSentSystemMessage(t *testing.T) {
 func TestSystemPromptStillPrependsWhenClientHasNone(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
-	proxy, _ := systemPromptProxy(t, upstreamServer, testSystemPrompt)
+	proxy := systemPromptProxy(t, upstreamServer, testSystemPrompt)
 
 	forwardBody(t, proxy, "/v1/chat/completions", `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)
 
@@ -158,7 +154,7 @@ func TestSystemPromptStillPrependsWhenClientHasNone(t *testing.T) {
 func TestSystemPromptNoopWhenUnset(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
-	proxy, _ := systemPromptProxy(t, upstreamServer, "")
+	proxy := systemPromptProxy(t, upstreamServer, "")
 
 	forwardBody(t, proxy, "/v1/responses", `{"model":"test-model","input":"hi"}`)
 
