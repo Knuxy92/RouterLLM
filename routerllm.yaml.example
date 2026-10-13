@@ -61,13 +61,17 @@ providers:
   # set the gateway requires (renaming client tools whose names collide with
   # those), and sends the OpenCode client identity headers (User-Agent plus a
   # fresh x-opencode-session / x-opencode-request per request — x-session-id
-  # and x-opencode-session-id aliases ride along with the same value). Auth is
-  # always Authorization: Bearer <api_key> — auth_mode is ignored for this
-  # style. Each model speaks its own dialect, so pick per leg with stylecall:
+  # and x-opencode-session-id aliases ride along with the same value, plus
+  # x-org-id automatically when the serving login account belongs to an org).
+  # Auth is login-based, not api_key: run `routerllm --opencode-login` (device
+  # flow against https://opencode.ai/console, override with OPENCODE_CONSOLE_URL)
+  # to create opencode-accounts.json next to the executable (override with
+  # OPENCODE_ACCOUNTS_FILE). An ENABLED opencode provider refuses to start
+  # until that file holds at least one account — same rule as cline/codex.
+  # Each model speaks its own dialect, so pick per leg with stylecall:
   # chat (default) / responses / messages.
 
   - name: opencode
-    api_key: ${OPENCODE_API_KEY}
     style: opencode
     base_url: https://opencode.ai/inference/openai
     headers:
@@ -173,6 +177,13 @@ providers:
   # - name: codex
   #   style: codex
   #   base_url: https://chatgpt.com/backend-api
+
+  # --- OpenCode Console accounts ---
+  # The opencode provider above is ENABLED and needs opencode-accounts.json
+  # next to the executable (override with OPENCODE_ACCOUNTS_FILE). Create it
+  # with `routerllm --opencode-login` before starting — until then startup is
+  # refused, same as cline/codex. Add more accounts by re-running the login;
+  # each login may carry its own Console server and org.
 
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these

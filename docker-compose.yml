@@ -30,6 +30,10 @@ services:
       # `routerllm --codex-login` on the host (the file must exist first —
       # a missing host path is auto-created as a directory by Docker).
       # - ./codex-accounts.json:/app/codex-accounts.json:ro
+      # OpenCode providers only: mount opencode-accounts.json AFTER running
+      # `routerllm --opencode-login` on the host (the file must exist first —
+      # a missing host path is auto-created as a directory by Docker).
+      # - ./opencode-accounts.json:/app/opencode-accounts.json:ro
     environment:
       # Keep the request-event jsonl on the persistent volume, not beside the
       # config (a single-file bind mount is backed by the container layer).

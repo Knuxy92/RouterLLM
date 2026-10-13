@@ -32,9 +32,12 @@ copy .env.example .env
 Edit `.env` with your provider API keys:
 
 ```dotenv
-OPENCODE_API_KEY=sk-...
 FREEMODEL_API_KEY=key1,key2
 ```
+
+OpenCode needs no API key: run `routerllm --opencode-login` (same for
+`--cline-login`, `--codex-login`, `--alysis-login`) to create the account file
+before starting.
 
 `.env` is loaded automatically at startup. Real environment variables take precedence over `.env`.
 
