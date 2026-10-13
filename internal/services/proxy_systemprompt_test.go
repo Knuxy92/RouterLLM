@@ -103,7 +103,7 @@ func TestSystemPromptKeepsClientInstructions(t *testing.T) {
 	}
 }
 
-func TestSystemPromptSkipsWhenClientSentSystemMessage(t *testing.T) {
+func TestSystemPromptPrependsEvenWhenClientSentSystemMessage(t *testing.T) {
 	var upstream map[string]any
 	upstreamServer := capturingUpstream(t, &upstream)
 	proxy, _ := systemPromptProxy(t, upstreamServer, testSystemPrompt)
@@ -112,6 +112,10 @@ func TestSystemPromptSkipsWhenClientSentSystemMessage(t *testing.T) {
 		`{"model":"test-model","messages":[{"role":"system","content":"CLIENT-SYSTEM"},{"role":"user","content":"hi"}]}`)
 
 	messages, _ := upstream["messages"].([]any)
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3 — the configured prompt, the client's own system message and its user turn: %v", len(messages), messages)
+	}
+
 	systems := 0
 	for _, entry := range messages {
 		msg, _ := entry.(map[string]any)
@@ -119,11 +123,18 @@ func TestSystemPromptSkipsWhenClientSentSystemMessage(t *testing.T) {
 			systems++
 		}
 	}
-	if systems != 1 {
-		t.Fatalf("system messages upstream = %d, want 1 — the client already has one: %v", systems, messages)
+	if systems != 2 {
+		t.Fatalf("system messages upstream = %d, want 2 — the configured prompt leads, the client's own is kept below it: %v", systems, messages)
 	}
-	if content, _ := messages[0].(map[string]any)["content"].(string); content != "CLIENT-SYSTEM" {
-		t.Errorf("first message content = %q, want the client's own system message untouched", content)
+
+	first, _ := messages[0].(map[string]any)
+	if first["role"] != "system" || first["content"] != testSystemPrompt {
+		t.Errorf("first message = %v, want the configured prompt as system so it leads", first)
+	}
+
+	second, _ := messages[1].(map[string]any)
+	if second["role"] != "system" || second["content"] != "CLIENT-SYSTEM" {
+		t.Errorf("second message = %v, want the client's own system message preserved untouched", second)
 	}
 }
 

@@ -1748,8 +1748,9 @@ func (p *Proxy) serveForceStream(resp *http.Response, modelName, dialect string,
 }
 
 // injectSystemPrompt puts the configured prompt in front of whatever the client
-// sent, in the field the inbound dialect uses for it. A client that already
-// carries its own system prompt is left alone rather than demoted below ours.
+// sent, in the field the inbound dialect uses for it. It is prepended on every
+// request: a client that already carries its own system prompt keeps it, below
+// ours, rather than replacing or suppressing it.
 func (p *Proxy) injectSystemPrompt(body map[string]any) {
 	prompt := *p.systemPrompt.Load()
 	if prompt == "" {
@@ -1763,10 +1764,6 @@ func (p *Proxy) injectSystemPrompt(body map[string]any) {
 
 	msgs, ok := body["messages"].([]any)
 	if !ok {
-		return
-	}
-	if hasSystemMessage(msgs) {
-		p.log.Printf("system prompt skipped: the client already sent a system message")
 		return
 	}
 
@@ -1788,19 +1785,4 @@ func (p *Proxy) injectIntoInstructions(body map[string]any, prompt string) {
 	if p.advancedDebug {
 		p.log.Printf("injected system prompt into instructions: len=%d chars", len(prompt))
 	}
-}
-
-func hasSystemMessage(msgs []any) bool {
-	for _, entry := range msgs {
-		msg, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role == "system" || role == "developer" {
-			return true
-		}
-	}
-
-	return false
 }
