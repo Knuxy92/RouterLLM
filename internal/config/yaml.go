@@ -12,6 +12,7 @@ import (
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
+	"routerllm/internal/opencode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -334,7 +335,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 // isAccountStyle reports styles whose credentials come from a login-managed
 // account store instead of api_key.
 func isAccountStyle(style string) bool {
-	return style == "cline" || style == "alysis" || style == "codex"
+	return style == "cline" || style == "alysis" || style == "codex" || style == "opencode"
 }
 
 // accountStyleKeys loads the credentials of an account-backed style's store,
@@ -356,6 +357,12 @@ func accountStyleKeys(style string) (keys []string, path string, ok bool, err er
 		return store.GatewayKeys(), store.Path(), true, nil
 	case "codex":
 		store, err := codex.LoadAccountStore(codex.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.RefreshTokens(), store.Path(), true, nil
+	case "opencode":
+		store, err := opencode.LoadAccountStore(opencode.DefaultAccountsPath())
 		if err != nil {
 			return nil, "", true, err
 		}

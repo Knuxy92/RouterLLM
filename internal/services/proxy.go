@@ -96,6 +96,15 @@ var clientCredentialHeaders = map[string]bool{
 	"accept-encoding":     true,
 }
 
+// opencodeBindingKey is the server/org pair a pool key was first seen with.
+// The pool keys are the original refresh tokens, but rotation re-files them
+// under new strings — the proxy remembers the first binding so per-request
+// store lookups keep working after the first rotation.
+type opencodeBindingKey struct {
+	server string
+	orgID  string
+}
+
 type Proxy struct {
 	registry             atomic.Pointer[provider.Registry]
 	client               *http.Client
@@ -114,6 +123,9 @@ type Proxy struct {
 	clineManagers        map[string]*cline.Manager
 	codexMu              sync.Mutex
 	codexManager         *codex.Manager
+	opencodeMu           sync.Mutex
+	opencodeManagers     map[string]*opencode.Manager
+	opencodeBinding      map[string]opencodeBindingKey
 	quotaMu              sync.Mutex
 	quotas               map[string]map[string]QuotaSnapshot
 	telemetry            atomic.Pointer[telemetry.Store]
@@ -167,12 +179,102 @@ func (p *Proxy) codexAccessToken(ctx context.Context, refreshToken string, force
 	return manager.AccessToken(ctx, refreshToken, force)
 }
 
+// opencodeAccessToken mints (or reuses) the Console access token backing one
+// account refresh token. Each account may point at its own Console server, so
+// managers are keyed by server URL the way cline managers are keyed by base
+// URL. The refresh token itself — not the short-lived access token — is the
+// key-pool key, so cooldown state stays stable across rotations.
+func (p *Proxy) opencodeAccessToken(ctx context.Context, server, refreshToken string, force bool) (string, error) {
+	if server == "" {
+		server = opencode.DefaultServer()
+	}
+
+	p.opencodeMu.Lock()
+	manager, ok := p.opencodeManagers[server]
+	if !ok {
+		store, err := opencode.LoadAccountStore(opencode.DefaultAccountsPath())
+		if err != nil {
+			p.log.Printf("opencode accounts unavailable: %v", err)
+			store = nil
+		}
+		manager = opencode.NewManager(&opencode.Client{HTTPClient: p.client, Server: server}, store)
+		p.opencodeManagers[server] = manager
+	}
+	p.opencodeMu.Unlock()
+
+	return manager.AccessToken(ctx, refreshToken, force)
+}
+
+// opencodeOrgID returns the org id of the account holding refreshToken, for
+// the automatic x-org-id header. Empty means the account has no org and no
+// header is sent — the same shape as the Console client.
+func (p *Proxy) opencodeOrgID(refreshToken string) string {
+	store, err := opencode.LoadAccountStore(opencode.DefaultAccountsPath())
+	if err != nil {
+		return ""
+	}
+
+	return store.OrgID(refreshToken)
+}
+
+// opencodeServerOrg resolves the Console server and org id for the account
+// holding refreshToken. Both fall back to empty (server then defaults inside
+// opencodeAccessToken, org then omits the header) when the store is missing.
+// After the first rotation the file no longer contains the original refresh
+// token, so the sticky map remembers the server/org pair that the first
+// lookup returned; see rememberOpencodeBinding.
+func (p *Proxy) opencodeServerOrg(refreshToken string) (server, orgID string) {
+	p.opencodeMu.Lock()
+	if bound, ok := p.opencodeBinding[refreshToken]; ok {
+		p.opencodeMu.Unlock()
+
+		return bound.server, bound.orgID
+	}
+	p.opencodeMu.Unlock()
+
+	store, err := opencode.LoadAccountStore(opencode.DefaultAccountsPath())
+	if err != nil {
+		return "", ""
+	}
+
+	server, orgID = store.Server(refreshToken), store.OrgID(refreshToken)
+	if server != "" || orgID != "" {
+		p.opencodeMu.Lock()
+		if p.opencodeBinding == nil {
+			p.opencodeBinding = make(map[string]opencodeBindingKey)
+		}
+		if _, ok := p.opencodeBinding[refreshToken]; !ok {
+			p.opencodeBinding[refreshToken] = opencodeBindingKey{server: server, orgID: orgID}
+		}
+		p.opencodeMu.Unlock()
+	}
+
+	return server, orgID
+}
+
+// rememberOpencodeBinding re-keys the sticky server/org binding after a
+// rotation: the pool key stays the original refresh token, but the store now
+// files it under the rotated one, so future per-request lookups by the pool
+// key would miss without this.
+func (p *Proxy) rememberOpencodeBinding(refreshToken, server, orgID string) {
+	if refreshToken == "" {
+		return
+	}
+
+	p.opencodeMu.Lock()
+	if p.opencodeBinding == nil {
+		p.opencodeBinding = make(map[string]opencodeBindingKey)
+	}
+	p.opencodeBinding[refreshToken] = opencodeBindingKey{server: server, orgID: orgID}
+	p.opencodeMu.Unlock()
+}
+
 // debug controls the per-request routing trace (which model, which provider
 // served it). advancedDebug additionally logs response bodies. Failure lines —
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), quotas: make(map[string]map[string]QuotaSnapshot)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), opencodeManagers: make(map[string]*opencode.Manager), quotas: make(map[string]map[string]QuotaSnapshot)}
 	p.forceStream.Store(forceStream)
 	p.forwardClientHeaders.Store(forwardClientHeaders)
 	p.storeAllowClientHeaders(allowClientHeaders)
@@ -217,6 +319,7 @@ func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
 	p.systemPrompt.Store(&systemPrompt)
 	p.pruneClineManagers(reg)
 	p.pruneCodexManager(reg)
+	p.pruneOpencodeManagers(reg)
 	p.pruneQuotas(reg)
 }
 
@@ -303,6 +406,29 @@ func (p *Proxy) pruneCodexManager(reg *provider.Registry) {
 	p.codexMu.Lock()
 	p.codexManager = nil
 	p.codexMu.Unlock()
+}
+
+// pruneOpencodeManagers drops per-server Console managers once no account in
+// the store points at that server anymore. The store is the source of truth
+// for live servers because accounts — not provider blocks — own the server
+// URL. The proxy already holds the provider registry, so a manager keyed by
+// an account server survives exactly while at least one opencode provider is
+// configured; without any opencode provider every manager is dropped.
+func (p *Proxy) pruneOpencodeManagers(reg *provider.Registry) {
+	keep := false
+	for _, pc := range reg.ProviderConfigs() {
+		if pc.Style == "opencode" && !pc.Disabled {
+			keep = true
+			break
+		}
+	}
+
+	p.opencodeMu.Lock()
+	defer p.opencodeMu.Unlock()
+
+	if !keep {
+		p.opencodeManagers = make(map[string]*opencode.Manager)
+	}
 }
 
 // captureQuota records the Codex rate-limit headers carried on one upstream
@@ -1080,10 +1206,22 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				codex.SetHeaders(req.Header, token)
 			} else if pv.Style == "google" {
 				req.Header.Set(googleAPIKeyHeader, key)
-			} else if pv.Style == "opencode" {
-				opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID())
-				req.Header.Set("Authorization", "Bearer "+key)
-			} else {
+		} else if pv.Style == "opencode" {
+			// The key pool carries account refresh tokens, never the api_key
+			// from YAML. Exchange for a short-lived Console access token here;
+			// the serving account's org id rides on x-org-id automatically.
+			server, orgID := p.opencodeServerOrg(key)
+			token, err := p.opencodeAccessToken(r.Context(), server, key, forceRefresh)
+			if err != nil {
+				p.log.Printf("opencode token refresh failed via %s: %v", pv.Name, err)
+				lastStatus = http.StatusUnauthorized
+				lastErrBody = []byte(err.Error())
+				pv.Keys.MarkDead(key)
+				break
+			}
+			opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID(), orgID)
+			req.Header.Set("Authorization", "Bearer "+token)
+		} else {
 				applyAuthHeaders(req.Header, key, pv.AuthMode)
 			}
 
@@ -1104,7 +1242,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 
 			p.captureQuota(pv.Name, key, r2.Header)
 
-			if (pv.Style == "cline" || pv.Style == "codex") && r2.StatusCode == http.StatusUnauthorized && !refreshed {
+			if (pv.Style == "cline" || pv.Style == "codex" || pv.Style == "opencode") && r2.StatusCode == http.StatusUnauthorized && !refreshed {
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("%s token stale via %s, refreshing", pv.Style, pv.Name), r2, eb)

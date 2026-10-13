@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func opencodeTestRegistryWithStyleCall(upstream *httptest.Server, styleCall stri
 		Name:    "oc-test",
 		BaseURL: upstream.URL,
 		Style:   "opencode",
-		Keys:    []string{"oc_sk_key"},
+		Keys:    []string{"oc_refresh_token"},
 	}}, []model.Rule{{
 		ModelID: "test-model",
 		Routes:  []model.Spec{{Provider: "oc-test", Model: "up-model", StyleCall: styleCall}},
@@ -67,8 +68,8 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("x-opencode-client"); got != "cli" {
 		t.Errorf("x-opencode-client = %q, want cli", got)
 	}
-	if got := r.Header.Get("Authorization"); got != "Bearer oc_sk_key" {
-		t.Errorf("Authorization = %q, want Bearer oc_sk_key", got)
+	if got := r.Header.Get("Authorization"); got != "Bearer oc_access_token" {
+		t.Errorf("Authorization = %q, want Bearer oc_access_token", got)
 	}
 	if got := r.Header.Get("x-api-key"); got != "" {
 		t.Errorf("x-api-key = %q, want empty (opencode auth is Bearer-only)", got)
@@ -110,12 +111,62 @@ func assertRequiredToolsPresent(t *testing.T, tools []any) {
 	}
 }
 
+// newOpencodeTestProxy points the account store and the Console server at the
+// fake upstream, so the legacy tests exercise the account-token path without
+// touching the network. The account holds no org, so no x-org-id is expected.
+func newOpencodeTestProxy(t *testing.T, upstream *httptest.Server, registry *provider.Registry) *Proxy {
+	t.Helper()
+
+	storePath := filepath.Join(t.TempDir(), "opencode-accounts.json")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", storePath)
+	store, err := opencode.LoadAccountStore(storePath)
+	if err != nil {
+		t.Fatalf("LoadAccountStore: %v", err)
+	}
+	if err := store.Add(opencode.Account{
+		AccountID: "u-1", Email: "dev@example.test", RefreshToken: "oc_refresh_token",
+		Server: upstream.URL, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy.opencodeMu.Lock()
+	proxy.opencodeManagers[upstream.URL] = opencode.NewManager(&opencode.Client{
+		HTTPClient: upstream.Client(), Server: upstream.URL,
+	}, store)
+	proxy.opencodeMu.Unlock()
+
+	return proxy
+}
+
+// opencodeTokenExchange serves the Console refresh endpoint with a long-lived
+// access token, so the legacy tests pay exactly one exchange per run. Any
+// other path falls through to the test's own handler body.
+func opencodeTokenExchange(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token":  "oc_access_token",
+		"refresh_token": "oc_refresh_token",
+		"expires_in":    3600,
+	})
+}
+
 func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 	sanitized := openCodeSanitizedBash()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+			return
 		}
 		assertOpenCodeHeaders(t, r)
 
@@ -154,7 +205,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
@@ -179,6 +230,10 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 	sanitized := openCodeSanitizedBash()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		assertOpenCodeHeaders(t, r)
 
 		var body map[string]any
@@ -209,7 +264,7 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
 		`{"model":"test-model","stream":true,"input":[{"type":"function_call","call_id":"call_0","name":"bash","arguments":"{}"}],`+
@@ -232,6 +287,10 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 
 func TestForwardOpenCodeWithoutClientTools(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("body decode: %v", err)
@@ -248,7 +307,7 @@ func TestForwardOpenCodeWithoutClientTools(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
@@ -268,6 +327,10 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 	sanitized := openCodeSanitizedBash()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("path = %q, want /v1/chat/completions", r.URL.Path)
 		}
@@ -302,7 +365,7 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "chat"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
@@ -323,6 +386,10 @@ func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
 	var upstreamBody map[string]any
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
 			t.Errorf("body decode: %v", err)
 		}
@@ -334,7 +401,7 @@ func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "chat"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"none",`+
@@ -358,6 +425,10 @@ func TestForwardOpenCodeForcesAutoToolChoice(t *testing.T) {
 	var upstreamBody map[string]any
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
 			t.Errorf("body decode: %v", err)
 		}
@@ -369,7 +440,7 @@ func TestForwardOpenCodeForcesAutoToolChoice(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "chat"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "chat"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"required",`+
@@ -395,6 +466,10 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if r.URL.Path != "/v1/messages" {
 			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
 		}
@@ -430,7 +505,7 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "messages"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "messages"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
@@ -453,6 +528,10 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 
 func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("body decode: %v", err)
@@ -467,7 +546,7 @@ func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistryWithStyleCall(upstream, "responses"), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
@@ -482,6 +561,10 @@ func TestForwardOpenCodeClampsMinTokens(t *testing.T) {
 
 func TestForwardOpenCodeDefaultsToChat(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("path = %q, want /v1/chat/completions (default dialect)", r.URL.Path)
 		}
@@ -493,7 +576,7 @@ func TestForwardOpenCodeDefaultsToChat(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := NewProxy(opencodeTestRegistry(upstream), upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistry(upstream))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`))

@@ -49,7 +49,7 @@ func NewRequestID() string {
 	return newID("msg_")
 }
 
-func SetHeaders(header http.Header, sessionID, requestID string) {
+func SetHeaders(header http.Header, sessionID, requestID, orgID string) {
 	header.Set("User-Agent", UserAgent)
 	header.Set("x-opencode-session", sessionID)
 	// Alternate spellings of the session header seen on the wire; the
@@ -59,6 +59,11 @@ func SetHeaders(header http.Header, sessionID, requestID string) {
 	header.Set("x-opencode-request", requestID)
 	header.Set("x-opencode-project", "global")
 	header.Set("x-opencode-client", "cli")
+	// The Console client attaches the serving account's org only when the
+	// account belongs to one; the gateway behaves the same without it.
+	if orgID != "" {
+		header.Set("x-org-id", orgID)
+	}
 }
 
 func newID(prefix string) string {

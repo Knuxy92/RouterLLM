@@ -55,7 +55,7 @@ func TestIDsAreUniqueAcrossCalls(t *testing.T) {
 func TestSetHeaders(t *testing.T) {
 	h := make(http.Header)
 
-	SetHeaders(h, "ses_abc", "msg_def")
+	SetHeaders(h, "ses_abc", "msg_def", "")
 
 	want := map[string]string{
 		"User-Agent":            UserAgent,
@@ -76,6 +76,19 @@ func TestSetHeaders(t *testing.T) {
 	}
 	if _, ok := h["Authorization"]; ok {
 		t.Fatalf("Authorization header set, want none")
+	}
+	if _, ok := h["X-Org-Id"]; ok {
+		t.Fatalf("X-Org-Id header set, want none")
+	}
+}
+
+func TestSetHeadersWithOrg(t *testing.T) {
+	h := make(http.Header)
+
+	SetHeaders(h, "ses_abc", "msg_def", "org-1")
+
+	if got := h.Get("X-Org-Id"); got != "org-1" {
+		t.Fatalf("X-Org-Id = %q, want org-1", got)
 	}
 }
 

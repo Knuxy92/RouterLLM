@@ -298,6 +298,10 @@ func runAnthropicLeg(t *testing.T, clamp bool) int {
 	var upstreamDepth int
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("body decode: %v", err)
@@ -321,13 +325,13 @@ func runAnthropicLeg(t *testing.T, clamp bool) int {
 		Name:    "oc-clamp",
 		BaseURL: upstream.URL,
 		Style:   "opencode",
-		Keys:    []string{"oc_sk_key"},
+		Keys:    []string{"oc_refresh_token"},
 	}}, []model.Rule{{
 		ModelID: "test-model",
 		Routes:  []model.Spec{{Provider: "oc-clamp", Model: "up-model", StyleCall: "messages", ClampToolSchemas: clamp}},
 	}}, time.Minute)
 
-	proxy := NewProxy(registry, upstream.Client(), log.New(io.Discard, "", 0), false, false, false, false, nil, "")
+	proxy := newOpencodeTestProxy(t, upstream, registry)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(marshalBody(t, chatToolBody("deep_probe", nestedSchema(12)))))
 	w := httptest.NewRecorder()
 
