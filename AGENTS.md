@@ -53,6 +53,7 @@ All provider fields (style, base_url, headers, auth_mode, share, query) must be 
 - `internal/config/yaml.go` — YAML config loader. Supports `${VAR}` env var substitution with comma-split for multi-key.
 - `internal/model/model.go` — shared types: Rule/Spec/RequestDefaults for routing, Model/Choice/Message for chat API.
 - `internal/provider/provider.go` — `NewRegistry(configs, rules, cooldown)` builds the live route table from model rules. A route only activates if its provider is configured (has keys).
+- `internal/quota/quota.go` — parses the Codex `X-Codex-*` rate-limit headers into a snapshot. A leaf package (stdlib only, no repo imports); the Proxy owns the store and calls `quota.ParseHeaders` per response, while the admin console reads `quota.Snapshot` for the per-key quota row.
 - `internal/services/proxy.go` — the `Proxy` object: struct fields, `NewProxy`, the hot-reload setters (`Apply`, `ApplySettings`, `SetDedupeTools`, `SetClampToolSchemas`), the Codex quota snapshot and the client-header allowlist. One file per concern elsewhere in the package, all still `package services`:
 - `internal/services/proxy_forward.go` — the request pipeline. `Forward` selects routes, applies defaults, translates per dialect, and iterates keys with retry/backoff (`ForwardRaw`, `translateRoute`, `forward`, `tryKeys`, `injectSystemPrompt`).
 - `internal/services/proxy_serve.go` — every `serve*` writer, one per upstream dialect (openai/responses/messages/google/codex plus the `force_stream` passthrough).
