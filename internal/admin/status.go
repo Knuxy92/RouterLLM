@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"routerllm/internal/provider"
-	"routerllm/internal/services"
+	"routerllm/internal/quota"
 )
 
 type KeyState struct {
@@ -13,7 +13,7 @@ type KeyState struct {
 	Alive        bool                    `json:"alive"`
 	CooldownLeft int                     `json:"cooldown_left_seconds"`
 	Disabled     bool                    `json:"disabled"`
-	Quota        *services.QuotaSnapshot `json:"quota,omitempty"`
+	Quota        *quota.Snapshot `json:"quota,omitempty"`
 }
 
 type ProviderStatus struct {
@@ -91,7 +91,7 @@ func (d Deps) buildStatus() Status {
 	}
 }
 
-func buildProviders(reg *provider.Registry, quota func(provider, key string) (services.QuotaSnapshot, bool)) []ProviderStatus {
+func buildProviders(reg *provider.Registry, quotaFn func(provider, key string) (quota.Snapshot, bool)) []ProviderStatus {
 	out := make([]ProviderStatus, 0, reg.TotalProviders())
 
 	for _, pc := range reg.ProviderConfigs() {
@@ -110,7 +110,7 @@ func buildProviders(reg *provider.Registry, quota func(provider, key string) (se
 			status.KeysAlive = live.Keys.AliveCount()
 			status.Requests = live.Stats().Requests()
 			status.Errors = live.Stats().Errors()
-			status.Keys = keyStates(live, pc.Keys, quota)
+			status.Keys = keyStates(live, pc.Keys, quotaFn)
 		}
 		status.KeysTotal = len(pc.Keys)
 
@@ -120,14 +120,14 @@ func buildProviders(reg *provider.Registry, quota func(provider, key string) (se
 	return out
 }
 
-func keyStates(p *provider.Provider, rawKeys []string, quota func(provider, key string) (services.QuotaSnapshot, bool)) []KeyState {
+func keyStates(p *provider.Provider, rawKeys []string, quotaFn func(provider, key string) (quota.Snapshot, bool)) []KeyState {
 	states := p.Keys.States()
 	out := make([]KeyState, 0, len(states))
 
 	for i, s := range states {
 		state := KeyState{Masked: s.Masked, Alive: s.Alive}
-		if quota != nil && i < len(rawKeys) {
-			if snapshot, ok := quota(p.Name, rawKeys[i]); ok {
+		if quotaFn != nil && i < len(rawKeys) {
+			if snapshot, ok := quotaFn(p.Name, rawKeys[i]); ok {
 				state.Quota = &snapshot
 			}
 		}

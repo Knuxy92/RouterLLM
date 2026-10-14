@@ -16,40 +16,8 @@ import (
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
+	"routerllm/internal/quota"
 )
-
-func TestParseQuotaHeaders(t *testing.T) {
-	header := http.Header{}
-	header.Set("X-Codex-Primary-Used-Percent", "42")
-	header.Set("X-Codex-Primary-Window-Minutes", "43200")
-	header.Set("X-Codex-Primary-Reset-At", "1792294116")
-	header.Set("X-Codex-Secondary-Used-Percent", "0")
-	header.Set("X-Codex-Secondary-Window-Minutes", "0")
-	header.Set("X-Codex-Plan-Type", "free")
-
-	snapshot, ok := parseQuotaHeaders(header)
-	if !ok {
-		t.Fatal("expected a snapshot")
-	}
-	if snapshot.Primary == nil || snapshot.Primary.UsedPercent != 42 || snapshot.Primary.WindowMinutes != 43200 || snapshot.Primary.ResetAt != 1792294116 {
-		t.Fatalf("primary = %+v", snapshot.Primary)
-	}
-	if snapshot.Secondary != nil {
-		t.Fatalf("zero-length secondary window must be dropped: %+v", snapshot.Secondary)
-	}
-	if snapshot.PlanType != "free" {
-		t.Fatalf("plan = %q, want free", snapshot.PlanType)
-	}
-}
-
-func TestParseQuotaHeadersWithoutCodexHeaders(t *testing.T) {
-	if _, ok := parseQuotaHeaders(http.Header{}); ok {
-		t.Fatal("plain headers must not produce a snapshot")
-	}
-	if _, ok := parseQuotaHeaders(nil); ok {
-		t.Fatal("nil headers must not produce a snapshot")
-	}
-}
 
 // quotaProxy builds a codex proxy whose fake upstream answers /oauth/token and
 // /codex/responses, with the quota headers driven by percent.
@@ -161,8 +129,8 @@ func TestForwardWarnsOncePerQuotaCrossing(t *testing.T) {
 
 func TestApplyPrunesQuotasForRemovedProviders(t *testing.T) {
 	proxy := NewProxy(provider.NewRegistry(nil, nil, time.Minute), nil, log.New(io.Discard, "", 0), false, false, false, false, nil, "")
-	proxy.quotas["gone"] = map[string]QuotaSnapshot{"k": {}}
-	proxy.quotas["kept"] = map[string]QuotaSnapshot{"k": {}}
+	proxy.quotas["gone"] = map[string]quota.Snapshot{"k": {}}
+	proxy.quotas["kept"] = map[string]quota.Snapshot{"k": {}}
 
 	next := provider.NewRegistry([]config.ProviderConfig{{
 		Name: "kept", BaseURL: "https://example.test", Style: "openai", Keys: []string{"k"},

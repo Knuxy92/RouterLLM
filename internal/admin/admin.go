@@ -13,6 +13,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"routerllm/internal/provider"
+	"routerllm/internal/quota"
 	"routerllm/internal/services"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
@@ -32,7 +33,7 @@ type Deps struct {
 	Test func(r *http.Request, req services.TestRequest) *services.TestResult
 	// Quota reports the last Codex rate-limit snapshot for one provider key;
 	// nil simply omits quota display.
-	Quota func(provider, key string) (services.QuotaSnapshot, bool)
+	Quota func(provider, key string) (quota.Snapshot, bool)
 }
 
 func Mount(r chi.Router, deps Deps) {

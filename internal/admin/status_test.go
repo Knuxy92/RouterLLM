@@ -7,7 +7,7 @@ import (
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
-	"routerllm/internal/services"
+	"routerllm/internal/quota"
 )
 
 func TestBuildProvidersAttachesKeyQuota(t *testing.T) {
@@ -18,18 +18,18 @@ func TestBuildProvidersAttachesKeyQuota(t *testing.T) {
 		ModelID: "m", Routes: []model.Spec{{Provider: "codex", Model: "m"}},
 	}}, time.Minute)
 
-	quota := func(name, key string) (services.QuotaSnapshot, bool) {
+	quotaFn := func(name, key string) (quota.Snapshot, bool) {
 		if name != "codex" || key != "rt-1" {
-			return services.QuotaSnapshot{}, false
+			return quota.Snapshot{}, false
 		}
 
-		return services.QuotaSnapshot{
-			Primary:  &services.QuotaWindow{UsedPercent: 42, WindowMinutes: 43200, ResetAt: 1792294116},
+		return quota.Snapshot{
+			Primary:  &quota.Window{UsedPercent: 42, WindowMinutes: 43200, ResetAt: 1792294116},
 			PlanType: "free",
 		}, true
 	}
 
-	providers := buildProviders(reg, quota)
+	providers := buildProviders(reg, quotaFn)
 	if len(providers) != 1 || len(providers[0].Keys) != 2 {
 		t.Fatalf("providers = %+v", providers)
 	}

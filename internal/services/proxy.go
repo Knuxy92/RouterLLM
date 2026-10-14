@@ -13,6 +13,7 @@ import (
 	"routerllm/internal/codex"
 	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
+	"routerllm/internal/quota"
 	"routerllm/internal/telemetry"
 )
 
@@ -65,7 +66,7 @@ type Proxy struct {
 	opencodeManagers     map[string]*opencode.Manager
 	opencodeBinding      map[string]opencodeBindingKey
 	quotaMu              sync.Mutex
-	quotas               map[string]map[string]QuotaSnapshot
+	quotas               map[string]map[string]quota.Snapshot
 	telemetry            atomic.Pointer[telemetry.Store]
 }
 
@@ -74,7 +75,7 @@ type Proxy struct {
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), opencodeManagers: make(map[string]*opencode.Manager), quotas: make(map[string]map[string]QuotaSnapshot)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), opencodeManagers: make(map[string]*opencode.Manager), quotas: make(map[string]map[string]quota.Snapshot)}
 	p.forceStream.Store(forceStream)
 	p.forwardClientHeaders.Store(forwardClientHeaders)
 	p.storeAllowClientHeaders(allowClientHeaders)
@@ -180,7 +181,7 @@ func (p *Proxy) clientHeaderAllowlist() []string {
 // any extra request; the warn line fires once per upward crossing of the
 // threshold and re-arms after the value drops back below it.
 func (p *Proxy) captureQuota(providerName, key string, header http.Header) {
-	snapshot, ok := parseQuotaHeaders(header)
+	snapshot, ok := quota.ParseHeaders(header)
 	if !ok {
 		return
 	}
@@ -188,7 +189,7 @@ func (p *Proxy) captureQuota(providerName, key string, header http.Header) {
 	p.quotaMu.Lock()
 	byKey := p.quotas[providerName]
 	if byKey == nil {
-		byKey = make(map[string]QuotaSnapshot)
+		byKey = make(map[string]quota.Snapshot)
 		p.quotas[providerName] = byKey
 	}
 	previous, had := byKey[key]
@@ -198,8 +199,8 @@ func (p *Proxy) captureQuota(providerName, key string, header http.Header) {
 	if snapshot.Primary == nil {
 		return
 	}
-	wasAbove := had && previous.Primary != nil && previous.Primary.UsedPercent >= quotaWarnPercent
-	if snapshot.Primary.UsedPercent >= quotaWarnPercent && !wasAbove {
+	wasAbove := had && previous.Primary != nil && previous.Primary.UsedPercent >= quota.WarnPercent
+	if snapshot.Primary.UsedPercent >= quota.WarnPercent && !wasAbove {
 		p.log.Printf("codex quota: provider=%s key=%s primary=%d%% window=%dm resets_at=%s", providerName, maskKey(key), snapshot.Primary.UsedPercent, snapshot.Primary.WindowMinutes, quotaResetLabel(snapshot.Primary.ResetAt))
 	}
 }
@@ -213,7 +214,7 @@ func quotaResetLabel(resetAt int64) string {
 }
 
 // Quota returns the last Codex rate-limit snapshot observed for one provider key.
-func (p *Proxy) Quota(providerName, key string) (QuotaSnapshot, bool) {
+func (p *Proxy) Quota(providerName, key string) (quota.Snapshot, bool) {
 	p.quotaMu.Lock()
 	defer p.quotaMu.Unlock()
 

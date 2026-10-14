@@ -1,4 +1,8 @@
-package services
+// Package quota reads the Codex rate-limit headers the gateway repeats on
+// every upstream response and turns them into a snapshot the console can show
+// per provider key. It holds no proxy state — the Proxy owns the store and
+// calls ParseHeaders on each response.
+package quota
 
 import (
 	"net/http"
@@ -6,39 +10,41 @@ import (
 	"time"
 )
 
-const quotaWarnPercent = 80
+// WarnPercent is the used-percentage threshold at which the proxy logs a
+// one-line warning as a key crosses it.
+const WarnPercent = 80
 
-// QuotaWindow is one Codex rate-limit window as advertised on upstream
+// Window is one Codex rate-limit window as advertised on upstream
 // response headers (X-Codex-Primary-* / X-Codex-Secondary-*).
-type QuotaWindow struct {
+type Window struct {
 	UsedPercent   int   `json:"used_percent"`
 	WindowMinutes int   `json:"window_minutes"`
 	ResetAt       int64 `json:"reset_at"`
 }
 
-// QuotaSnapshot is the latest Codex rate-limit state observed for one provider
+// Snapshot is the latest Codex rate-limit state observed for one provider
 // key. The upstream repeats these headers on every response, so the snapshot
 // stays current without any extra request.
-type QuotaSnapshot struct {
-	Primary   *QuotaWindow `json:"primary,omitempty"`
-	Secondary *QuotaWindow `json:"secondary,omitempty"`
-	PlanType  string       `json:"plan_type,omitempty"`
-	UpdatedAt time.Time    `json:"updated_at"`
+type Snapshot struct {
+	Primary   *Window   `json:"primary,omitempty"`
+	Secondary *Window   `json:"secondary,omitempty"`
+	PlanType  string    `json:"plan_type,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func parseQuotaHeaders(h http.Header) (QuotaSnapshot, bool) {
+func ParseHeaders(h http.Header) (Snapshot, bool) {
 	if h == nil {
-		return QuotaSnapshot{}, false
+		return Snapshot{}, false
 	}
 
 	primary, hasPrimary := parseQuotaWindow(h, "X-Codex-Primary")
 	secondary, hasSecondary := parseQuotaWindow(h, "X-Codex-Secondary")
 	planType := h.Get("X-Codex-Plan-Type")
 	if !hasPrimary && !hasSecondary && planType == "" {
-		return QuotaSnapshot{}, false
+		return Snapshot{}, false
 	}
 
-	snapshot := QuotaSnapshot{PlanType: planType, UpdatedAt: time.Now()}
+	snapshot := Snapshot{PlanType: planType, UpdatedAt: time.Now()}
 	if hasPrimary {
 		snapshot.Primary = &primary
 	}
@@ -53,18 +59,18 @@ func parseQuotaHeaders(h http.Header) (QuotaSnapshot, bool) {
 
 // parseQuotaWindow reads one window's headers. A window needs at least a used
 // percent; the window length and reset time are optional extras.
-func parseQuotaWindow(h http.Header, prefix string) (QuotaWindow, bool) {
+func parseQuotaWindow(h http.Header, prefix string) (Window, bool) {
 	raw := h.Get(prefix + "-Used-Percent")
 	if raw == "" {
-		return QuotaWindow{}, false
+		return Window{}, false
 	}
 
 	percent, err := strconv.Atoi(raw)
 	if err != nil {
-		return QuotaWindow{}, false
+		return Window{}, false
 	}
 
-	window := QuotaWindow{UsedPercent: percent}
+	window := Window{UsedPercent: percent}
 	if minutes, err := strconv.Atoi(h.Get(prefix + "-Window-Minutes")); err == nil {
 		window.WindowMinutes = minutes
 	}
