@@ -137,22 +137,29 @@ func TestSetHeadersWithOrg(t *testing.T) {
 
 func TestRequiredToolsMatchNames(t *testing.T) {
 	names := RequiredToolNames()
+	table := RequiredToolDetail()
 
-	want := []string{"bash", "read", "task", "todowrite", "webfetch", "websearch", "write"}
-	if len(names) != len(want) {
-		t.Fatalf("names = %v, want %v", names, want)
+	if len(names) == 0 {
+		t.Fatal("no required tools")
 	}
-	for i, name := range want {
-		if names[i] != name {
-			t.Fatalf("names[%d] = %q, want %q", i, names[i], name)
-		}
+	if len(table) != len(names) {
+		t.Fatalf("table has %d tools, names has %d", len(table), len(names))
 	}
 
 	tools := RequiredTools()
 	if len(tools) != len(names) {
 		t.Fatalf("got %d tools, want %d", len(tools), len(names))
 	}
+
 	for i, name := range names {
+		// The rename pass keys off RequiredToolNames and the injection pass
+		// keys off RequiredTools. If these ever disagree, a colliding client
+		// tool is renamed without its replacement ever being injected.
+		want := table[i].Name
+		if name != want {
+			t.Fatalf("names[%d] = %q, want %q (table entry)", i, name, want)
+		}
+
 		tool := tools[i]
 		if tool["type"] != "function" {
 			t.Fatalf("tool %d type = %v, want function", i, tool["type"])
@@ -161,37 +168,46 @@ func TestRequiredToolsMatchNames(t *testing.T) {
 		if !ok {
 			t.Fatalf("tool %d function = %v, want map", i, tool["function"])
 		}
-		if fn["name"] != name {
-			t.Fatalf("tool %d name = %v, want %q", i, fn["name"], name)
+		if fn["name"] != want {
+			t.Fatalf("tool %d name = %v, want %q", i, fn["name"], want)
 		}
-		if fn["description"] != "DONT USE THIS TOOL" {
-			t.Fatalf("tool %d description = %v", i, fn["description"])
+		if fn["description"] != table[i].Desc {
+			t.Fatalf("tool %d description = %v, want %q", i, fn["description"], table[i].Desc)
 		}
 		if fn["strict"] != false {
 			t.Fatalf("tool %d strict = %v, want false", i, fn["strict"])
 		}
+
 		params, ok := fn["parameters"].(map[string]any)
 		if !ok {
 			t.Fatalf("tool %d parameters = %v, want map", i, fn["parameters"])
 		}
-		if len(params) != 3 {
-			t.Fatalf("tool %d parameters = %v, want properties/required/type only", i, params)
+		if len(params) != 4 {
+			t.Fatalf("tool %d parameters = %v, want type/properties/required/additionalProperties", i, params)
 		}
 		props, ok := params["properties"].(map[string]any)
-		if !ok || len(props) != 0 {
-			t.Fatalf("tool %d properties = %v, want empty map", i, params["properties"])
+		if !ok || len(props) != len(table[i].Properties) {
+			t.Fatalf("tool %d properties = %v, want %d entries", i, params["properties"], len(table[i].Properties))
 		}
-		req, ok := params["required"].([]string)
-		if !ok || len(req) != 0 {
-			t.Fatalf("tool %d required = %v, want empty slice", i, params["required"])
+		for _, p := range table[i].Properties {
+			if _, ok := props[p]; !ok {
+				t.Fatalf("tool %d properties missing %q", i, p)
+			}
 		}
-		if params["type"] != "object" {
-			t.Fatalf("tool %d parameters type = %v, want object", i, params["type"])
+		if req, ok := params["required"].([]string); !ok || len(req) != len(table[i].Required) {
+			t.Fatalf("tool %d required = %v, want %v", i, params["required"], table[i].Required)
+		}
+		if params["type"] != "null" {
+			t.Fatalf("tool %d parameters type = %v, want null", i, params["type"])
+		}
+		if params["additionalProperties"] != false {
+			t.Fatalf("tool %d additionalProperties = %v, want false", i, params["additionalProperties"])
 		}
 	}
 }
 
 func TestRequiredToolsReturnsIndependentCopies(t *testing.T) {
+	table := RequiredToolDetail()
 	first := RequiredTools()
 
 	first[0]["type"] = "mutated"
@@ -210,15 +226,15 @@ func TestRequiredToolsReturnsIndependentCopies(t *testing.T) {
 	if !ok {
 		t.Fatalf("second call function not a map")
 	}
-	if fn2["name"] != "bash" {
-		t.Fatalf("second call name = %v, want bash", fn2["name"])
+	if fn2["name"] != table[0].Name {
+		t.Fatalf("second call name = %v, want %q", fn2["name"], table[0].Name)
 	}
 	params2 := fn2["parameters"].(map[string]any)
 	props2 := params2["properties"].(map[string]any)
-	if len(props2) != 0 {
-		t.Fatalf("second call properties = %v, want empty map", props2)
+	if _, leaked := props2["injected"]; leaked {
+		t.Fatalf("second call properties = %v, want the original set", props2)
 	}
-	if req2 := params2["required"].([]string); len(req2) != 0 {
-		t.Fatalf("second call required = %v, want empty slice", req2)
+	if req2 := params2["required"].([]string); len(req2) != len(table[0].Required) {
+		t.Fatalf("second call required = %v, want %v", req2, table[0].Required)
 	}
 }

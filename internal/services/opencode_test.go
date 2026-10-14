@@ -33,15 +33,19 @@ func opencodeTestRegistryWithStyleCall(upstream *httptest.Server, styleCall stri
 	}}, time.Minute)
 }
 
-// openCodeSanitizedBash computes the deterministic renamed form a client tool
-// named "bash" receives on an opencode leg.
-func openCodeSanitizedBash() string {
+// openCodeCollidingTool is a client tool name that is also in the gateway's
+// required set, so it exercises the rename-and-restore path.
+const openCodeCollidingTool = "edit"
+
+// openCodeSanitizedTool computes the deterministic renamed form openCodeCollidingTool
+// receives on an opencode leg.
+func openCodeSanitizedTool() string {
 	used := map[string]bool{}
 	for _, name := range opencode.RequiredToolNames() {
 		used[name] = true
 	}
 
-	return uniqueSanitizedToolName("bash", used)
+	return uniqueSanitizedToolName(openCodeCollidingTool, used)
 }
 
 func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
@@ -88,7 +92,7 @@ func assertRequiredToolsPresent(t *testing.T, tools []any) {
 		}
 		if name, _ := tm["name"].(string); name != "" {
 			byName[name] = true
-			if name == "bash" {
+			if name == openCodeCollidingTool {
 				if strict, ok := tm["strict"].(bool); !ok || strict {
 					t.Errorf("injected tool %q must carry strict=false (got %v, present %v)", name, strict, ok)
 				}
@@ -148,7 +152,7 @@ func opencodeTokenExchange(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
-	sanitized := openCodeSanitizedBash()
+	sanitized := openCodeSanitizedTool()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		opencodeTokenExchange(w, r)
@@ -167,7 +171,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 		}
 		tools, _ := body["tools"].([]any)
 		if len(tools) != len(opencode.RequiredToolNames())+1 {
-			t.Errorf("upstream tools = %d, want %d (7 required + 1 renamed client tool)", len(tools), len(opencode.RequiredToolNames())+1)
+			t.Errorf("upstream tools = %d, want %d (required + 1 renamed client tool)", len(tools), len(opencode.RequiredToolNames())+1)
 		}
 		assertRequiredToolsPresent(t, tools)
 
@@ -182,8 +186,8 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 		if !names[sanitized] {
 			t.Errorf("client tool not renamed to %q; names = %v", sanitized, names)
 		}
-		if names["bash"] && !names[sanitized] {
-			t.Error("client tool kept the reserved name bash")
+		if names[openCodeCollidingTool] && !names[sanitized] {
+			t.Errorf("client tool kept the reserved name %s", openCodeCollidingTool)
 		}
 		if _, ok := body["tool_choice"]; !ok {
 			t.Error("tool_choice missing")
@@ -200,7 +204,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
-			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+			`"tools":[{"type":"function","function":{"name":"`+openCodeCollidingTool+`","parameters":{"type":"object"}}}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/chat/completions", w, req)
@@ -209,7 +213,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, `"name":"bash"`) {
+	if !strings.Contains(body, `"name":"`+openCodeCollidingTool+`"`) {
 		t.Fatalf("client must see the original tool name:\n%s", body)
 	}
 	if strings.Contains(body, sanitized) {
@@ -218,7 +222,7 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 }
 
 func TestForwardOpenCodeResponsesInbound(t *testing.T) {
-	sanitized := openCodeSanitizedBash()
+	sanitized := openCodeSanitizedTool()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		opencodeTokenExchange(w, r)
@@ -258,8 +262,8 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
-		`{"model":"test-model","stream":true,"input":[{"type":"function_call","call_id":"call_0","name":"bash","arguments":"{}"}],`+
-			`"tools":[{"type":"function","name":"bash","strict":false}]}`))
+		`{"model":"test-model","stream":true,"input":[{"type":"function_call","call_id":"call_0","name":"`+openCodeCollidingTool+`","arguments":"{}"}],`+
+			`"tools":[{"type":"function","name":"`+openCodeCollidingTool+`","strict":false}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/responses", w, req)
@@ -268,7 +272,7 @@ func TestForwardOpenCodeResponsesInbound(t *testing.T) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, `"name":"bash"`) {
+	if !strings.Contains(body, `"name":"`+openCodeCollidingTool+`"`) {
 		t.Fatalf("client must see the original tool name:\n%s", body)
 	}
 	if strings.Contains(body, sanitized) {
@@ -315,7 +319,7 @@ func TestForwardOpenCodeWithoutClientTools(t *testing.T) {
 }
 
 func TestForwardOpenCodeStyleCallChat(t *testing.T) {
-	sanitized := openCodeSanitizedBash()
+	sanitized := openCodeSanitizedTool()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		opencodeTokenExchange(w, r)
@@ -360,7 +364,7 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
-			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+			`"tools":[{"type":"function","function":{"name":"`+openCodeCollidingTool+`","parameters":{"type":"object"}}}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/chat/completions", w, req)
@@ -368,7 +372,7 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"name":"bash"`) {
+	if !strings.Contains(w.Body.String(), `"name":"`+openCodeCollidingTool+`"`) {
 		t.Fatalf("client must see the original tool name:\n%s", w.Body.String())
 	}
 }
@@ -396,7 +400,7 @@ func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"none",`+
-			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+			`"tools":[{"type":"function","function":{"name":"`+openCodeCollidingTool+`","parameters":{"type":"object"}}}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/chat/completions", w, req)
@@ -435,7 +439,7 @@ func TestForwardOpenCodeForcesAutoToolChoice(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],"tool_choice":"required",`+
-			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object"}}}]}`))
+			`"tools":[{"type":"function","function":{"name":"`+openCodeCollidingTool+`","parameters":{"type":"object"}}}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/chat/completions", w, req)
@@ -449,7 +453,7 @@ func TestForwardOpenCodeForcesAutoToolChoice(t *testing.T) {
 }
 
 func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
-	sanitized := openCodeSanitizedBash()
+	sanitized := openCodeSanitizedTool()
 	anthropicSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n" +
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"" + sanitized + "\"}}\n\n" +
 		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n" +
@@ -472,7 +476,7 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 		}
 		tools, _ := body["tools"].([]any)
 		if len(tools) != len(opencode.RequiredToolNames())+1 {
-			t.Errorf("upstream tools = %d, want %d (7 required + 1 renamed client tool)", len(tools), len(opencode.RequiredToolNames())+1)
+			t.Errorf("upstream tools = %d, want %d (required + 1 renamed client tool)", len(tools), len(opencode.RequiredToolNames())+1)
 		}
 		seen := map[string]bool{}
 		for _, entry := range tools {
@@ -500,7 +504,7 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
 		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}],`+
-			`"tools":[{"type":"function","function":{"name":"bash","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}}]}`))
+			`"tools":[{"type":"function","function":{"name":"`+openCodeCollidingTool+`","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}}]}`))
 	w := httptest.NewRecorder()
 
 	proxy.Forward("/v1/chat/completions", w, req)
@@ -509,7 +513,7 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, `"name":"bash"`) {
+	if !strings.Contains(body, `"name":"`+openCodeCollidingTool+`"`) {
 		t.Fatalf("client must see the original tool name:\n%s", body)
 	}
 	if strings.Contains(body, sanitized) {
