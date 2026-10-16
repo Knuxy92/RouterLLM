@@ -63,20 +63,6 @@ func RequiredToolDetail() []ToolDef {
 	return append([]ToolDef(nil), requiredTools...)
 }
 
-// RequiredTools renders the table as OpenAI-shaped function definitions.
-//
-// The gateway requires this tool set on every dialect, so the proxy injects it
-// whether or not the client asked for it. These definitions are placeholders
-// that exist to satisfy the gateway: the real capability arrives as the client's
-// own tools, which a colliding name is renamed away from and which the response
-// maps back. The descriptions say so explicitly, and "type": "null" below
-// reinforces it.
-//
-// That "null" is deliberate and contradicts the sibling properties/required —
-// do NOT "fix" it to "object". The gateway in use accepts it, and it is the
-// second signal telling the model these take no arguments. Changing it would
-// leave only the prose to carry that, and a strict schema validator on some
-// other route would reject the whole request rather than one tool.
 func RequiredTools() []map[string]any {
 	tools := make([]map[string]any, len(requiredTools))
 	for i, t := range requiredTools {
@@ -91,7 +77,7 @@ func RequiredTools() []map[string]any {
 				"name":        t.Name,
 				"description": t.Desc,
 				"parameters": map[string]any{
-					"type":                 "null",
+					"type":                 "object",
 					"properties":           props,
 					"required":             t.Required,
 					"additionalProperties": false,
