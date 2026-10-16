@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"routerllm/internal/audit"
 	"routerllm/internal/handlers"
 	"routerllm/internal/util"
 )
@@ -139,6 +140,9 @@ func (w *auditResponseWriter) Flush() {
 	}
 }
 
+// auditLog records the outer two phases of the journey: what the client sent
+// and what went back on the wire. The inner phases are recorded by the proxy
+// into the same trace, which is drained once the handler returns.
 func auditLog(logger *log.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,19 +151,37 @@ func auditLog(logger *log.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			started := time.Now()
-			requestBody, readErr := captureRequestBody(r)
-			logger.Printf("user_request time=%s request_id=%s method=%s path=%s headers=%s body=%q body_truncated=%t read_error=%v",
-				started.Format(time.RFC3339Nano), r.Header.Get("X-Request-ID"), r.Method, r.URL.RequestURI(), formatHeaders(r.Header), requestBody.body, requestBody.truncated, readErr)
+			ctx, tr := audit.WithTrace(r.Context(), logger, r.Header.Get("X-Request-ID"))
+
+			req := tr.Add(audit.PhaseClientReq)
+			req.Method = r.Method
+			req.URL = r.URL.RequestURI()
+			req.Headers = audit.RedactHeaders(r.Header)
+
+			if r.Body != nil {
+				captured, _ := captureRequestBody(r)
+				_, _ = req.Write([]byte(captured.body))
+				if captured.truncated {
+					req.MarkTruncated()
+				}
+			}
+			tr.Emit(req)
 
 			writer := &auditResponseWriter{ResponseWriter: w}
-			next.ServeHTTP(writer, r)
+			next.ServeHTTP(writer, r.WithContext(ctx))
 			if writer.status == 0 {
 				writer.status = http.StatusOK
 			}
 
-			logger.Printf("system_response time=%s request_id=%s status=%d duration=%s headers=%s body=%q body_truncated=%t",
-				time.Now().Format(time.RFC3339Nano), r.Header.Get("X-Request-ID"), writer.status, time.Since(started), formatHeaders(writer.Header()), writer.body.String(), writer.truncated)
+			rep := tr.Add(audit.PhaseClientRep)
+			rep.Status = writer.status
+			rep.DurationMS = time.Since(tr.Start()).Milliseconds()
+			rep.Headers = audit.RedactHeaders(writer.Header())
+			_, _ = rep.Write(writer.body.Bytes())
+			if writer.truncated {
+				rep.MarkTruncated()
+			}
+			tr.Emit(rep)
 		})
 	}
 }

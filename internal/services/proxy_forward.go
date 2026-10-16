@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"routerllm/internal/adapter"
+	"routerllm/internal/audit"
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
@@ -81,6 +82,21 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	p.injectSystemPrompt(body)
 
 	modelName, _ := body["model"].(string)
+
+	// The request as the router settled on it: an /v1/messages body has been
+	// translated to chat shape by the handler before this point, so this is the
+	// first version the rest of the pipeline speaks.
+	if e := audit.FromContext(r.Context()).Add(audit.PhaseServerReq); e != nil {
+		e.Method = r.Method
+		e.URL = path
+		e.Model = modelName
+		e.Headers = audit.RedactHeaders(r.Header)
+		if encoded, err := json.MarshalIndent(body, "", "  "); err == nil {
+			_, _ = e.Write(encoded)
+		}
+		audit.FromContext(r.Context()).Emit(e)
+	}
+
 	routes := p.registry.Load().Routes(modelName)
 	if len(routes) == 0 {
 		return nil, nil, nil, fmt.Errorf("%w: %q", errModelNotFound, modelName)
@@ -422,6 +438,21 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		}
 
 		d := route.Dialect()
+
+		// Everything below writes the translator's own output: the upstream
+		// dialect converted into the shape the client asked for. Recording it
+		// here, under the router's writer, separates what the proxy produced
+		// from what finally reaches the socket.
+		if tr := audit.FromContext(r.Context()); tr != nil {
+			e := tr.Add(audit.PhaseServerRep)
+			e.Status = http.StatusOK
+			e.Provider = route.Provider.Name
+			e.Upstream = route.ModelName
+			e.Dialect = d
+			w = &auditWriter{ResponseWriter: w, entry: e}
+			defer tr.Emit(e)
+		}
+
 		if forceStream && path == "/v1/chat/completions" {
 			p.serveForceStream(resp, route.ModelName, d, w, toolNameRestore)
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusOK, "", traceTokens(resp), ""))
@@ -470,6 +501,31 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, err.Error(), 0, trace.LastBody()))
 		}
 		return
+	}
+}
+
+// auditWriter mirrors what the translation layer writes into an audit entry,
+// so server_rep shows the proxy's own output rather than the raw upstream bytes.
+type auditWriter struct {
+	http.ResponseWriter
+	entry *audit.Entry
+}
+
+func (a *auditWriter) WriteHeader(status int) {
+	a.entry.Status = status
+	a.ResponseWriter.WriteHeader(status)
+}
+
+func (a *auditWriter) Write(p []byte) (int, error) {
+	_, _ = a.entry.Write(p)
+
+	return a.ResponseWriter.Write(p)
+}
+
+// Flush keeps SSE streaming through the wrapper instead of buffering on it.
+func (a *auditWriter) Flush() {
+	if flusher, ok := a.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
 	}
 }
 
@@ -639,12 +695,30 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				applyAuthHeaders(req.Header, key, pv.AuthMode)
 			}
 
+			if reqE := audit.FromContext(r.Context()).Add(audit.PhaseProvReq); reqE != nil {
+				reqE.Method = req.Method
+				reqE.URL = pv.BaseURL + call.path
+				reqE.Provider = pv.Name
+				reqE.Attempt = attempt + 1
+				reqE.Headers = audit.RedactHeaders(req.Header)
+				_, _ = reqE.Write(call.body)
+				audit.FromContext(r.Context()).Emit(reqE)
+			}
+
+			callStart := time.Now()
 			r2, err := p.client.Do(req)
 			if err != nil {
 				safeErr := redactURLError(err)
 				p.log.Printf("proxy error via %s (retry %d/%d): %s", pv.Name, retry+1, maxRetries, safeErr)
 				lastStatus = http.StatusBadGateway
 				lastErrBody = []byte(safeErr)
+				if repE := audit.FromContext(r.Context()).Add(audit.PhaseProvRep); repE != nil {
+					repE.Provider = pv.Name
+					repE.Status = http.StatusBadGateway
+					repE.DurationMS = time.Since(callStart).Milliseconds()
+					_, _ = repE.Write([]byte(safeErr))
+					audit.FromContext(r.Context()).Emit(repE)
+				}
 				if retry < maxRetries-1 {
 					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
@@ -652,6 +726,20 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					continue
 				}
 				break
+			}
+
+			// Headers are known here but the body is not: the response is a stream that
+			// is read further up. Log the phase now so the round trip is visible
+			// live, tee the body so a second line carries the payload, and
+			// repeat the phase for a stream that arrives in chunks.
+			if repE := audit.FromContext(r.Context()).Add(audit.PhaseProvRep); repE != nil {
+				repE.Provider = pv.Name
+				repE.Status = r2.StatusCode
+				repE.DurationMS = time.Since(callStart).Milliseconds()
+				repE.Headers = audit.RedactHeaders(r2.Header)
+				tr := audit.FromContext(r.Context())
+				tr.Emit(repE)
+				r2.Body = audit.TeeBody(r2.Body, repE, func() { tr.Emit(repE) })
 			}
 
 			p.captureQuota(pv.Name, key, r2.Header)

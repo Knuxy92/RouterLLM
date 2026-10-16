@@ -91,13 +91,14 @@ func TestAuditLogUsesConfiguredLogger(t *testing.T) {
 
 	logs := output.String()
 	for _, want := range []string{
-		"user_request time=",
-		"system_response time=",
-		`body="{\"message\":\"hello\"}"`,
-		`"Authorization":["[REDACTED]"]`,
-		`"X-Test":["value"]`,
-		"status=404",
-		"duration=",
+		`"phase": "client_req"`,
+		`"phase": "client_rep"`,
+		`"message": "hello"`,
+		`"X-Test"`,
+		`"value"`,
+		`"[REDACTED]"`,
+		`"status": 404`,
+		`"duration_ms":`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log missing %q:\n%s", want, logs)
