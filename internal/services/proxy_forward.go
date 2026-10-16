@@ -716,6 +716,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					repE.Provider = pv.Name
 					repE.Status = http.StatusBadGateway
 					repE.DurationMS = time.Since(callStart).Milliseconds()
+					repE.Attempt = attempt + 1
 					_, _ = repE.Write([]byte(safeErr))
 					audit.FromContext(r.Context()).Emit(repE)
 				}
@@ -736,6 +737,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				repE.Provider = pv.Name
 				repE.Status = r2.StatusCode
 				repE.DurationMS = time.Since(callStart).Milliseconds()
+				repE.Attempt = attempt + 1
 				repE.Headers = audit.RedactHeaders(r2.Header)
 				tr := audit.FromContext(r.Context())
 				tr.Emit(repE)

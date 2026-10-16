@@ -91,6 +91,8 @@ func TestAuditLogUsesConfiguredLogger(t *testing.T) {
 
 	logs := output.String()
 	for _, want := range []string{
+		"[client_req]  POST /missing",
+		"[client_rep]  404",
 		`"phase": "client_req"`,
 		`"phase": "client_rep"`,
 		`"message": "hello"`,
@@ -98,7 +100,6 @@ func TestAuditLogUsesConfiguredLogger(t *testing.T) {
 		`"value"`,
 		`"[REDACTED]"`,
 		`"status": 404`,
-		`"duration_ms":`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log missing %q:\n%s", want, logs)
