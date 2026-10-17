@@ -124,6 +124,48 @@ func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
 	p.pruneQuotas(reg)
 }
 
+// FlushAccounts retries persisting account-file updates that could not be
+// written when they happened — a locked file, a read-only mount — so an
+// orderly shutdown never leaves an account file behind a rotated refresh
+// token and forces a re-login on the next start. Best-effort: failures are
+// logged and shutdown continues.
+func (p *Proxy) FlushAccounts() {
+	for _, m := range snapshotManagers(&p.clineMu, p.clineManagers) {
+		if err := m.Flush(); err != nil {
+			p.log.Printf("cline: account file not flushed: %v", err)
+		}
+	}
+
+	p.codexMu.Lock()
+	codexManager := p.codexManager
+	p.codexMu.Unlock()
+	if codexManager != nil {
+		if err := codexManager.Flush(); err != nil {
+			p.log.Printf("codex: account file not flushed: %v", err)
+		}
+	}
+
+	for _, m := range snapshotManagers(&p.opencodeMu, p.opencodeManagers) {
+		if err := m.Flush(); err != nil {
+			p.log.Printf("opencode: account file not flushed: %v", err)
+		}
+	}
+}
+
+// snapshotManagers copies a manager map under its lock so flush work runs
+// outside it.
+func snapshotManagers[T any](mu *sync.Mutex, managers map[string]T) []T {
+	mu.Lock()
+	defer mu.Unlock()
+
+	out := make([]T, 0, len(managers))
+	for _, m := range managers {
+		out = append(out, m)
+	}
+
+	return out
+}
+
 // ApplySettings swaps the request-shaping options that hot reload can change.
 // The allowlist is copied so a caller's slice cannot be mutated under a live
 // request; the values are read per request, so a swap applies at once.

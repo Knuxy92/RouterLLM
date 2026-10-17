@@ -63,6 +63,17 @@ func (m *Manager) AccessToken(ctx context.Context, refreshToken string, force bo
 	return token.AccessToken, nil
 }
 
+// Flush retries persisting account-file updates this process made but could
+// not write when they happened — a locked file, a read-only mount. Called on
+// shutdown so the file is never left behind the rotations this process served.
+func (m *Manager) Flush() error {
+	if m.store == nil {
+		return nil
+	}
+
+	return m.store.Flush()
+}
+
 // pruneExpiredLocked drops tokens that can no longer satisfy a request. Refresh
 // tokens rotate and every config reload re-reads the account file, so without
 // this the map keeps one entry per historical token for the process lifetime.

@@ -27,6 +27,7 @@ type AccountStore struct {
 	path     string
 	mu       sync.Mutex
 	accounts []Account
+	dirty    bool
 }
 
 func DefaultAccountsPath() string {
@@ -57,14 +58,36 @@ func (s *AccountStore) Add(account Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return accounts.Add(accountLabel, s.path, &s.accounts, account, func(a Account) string { return a.Email })
+	return s.noteWrite(accounts.Add(accountLabel, s.path, &s.accounts, account, func(a Account) string { return a.Email }))
 }
 
 func (s *AccountStore) Rotate(oldToken, newToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return accounts.Rotate(accountLabel, s.path, &s.accounts, oldToken, newToken, refreshToken, setRefreshToken)
+	return s.noteWrite(accounts.Rotate(accountLabel, s.path, &s.accounts, oldToken, newToken, refreshToken, setRefreshToken))
+}
+
+// Flush retries the account-file write when a previous attempt failed, so a
+// shutdown cannot lose a logged-in account and force a re-login on the next
+// start. It is a no-op when the file already reflects memory.
+func (s *AccountStore) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.dirty {
+		return nil
+	}
+
+	return s.noteWrite(accounts.Flush(accountLabel, s.path, &s.accounts, refreshToken))
+}
+
+// noteWrite remembers whether the in-memory entries are ahead of the file, so
+// Flush knows whether there is anything to write.
+func (s *AccountStore) noteWrite(err error) error {
+	s.dirty = err != nil
+
+	return err
 }
 
 func refreshToken(a Account) string { return a.RefreshToken }

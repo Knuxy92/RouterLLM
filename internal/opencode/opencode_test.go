@@ -197,8 +197,8 @@ func TestRequiredToolsMatchNames(t *testing.T) {
 		if req, ok := params["required"].([]string); !ok || len(req) != len(table[i].Required) {
 			t.Fatalf("tool %d required = %v, want %v", i, params["required"], table[i].Required)
 		}
-		if params["type"] != "null" {
-			t.Fatalf("tool %d parameters type = %v, want null", i, params["type"])
+		if params["type"] != "object" {
+			t.Fatalf("tool %d parameters type = %v, want object", i, params["type"])
 		}
 		if params["additionalProperties"] != false {
 			t.Fatalf("tool %d additionalProperties = %v, want false", i, params["additionalProperties"])

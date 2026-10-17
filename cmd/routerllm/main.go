@@ -228,6 +228,10 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	// Account-file writes are best-effort while running; retry them before the
+	// drain, so even a shutdown that ends in Fatal cannot lose a rotated
+	// refresh token and force a re-login at the next start.
+	proxy.FlushAccounts()
 	logger.Println("shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -240,6 +244,9 @@ func main() {
 			logger.Fatal("admin TLS server forced to shutdown:", err)
 		}
 	}
+	// Requests draining during shutdown may have rotated tokens since the
+	// first pass.
+	proxy.FlushAccounts()
 	if err := teleStore.Close(); err != nil {
 		logger.Printf("telemetry close failed: %v", err)
 	}

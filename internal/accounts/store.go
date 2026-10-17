@@ -103,6 +103,19 @@ func Rotate[T any](label, path string, entries *[]T, oldToken, newToken string, 
 	return Persist(label, path, *entries)
 }
 
+// Flush writes the in-memory entries to disk, first folding in any entries
+// added to the file by another process since they were loaded. Callers use it
+// to retry a write that failed when it happened — a locked file, a read-only
+// mount — so a shutdown cannot leave the file behind the tokens the process
+// has already seen. Caller must hold the store's mutex.
+func Flush[T any](label, path string, entries *[]T, keyOf func(T) string) error {
+	if err := mergeFile(label, path, entries, keyOf); err != nil {
+		return err
+	}
+
+	return Persist(label, path, *entries)
+}
+
 // mergeFile folds entries that appeared in the file since it was loaded into
 // memory, keyed by tokenOf. A missing file is not an error.
 func mergeFile[T any](label, path string, entries *[]T, tokenOf func(T) string) error {
