@@ -160,8 +160,8 @@ func TestRunTestAnthropicTranslatesPath(t *testing.T) {
 	if res.Tokens != 3 {
 		t.Fatalf("tokens = %d, want 3", res.Tokens)
 	}
-	if path := <-gotPath; path != "/v1/messages" {
-		t.Fatalf("upstream path = %q, want /v1/messages", path)
+	if path := <-gotPath; path != "/messages" {
+		t.Fatalf("upstream path = %q, want /messages", path)
 	}
 
 	events := store.Since(0)

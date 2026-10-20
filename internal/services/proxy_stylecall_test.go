@@ -37,8 +37,8 @@ func newStyleCallRegistry(upstream *httptest.Server, rules []model.Rule) *provid
 
 func TestForwardStyleCallMessages(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
-			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
+		if r.URL.Path != "/messages" {
+			t.Errorf("path = %q, want /messages", r.URL.Path)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -90,8 +90,8 @@ func TestForwardStyleCallMessages(t *testing.T) {
 
 func TestForwardStyleCallResponses(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/responses" {
-			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+		if r.URL.Path != "/responses" {
+			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -176,8 +176,8 @@ func TestResponsesInboundFiltering(t *testing.T) {
 	var hits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		if r.URL.Path != "/v1/responses" {
-			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+		if r.URL.Path != "/responses" {
+			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

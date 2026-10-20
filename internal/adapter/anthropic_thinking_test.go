@@ -135,8 +135,8 @@ func TestTranslateRequestThinkingCanonicalReasoning(t *testing.T) {
 func TestTranslateRequestPath(t *testing.T) {
 	out, path := translateForTest(t, map[string]any{"reasoning_effort": "high"})
 
-	if path != "/v1/messages" {
-		t.Fatalf("path = %q, want %q", path, "/v1/messages")
+	if path != "/messages" {
+		t.Fatalf("path = %q, want %q", path, "/messages")
 	}
 
 	if _, ok := out["thinking"]; !ok {

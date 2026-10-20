@@ -1091,3 +1091,45 @@ routes:
 		t.Fatal("dedupe_tools must default to false")
 	}
 }
+
+func TestLoadYAMLBaseURLIsOpaque(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: gateway
+    style: openai
+    base_url: https://api.kilo.ai/api/gateway
+    api_key: sk-test
+  - name: suffixed
+    style: openai
+    base_url: https://agentrouter.org/v1
+    api_key: sk-test
+  - name: slashed
+    style: openai
+    base_url: https://example.com/v1/
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: gateway
+        model: m
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]string{}
+	for _, p := range cfg.Providers {
+		byName[p.Name] = p.BaseURL
+	}
+	if got := byName["gateway"]; got != "https://api.kilo.ai/api/gateway" {
+		t.Errorf("gateway base_url = %q, want it verbatim", got)
+	}
+	if got := byName["suffixed"]; got != "https://agentrouter.org/v1" {
+		t.Errorf("suffixed base_url = %q, want the /v1 kept", got)
+	}
+	if got := byName["slashed"]; got != "https://example.com/v1" {
+		t.Errorf("slashed base_url = %q, want only the trailing slash trimmed", got)
+	}
+}

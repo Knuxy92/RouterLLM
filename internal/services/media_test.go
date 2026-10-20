@@ -128,6 +128,7 @@ func TestMediaResolverFileReferenceSendsProviderAuth(t *testing.T) {
 	pv := &provider.Provider{
 		Name:     "fake",
 		BaseURL:  upstream.URL,
+		Style:    "openai",
 		AuthMode: "bearer",
 		Keys:     keys.New([]string{"provider-secret"}, time.Minute),
 	}
@@ -147,8 +148,8 @@ func TestMediaResolverFileReferenceSendsProviderAuth(t *testing.T) {
 	path, auth := gotPath, gotAuth
 	mu.Unlock()
 
-	if path != "/v1/files/file-123/content" {
-		t.Fatalf("path = %q, want /v1/files/file-123/content", path)
+	if path != "/files/file-123/content" {
+		t.Fatalf("path = %q, want /files/file-123/content", path)
 	}
 	if auth != "Bearer provider-secret" {
 		t.Fatalf("Authorization = %q, want the provider key", auth)

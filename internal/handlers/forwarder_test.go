@@ -56,8 +56,8 @@ func TestMessagesPassesThroughAnthropicRoute(t *testing.T) {
 	const anthropicSSE = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
-			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
+		if r.URL.Path != "/messages" {
+			t.Errorf("path = %q, want /messages", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)

@@ -170,8 +170,8 @@ func TestTranslateRequestCarriesTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranslateRequest: %v", err)
 	}
-	if path != "/v1/messages" {
-		t.Fatalf("path = %q", path)
+	if path != "/messages" {
+		t.Fatalf("path = %q, want /messages", path)
 	}
 
 	var req map[string]any

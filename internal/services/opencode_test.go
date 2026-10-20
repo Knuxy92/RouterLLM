@@ -159,8 +159,8 @@ func TestForwardOpenCodeInjectsToolsAndRenames(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
 			return
 		}
-		if r.URL.Path != "/v1/responses" {
-			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+		if r.URL.Path != "/responses" {
+			t.Errorf("path = %q, want /responses", r.URL.Path)
 			return
 		}
 		assertOpenCodeHeaders(t, r)
@@ -465,8 +465,8 @@ func TestForwardOpenCodeStyleCallMessages(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
 			return
 		}
-		if r.URL.Path != "/v1/messages" {
-			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
+		if r.URL.Path != "/messages" {
+			t.Errorf("path = %q, want /messages", r.URL.Path)
 		}
 		assertOpenCodeHeaders(t, r)
 

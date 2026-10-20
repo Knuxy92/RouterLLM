@@ -39,8 +39,8 @@ func TestRunTestStyleCallResponses(t *testing.T) {
 	}
 
 	call := <-got
-	if call.path != "/v1/responses" {
-		t.Fatalf("upstream path = %q, want /v1/responses", call.path)
+	if call.path != "/responses" {
+		t.Fatalf("upstream path = %q, want /responses", call.path)
 	}
 	var body map[string]any
 	if err := json.Unmarshal([]byte(call.body), &body); err != nil {
@@ -84,7 +84,7 @@ func TestRunTestStyleCallMessages(t *testing.T) {
 	}
 
 	call := <-got
-	if call.path != "/v1/messages" {
-		t.Fatalf("upstream path = %q, want /v1/messages", call.path)
+	if call.path != "/messages" {
+		t.Fatalf("upstream path = %q, want /messages", call.path)
 	}
 }
