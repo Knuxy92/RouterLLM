@@ -1133,3 +1133,46 @@ routes:
 		t.Errorf("slashed base_url = %q, want only the trailing slash trimmed", got)
 	}
 }
+
+func TestLoadYAMLAuthModeNoneNeedsNoAPIKey(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: local
+    style: openai
+    base_url: http://localhost:11434/v1
+    auth_mode: none
+routes:
+  - model_id: local-model
+    routes:
+      - provider: local
+        model: upstream-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || cfg.Providers[0].AuthMode != "none" || len(cfg.Providers[0].Keys) != 0 {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLAuthModeNoneRejectsUnknown(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: local
+    style: openai
+    base_url: http://localhost:11434/v1
+    auth_mode: bogus
+    api_key: sk-test
+routes:
+  - model_id: local-model
+    routes:
+      - provider: local
+        model: upstream-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "unsupported auth_mode") {
+		t.Fatalf("error = %v, want unsupported auth_mode", err)
+	}
+}

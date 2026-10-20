@@ -205,10 +205,11 @@
           "enum": [
             "bearer",
             "x-api-key",
-            "both"
+            "both",
+            "none"
           ],
           "default": "bearer",
-          "description": "Authentication mode."
+          "description": "Authentication mode. none sends no auth header and needs no api_key (keyless local upstreams)."
         },
         "reasoning_style": {
           "type": "string",
