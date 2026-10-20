@@ -57,6 +57,17 @@ func (b *mediaBudget) consume(n int) {
 	b.bytes += n
 }
 
+// wireFilesPath returns the files-collection prefix for provider-relative
+// media fetches. Providers with an opaque base_url (openai/anthropic) address
+// it without the /v1 prefix; every other style keeps the legacy path.
+func wireFilesPath(pv *provider.Provider) string {
+	if pv.Style == "openai" || pv.Style == "anthropic" {
+		return "/files"
+	}
+
+	return "/v1/files"
+}
+
 // mediaResolver resolves a client media reference for an anthropic-style
 // route. Absolute public http(s) URLs are fetched without provider credentials
 // — a client-supplied URL must never see the provider key. Only the
@@ -81,7 +92,7 @@ func (p *Proxy) mediaResolver(pv *provider.Provider) adapter.MediaResolver {
 			return nil, "", err
 		}
 
-		return p.fetchMedia(pv, pv.BaseURL+"/v1/files/"+url.PathEscape(reference)+"/content", budget)
+		return p.fetchMedia(pv, pv.BaseURL+wireFilesPath(pv)+"/"+url.PathEscape(reference)+"/content", budget)
 	}
 }
 
