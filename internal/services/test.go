@@ -156,7 +156,7 @@ func (p *Proxy) testProvider(name string) (*provider.Provider, int, error) {
 		}
 		return nil, http.StatusNotFound, fmt.Errorf("provider %s not found", name)
 	}
-	if pv.Keys.AliveCount() == 0 {
+	if pv.Keys.AliveCount() == 0 && pv.AuthMode != "none" {
 		return nil, http.StatusBadRequest, fmt.Errorf("provider %s has no usable keys", name)
 	}
 

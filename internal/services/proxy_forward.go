@@ -629,12 +629,13 @@ func (p *Proxy) injectStreamUsage(routeBody map[string]any, path string) {
 }
 
 func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
-	maxAttempts := pv.Keys.AliveCount()
-	if maxAttempts == 0 && pv.AuthMode != "none" {
-		return nil, 0, nil, false
+	if pv.AuthMode == "none" {
+		return p.tryKeyless(pv, call, r)
 	}
+
+	maxAttempts := pv.Keys.AliveCount()
 	if maxAttempts == 0 {
-		maxAttempts = 1
+		return nil, 0, nil, false
 	}
 
 	pv.RecordRequest()
@@ -802,6 +803,106 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 
 			return r2, 0, nil, false
 		}
+	}
+
+	pv.RecordError()
+
+	return nil, lastStatus, lastErrBody, false
+}
+
+// tryKeyless sends one upstream attempt with no credential attached. Keyless
+// providers have no key pool, so there is nothing to rotate, cool down, or
+// refresh — transient statuses still retry on the same single attempt.
+func (p *Proxy) tryKeyless(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
+	pv.RecordRequest()
+
+	var lastStatus int
+	var lastErrBody []byte
+
+	for retry := 0; retry < maxRetries; retry++ {
+		req, err := http.NewRequestWithContext(r.Context(), call.method, pv.BaseURL+call.path+pv.Query, bytes.NewReader(call.body))
+		if err != nil {
+			safeErr := redactURLError(err)
+			p.log.Printf("failed to build request for %s: %s", pv.Name, safeErr)
+
+			return nil, http.StatusInternalServerError, []byte(safeErr), false
+		}
+		if p.forwardClientHeaders.Load() {
+			copyClientHeaders(req, r, p.clientHeaderAllowlist())
+		}
+		for k, v := range pv.Headers {
+			req.Header[k] = []string{v}
+		}
+		if req.Header.Get("Content-Type") == "" && call.contentType != "" {
+			req.Header.Set("Content-Type", call.contentType)
+		}
+
+		if reqE := audit.FromContext(r.Context()).Add(audit.PhaseProvReq); reqE != nil {
+			reqE.Method = req.Method
+			reqE.URL = pv.BaseURL + call.path
+			reqE.Provider = pv.Name
+			reqE.Attempt = 1
+			reqE.Headers = audit.RedactHeaders(req.Header)
+			_, _ = reqE.Write(call.body)
+			audit.FromContext(r.Context()).Emit(reqE)
+		}
+
+		callStart := time.Now()
+		r2, err := p.client.Do(req)
+		if err != nil {
+			safeErr := redactURLError(err)
+			p.log.Printf("proxy error via %s (retry %d/%d): %s", pv.Name, retry+1, maxRetries, safeErr)
+			lastStatus = http.StatusBadGateway
+			lastErrBody = []byte(safeErr)
+			if repE := audit.FromContext(r.Context()).Add(audit.PhaseProvRep); repE != nil {
+				repE.Provider = pv.Name
+				repE.Status = http.StatusBadGateway
+				repE.DurationMS = time.Since(callStart).Milliseconds()
+				repE.Attempt = 1
+				_, _ = repE.Write([]byte(safeErr))
+				audit.FromContext(r.Context()).Emit(repE)
+			}
+			if retry < maxRetries-1 {
+				if p.backoff(r.Context(), retry) {
+					return nil, lastStatus, lastErrBody, true
+				}
+				continue
+			}
+			break
+		}
+
+		if repE := audit.FromContext(r.Context()).Add(audit.PhaseProvRep); repE != nil {
+			repE.Provider = pv.Name
+			repE.Status = r2.StatusCode
+			repE.DurationMS = time.Since(callStart).Milliseconds()
+			repE.Attempt = 1
+			repE.Headers = audit.RedactHeaders(r2.Header)
+			tr := audit.FromContext(r.Context())
+			tr.Emit(repE)
+			r2.Body = audit.TeeBody(r2.Body, repE, func() { tr.Emit(repE) })
+		}
+
+		if transientStatuses[r2.StatusCode] {
+			eb := ReadErrorBody(r2.Body)
+			r2.Body.Close()
+			p.logResp(fmt.Sprintf("upstream %s transient (retry %d/%d)", pv.Name, retry+1, maxRetries), r2, eb)
+			lastStatus = r2.StatusCode
+			lastErrBody = eb
+			if retry < maxRetries-1 {
+				if p.backoff(r.Context(), retry) {
+					return nil, lastStatus, lastErrBody, true
+				}
+				continue
+			}
+
+			return nil, lastStatus, lastErrBody, false
+		}
+
+		if r2.StatusCode >= 400 {
+			pv.RecordError()
+		}
+
+		return r2, 0, nil, false
 	}
 
 	pv.RecordError()
