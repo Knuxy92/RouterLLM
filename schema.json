@@ -195,7 +195,7 @@
         "base_url": {
           "type": "string",
           "format": "uri",
-          "description": "Provider base URL. A trailing / and /v1 suffix are trimmed automatically."
+          "description": "Provider base URL. Used verbatim as the upstream prefix (only a trailing / is trimmed): include /v1 yourself for standard OpenAI APIs, or a custom sub-path like https://api.kilo.ai/api/gateway for gateways."
         },
         "headers": {
           "$ref": "#/$defs/headers"

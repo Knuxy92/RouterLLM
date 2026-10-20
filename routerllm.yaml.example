@@ -37,18 +37,26 @@ system_prompt_file: system_prompt.txt  # prepend this file's content as a system
 # --- Providers ---------------------------------------------------------------
 # Each provider requires at minimum: name, api_key, style, base_url.
 # Everything else is optional.
+# base_url is used verbatim as the upstream prefix (only a trailing / is
+# trimmed): include /v1 yourself for standard OpenAI APIs.
 
 providers:
 
   # --- Known providers ---
   # These are common API gateways. You must still specify style + base_url
   # (shown as comments for reference).
+  #
+  # Gateways on a custom sub-path need no /v1:
+  # - name: kilo
+  #   api_key: ${KILO_API_KEY}
+  #   style: openai
+  #   base_url: https://api.kilo.ai/api/gateway
 
   - name: agentrouter
     api_key: ${AGENT_ROUTER_API_KEY}
     # api_key: [key1, key2, key3]           # or list multiple keys directly
     style: openai
-    base_url: https://agentrouter.org
+    base_url: https://agentrouter.org/v1
     # headers:
     #   Content-Type: application/json
     auth_mode: bearer
@@ -80,7 +88,7 @@ providers:
   - name: alibaba
     api_key: ${ALIBABA_API_KEY}
     style: openai
-    base_url: https://your-region.maas.aliyuncs.com/compatible-mode
+    base_url: https://your-region.maas.aliyuncs.com/compatible-mode/v1
     headers:
       Content-Type: application/json
     auth_mode: bearer
@@ -88,7 +96,7 @@ providers:
   - name: freemodel-api
     api_key: ${FREEMODEL_API_KEY}
     style: openai
-    base_url: https://api.freemodel.dev
+    base_url: https://api.freemodel.dev/v1
     auth_mode: both                        # sends both Bearer + x-api-key
     share: freemodel                       # shares key cooldown state
     query: "?beta=true"
@@ -96,7 +104,7 @@ providers:
   - name: freemodel-cc
     api_key: ${FREEMODEL_API_KEY}
     style: anthropic                       # auto-translated to /v1/messages
-    base_url: https://cc.freemodel.dev
+    base_url: https://cc.freemodel.dev/v1
     auth_mode: both
     share: freemodel
     query: "?beta=true"
@@ -105,7 +113,7 @@ providers:
     api_key: ${AEROLINK_API_KEY}
     # api_key: [key1, key2, key3]
     style: anthropic
-    base_url: https://capi.aerolink.lat
+    base_url: https://capi.aerolink.lat/v1
     headers:
       Content-Type: application/json
       anthropic-version: 2023-06-01
@@ -114,7 +122,7 @@ providers:
   - name: forge
     api_key: ${FORGE_API_KEY}
     style: openai
-    base_url: https://forge-gateway-api.fly.dev
+    base_url: https://forge-gateway-api.fly.dev/v1
     headers:
       Content-Type: application/json
     auth_mode: bearer
@@ -143,7 +151,7 @@ providers:
   - name: retired-gateway
     disabled: true
     style: openai
-    base_url: https://api.retired-gateway.example
+    base_url: https://api.retired-gateway.example/v1
     auth_mode: bearer
 
   # --- Cline free model ---
