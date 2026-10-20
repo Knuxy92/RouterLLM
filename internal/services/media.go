@@ -141,6 +141,7 @@ func applyAuthHeaders(h http.Header, key, authMode string) {
 		h.Set("x-api-key", key)
 	case "x-api-key":
 		h.Set("x-api-key", key)
+	case "none":
 	default:
 		h.Set("Authorization", "Bearer "+key)
 	}

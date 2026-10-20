@@ -630,8 +630,11 @@ func (p *Proxy) injectStreamUsage(routeBody map[string]any, path string) {
 
 func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
 	maxAttempts := pv.Keys.AliveCount()
-	if maxAttempts == 0 {
+	if maxAttempts == 0 && pv.AuthMode != "none" {
 		return nil, 0, nil, false
+	}
+	if maxAttempts == 0 {
+		maxAttempts = 1
 	}
 
 	pv.RecordRequest()

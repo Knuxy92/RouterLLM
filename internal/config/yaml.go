@@ -301,9 +301,9 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 	}
 
 	switch yp.AuthMode {
-	case "bearer", "x-api-key", "both", "":
+	case "bearer", "x-api-key", "both", "none", "":
 	default:
-		return fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, or both)", yp.Name, yp.AuthMode)
+		return fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, both, or none)", yp.Name, yp.AuthMode)
 	}
 
 	switch yp.ReasoningStyle {
@@ -312,7 +312,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 		return fmt.Errorf("provider %q: unsupported reasoning_style %q (must be openai, openrouter, qwen, or raw)", yp.Name, yp.ReasoningStyle)
 	}
 
-	if len(yp.APIKey) == 0 && !isAccountStyle(yp.Style) && !yp.Disabled {
+	if len(yp.APIKey) == 0 && !isAccountStyle(yp.Style) && !yp.Disabled && yp.AuthMode != "none" {
 		return fmt.Errorf("provider %q: api_key is required", yp.Name)
 	}
 
@@ -323,7 +323,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 				return fmt.Errorf("provider %q: environment variable %s is not set", yp.Name, k)
 			}
 		}
-		if len(keys) == 0 && !isAccountStyle(yp.Style) {
+		if len(keys) == 0 && !isAccountStyle(yp.Style) && yp.AuthMode != "none" {
 			return fmt.Errorf("provider %q: api_key expanded to zero keys (is the environment variable empty?)", yp.Name)
 		}
 	}
