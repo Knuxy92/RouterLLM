@@ -169,7 +169,6 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		if p.Headers == nil {
 			p.Headers = make(map[string]string)
 		}
-		p.BaseURL = strings.TrimSuffix(p.BaseURL, "/v1")
 		providers = append(providers, p)
 	}
 

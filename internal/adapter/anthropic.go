@@ -136,7 +136,7 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 	req["stream"] = true
 
 	data, err := json.Marshal(req)
-	return data, "/v1/messages", err
+	return data, "/messages", err
 }
 
 // maxTokenKeys lists the OpenAI token-cap fields accepted on inbound bodies;
