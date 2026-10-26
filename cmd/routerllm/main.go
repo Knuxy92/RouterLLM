@@ -62,6 +62,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "--workbuddy-login" {
+		if err := runWorkbuddyLogin(); err != nil {
+			log.Fatalf("workbuddy login failed: %v", err)
+		}
+		return
+	}
+
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
 	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {

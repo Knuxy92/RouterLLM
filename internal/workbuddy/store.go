@@ -111,6 +111,14 @@ func (s *AccountStore) lookup(refreshToken string) (Account, bool) {
 	return Account{}, false
 }
 
+// AccountUID decodes the payload segment of a JWT access token and returns
+// its "uid" or "sub" claim, or "" when the token is not a readable JWT. The
+// login command uses it to fill the account's UID from the token the poll
+// returned.
+func AccountUID(accessToken string) string {
+	return jwtUID(accessToken)
+}
+
 // jwtUID decodes the payload segment of a JWT access token and returns its
 // "uid" or "sub" claim, or "" when the token is not a readable JWT.
 func jwtUID(accessToken string) string {

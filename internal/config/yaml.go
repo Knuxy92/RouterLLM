@@ -13,6 +13,7 @@ import (
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
+	"routerllm/internal/workbuddy"
 
 	"gopkg.in/yaml.v3"
 )
@@ -293,11 +294,11 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 	}
 
 	switch yp.Style {
-	case "openai", "anthropic", "cline", "google", "alysis", "codex", "opencode":
+	case "openai", "anthropic", "cline", "google", "alysis", "codex", "opencode", "workbuddy":
 	case "":
-		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, codex, or opencode)", yp.Name)
+		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, codex, opencode, or workbuddy)", yp.Name)
 	default:
-		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, codex, or opencode)", yp.Name, yp.Style)
+		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, codex, opencode, or workbuddy)", yp.Name, yp.Style)
 	}
 
 	switch yp.AuthMode {
@@ -334,7 +335,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 // isAccountStyle reports styles whose credentials come from a login-managed
 // account store instead of api_key.
 func isAccountStyle(style string) bool {
-	return style == "cline" || style == "alysis" || style == "codex" || style == "opencode"
+	return style == "cline" || style == "alysis" || style == "codex" || style == "opencode" || style == "workbuddy"
 }
 
 // accountStyleKeys loads the credentials of an account-backed style's store,
@@ -362,6 +363,12 @@ func accountStyleKeys(style string) (keys []string, path string, ok bool, err er
 		return store.RefreshTokens(), store.Path(), true, nil
 	case "opencode":
 		store, err := opencode.LoadAccountStore(opencode.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.RefreshTokens(), store.Path(), true, nil
+	case "workbuddy":
+		store, err := workbuddy.LoadAccountStore(workbuddy.DefaultAccountsPath())
 		if err != nil {
 			return nil, "", true, err
 		}
