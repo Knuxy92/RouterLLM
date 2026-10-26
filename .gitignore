@@ -15,6 +15,7 @@ cline-accounts.json
 alysis-accounts.json
 codex-accounts.json
 opencode-accounts.json
+workbuddy-accounts.json
 
 # Request-event telemetry (written beside the config at runtime)
 routerllm-telemetry.jsonl

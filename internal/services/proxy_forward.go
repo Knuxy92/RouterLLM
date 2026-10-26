@@ -487,6 +487,16 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			} else {
 				p.serveResponsesAsChat(resp, clientStream, route.ModelName, w, toolNameRestore)
 			}
+		case "workbuddy":
+			// The upstream streams reasoning one token per chunk; coalesce it
+			// so clients render one think block per reasoning segment.
+			coalescer := newReasoningCoalescer(w)
+			upstreamErr := p.serveOpenAI(resp, clientStream, coalescer, toolNameRestore)
+			coalescer.flushPending()
+			if upstreamErr != "" {
+				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap)))
+				return
+			}
 		default:
 			if path == "/v1/responses" {
 				serveResponses(resp, clientStream, w, toolNameRestore)
