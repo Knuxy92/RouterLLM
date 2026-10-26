@@ -154,6 +154,16 @@
           },
           {
             "properties": {
+              "style": {
+                "const": "workbuddy"
+              }
+            },
+            "required": [
+              "style"
+            ]
+          },
+          {
+            "properties": {
               "disabled": {
                 "const": true
               }
@@ -188,9 +198,10 @@
             "google",
             "alysis",
             "codex",
-            "opencode"
+            "opencode",
+            "workbuddy"
           ],
-          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth), opencode (OpenCode Zen account auth via `routerllm --opencode-login`: Console device flow, per-request access tokens, auto x-org-id, required-tool injection, rotating session/request headers)."
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth), opencode (OpenCode Zen account auth via `routerllm --opencode-login`: Console device flow, per-request access tokens, auto x-org-id, required-tool injection, rotating session/request headers), workbuddy (WorkBuddy account auth via `routerllm --workbuddy-login`: browser OAuth, refresh-token pool with singleflight refresh, desktop identity headers, fingerprint sanitize; base_url is the realm host — intl https://www.workbuddy.ai or CN https://copilot.tencent.com — and /v2/chat/completions is appended by the style)."
         },
         "base_url": {
           "type": "string",
