@@ -803,6 +803,20 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				break
 			}
 
+			// The WorkBuddy gateway rate-limits per (account, model): hammering
+			// the same key through the transient retry loop just deepens the
+			// cooldown, so the account sits out the key manager's standard
+			// cooldown window and the pool moves on.
+			if pv.Style == "workbuddy" && r2.StatusCode == http.StatusTooManyRequests {
+				eb := ReadErrorBody(r2.Body)
+				r2.Body.Close()
+				p.logResp(fmt.Sprintf("key %s rate-limited via %s, cooling down", maskKey(key), pv.Name), r2, eb)
+				lastStatus = r2.StatusCode
+				lastErrBody = eb
+				pv.Keys.MarkDead(key)
+				break
+			}
+
 			if transientStatuses[r2.StatusCode] {
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
