@@ -34,6 +34,11 @@ services:
       # `routerllm --opencode-login` on the host (the file must exist first —
       # a missing host path is auto-created as a directory by Docker).
       # - ./opencode-accounts.json:/app/opencode-accounts.json:ro
+      # WorkBuddy providers only: mount workbuddy-accounts.json AFTER running
+      # `routerllm --workbuddy-login` on the host (the file must exist first —
+      # a missing host path is auto-created as a directory by Docker). The
+      # server rotates refresh tokens, so mount it read-write.
+      # - ./workbuddy-accounts.json:/app/workbuddy-accounts.json
     environment:
       # Keep the request-event jsonl on the persistent volume, not beside the
       # config (a single-file bind mount is backed by the container layer).

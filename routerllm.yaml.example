@@ -193,6 +193,22 @@ providers:
   # refused, same as cline/codex. Add more accounts by re-running the login;
   # each login may carry its own Console server and org.
 
+  # --- WorkBuddy accounts ---
+  # Commented out on purpose: an ENABLED workbuddy provider refuses to start
+  # until `routerllm --workbuddy-login` has created workbuddy-accounts.json
+  # next to the executable (override with WORKBUDDY_ACCOUNTS_FILE). Uncomment
+  # BOTH this block and the workbuddy route below after logging in. No api_key
+  # is needed — keys come from the accounts file. base_url is the realm host
+  # (intl https://www.workbuddy.ai, CN https://copilot.tencent.com); the proxy
+  # appends /v2/chat/completions itself. WORKBUDDY_INTL_CHAT_BASE /
+  # WORKBUDDY_CN_CHAT_BASE override the realm hosts. Rate-limited accounts are
+  # cooled down per key; the identity/fingerprint headers and the system-prompt
+  # sanitize the upstream enforces are handled by the style itself.
+  #
+  # - name: workbuddy
+  #   style: workbuddy
+  #   base_url: https://www.workbuddy.ai
+
 # --- Claude Code-style headers (example) ------------------------------------
 # Providers that emulate Claude Code (like freemodel-api/cc) may need these
 # headers to match the expected client environment:
@@ -317,6 +333,14 @@ routes:
   #   routes:
   #     - provider: codex
   #       model: gpt-5.6-codex
+
+  # WorkBuddy account model — uncomment together with the workbuddy provider
+  # above (requires `routerllm --workbuddy-login` first). Model names come from
+  # the upstream catalog (deepseek-v4.1-flash is the cheapest any-realm model).
+  # - model_id: wb/deepseek-v4.1-flash
+  #   routes:
+  #     - provider: workbuddy
+  #       model: deepseek-v4.1-flash
 
   # Disabled fallback entry: skipped, the remaining entries still serve the
   # model. If every entry for a model_id is disabled the model disappears from
