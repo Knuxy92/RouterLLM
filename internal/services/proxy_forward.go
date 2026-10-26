@@ -20,6 +20,7 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
+	"routerllm/internal/workbuddy"
 )
 
 const maxRetries = 3
@@ -339,15 +340,18 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	case "google":
 		canonicalizeReasoning(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
-	case "cline":
-		canonicalizeReasoning(routeBody, route.Defaults)
-		delete(routeBody, "thinking_budget")
-		delete(routeBody, "reasoning_exclude")
-		routeBody["model"] = route.ModelName
-		sessionID = cline.PrepareBody(routeBody)
-		p.injectStreamUsage(routeBody, path)
-		reqBody, err = json.Marshal(routeBody)
-		reqPath = path
+		case "cline":
+			canonicalizeReasoning(routeBody, route.Defaults)
+			delete(routeBody, "thinking_budget")
+			delete(routeBody, "reasoning_exclude")
+			routeBody["model"] = route.ModelName
+			sessionID = cline.PrepareBody(routeBody)
+			p.injectStreamUsage(routeBody, path)
+			reqBody, err = json.Marshal(routeBody)
+			reqPath = path
+		case "workbuddy":
+			reqBody, err = p.translateWorkbuddyRoute(route, routeBody)
+			reqPath = workbuddy.ChatPath
 	case "chat":
 		routeBody["model"] = route.ModelName
 		if pv.ReasoningStyle == "raw" {
@@ -649,6 +653,9 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 		}
 		forceRefresh := false
 		refreshed := false
+		// One user send keeps one turn id across its retries (official CLI
+		// semantics: getEffectiveConversationRequestId).
+		turnID := workbuddy.UUID7Hex()
 
 		for retry := 0; retry < maxRetries; retry++ {
 			req, err := http.NewRequestWithContext(r.Context(), call.method, pv.BaseURL+call.path+pv.Query, bytes.NewReader(call.body))
@@ -689,6 +696,20 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					break
 				}
 				codex.SetHeaders(req.Header, token)
+			} else if pv.Style == "workbuddy" {
+				realm, uid, product := p.workbuddyAccount(key)
+				token, err := p.workbuddyAccessToken(r.Context(), realm, uid, key, forceRefresh)
+				if err != nil {
+					p.log.Printf("workbuddy token refresh failed via %s: %v", pv.Name, err)
+					lastStatus = http.StatusUnauthorized
+					lastErrBody = []byte(err.Error())
+					pv.Keys.MarkDead(key)
+					break
+				}
+				identity := workbuddy.Identity{UID: uid, AccessToken: token, Realm: realm, Product: product, TurnID: turnID}
+				for name, values := range identity.Headers() {
+					req.Header[name] = values
+				}
 			} else if pv.Style == "google" {
 				req.Header.Set(googleAPIKeyHeader, key)
 			} else if pv.Style == "opencode" {
@@ -761,7 +782,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 
 			p.captureQuota(pv.Name, key, r2.Header)
 
-			if (pv.Style == "cline" || pv.Style == "codex" || pv.Style == "opencode") && r2.StatusCode == http.StatusUnauthorized && !refreshed {
+			if (pv.Style == "cline" || pv.Style == "codex" || pv.Style == "opencode" || pv.Style == "workbuddy") && r2.StatusCode == http.StatusUnauthorized && !refreshed {
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("%s token stale via %s, refreshing", pv.Style, pv.Name), r2, eb)

@@ -15,6 +15,7 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/quota"
 	"routerllm/internal/telemetry"
+	"routerllm/internal/workbuddy"
 )
 
 var hopByHopHeaders = map[string]bool{
@@ -65,6 +66,9 @@ type Proxy struct {
 	opencodeMu           sync.Mutex
 	opencodeManagers     map[string]*opencode.Manager
 	opencodeBinding      map[string]opencodeBindingKey
+	workbuddyMu          sync.Mutex
+	workbuddyManagers    map[string]*workbuddy.Manager
+	workbuddyBinding     map[string]workbuddyBindingKey
 	quotaMu              sync.Mutex
 	quotas               map[string]map[string]quota.Snapshot
 	telemetry            atomic.Pointer[telemetry.Store]
@@ -75,7 +79,7 @@ type Proxy struct {
 // dead keys, retries, exhausted providers — are always logged regardless, since
 // they are what an operator needs when a provider breaks.
 func NewProxy(reg *provider.Registry, client *http.Client, log *log.Logger, debug bool, advancedDebug bool, forceStream bool, forwardClientHeaders bool, allowClientHeaders []string, systemPrompt string) *Proxy {
-	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), opencodeManagers: make(map[string]*opencode.Manager), quotas: make(map[string]map[string]quota.Snapshot)}
+	p := &Proxy{client: client, log: log, debug: debug, advancedDebug: advancedDebug, forceStreamUsage: os.Getenv("ROUTERLLM_TELEMETRY_USAGE") != "off", clineManagers: make(map[string]*cline.Manager), opencodeManagers: make(map[string]*opencode.Manager), workbuddyManagers: make(map[string]*workbuddy.Manager), quotas: make(map[string]map[string]quota.Snapshot)}
 	p.forceStream.Store(forceStream)
 	p.forwardClientHeaders.Store(forwardClientHeaders)
 	p.storeAllowClientHeaders(allowClientHeaders)
@@ -121,6 +125,7 @@ func (p *Proxy) Apply(reg *provider.Registry, systemPrompt string) {
 	p.pruneClineManagers(reg)
 	p.pruneCodexManager(reg)
 	p.pruneOpencodeManagers(reg)
+	p.pruneWorkbuddyManagers(reg)
 	p.pruneQuotas(reg)
 }
 
@@ -148,6 +153,12 @@ func (p *Proxy) FlushAccounts() {
 	for _, m := range snapshotManagers(&p.opencodeMu, p.opencodeManagers) {
 		if err := m.Flush(); err != nil {
 			p.log.Printf("opencode: account file not flushed: %v", err)
+		}
+	}
+
+	for _, m := range snapshotManagers(&p.workbuddyMu, p.workbuddyManagers) {
+		if err := m.Flush(); err != nil {
+			p.log.Printf("workbuddy: account file not flushed: %v", err)
 		}
 	}
 }
