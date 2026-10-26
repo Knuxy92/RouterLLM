@@ -18,6 +18,7 @@ import (
 //
 //	client reasoning map > client reasoning_effort / enable_thinking / thinking
 //	/ thinking_budget > route defaults
+//
 // reasoningEfforts is the whitelist of accepted reasoning_effort values.
 var reasoningEfforts = map[string]bool{
 	"none": true, "minimal": true, "low": true, "medium": true,

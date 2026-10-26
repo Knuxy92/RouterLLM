@@ -9,7 +9,10 @@
 // against desktop-client captures (5.8.4 intl / 5.8.3 cn).
 package workbuddy
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 const (
 	// DesktopVersionIntl is the intl desktop client version verified by
@@ -43,20 +46,32 @@ type RealmHosts struct {
 }
 
 // Hosts resolves the realm's endpoints. Anything but "cn" is the intl realm.
+// WORKBUDDY_INTL_CHAT_BASE / WORKBUDDY_CN_CHAT_BASE override the chat base —
+// tests stub the upstream with them, and deployments can pin a different exit.
 func Hosts(realm string) RealmHosts {
-	if realm == "cn" {
-		return RealmHosts{
+	defaults := RealmHosts{
+		ChatBase: "https://www.workbuddy.ai",
+		Origin:   "https://www.workbuddy.ai",
+		Domain:   "www.workbuddy.ai",
+	}
+	if NormalizeRealm(realm) == "cn" {
+		defaults = RealmHosts{
 			ChatBase: "https://copilot.tencent.com",
 			Origin:   "https://copilot.tencent.com",
 			Domain:   "copilot.tencent.com",
 		}
 	}
 
-	return RealmHosts{
-		ChatBase: "https://www.workbuddy.ai",
-		Origin:   "https://www.workbuddy.ai",
-		Domain:   "www.workbuddy.ai",
+	override := os.Getenv("WORKBUDDY_CN_CHAT_BASE")
+	if NormalizeRealm(realm) != "cn" {
+		override = os.Getenv("WORKBUDDY_INTL_CHAT_BASE")
 	}
+	override = strings.TrimRight(strings.TrimSpace(override), "/")
+	if override == "" {
+		return defaults
+	}
+
+	return RealmHosts{ChatBase: override, Origin: override, Domain: strings.TrimPrefix(strings.TrimPrefix(override, "https://"), "http://")}
 }
 
 // NormalizeRealm maps the accepted spellings onto intl/cn.

@@ -340,18 +340,18 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 	case "google":
 		canonicalizeReasoning(routeBody, route.Defaults)
 		reqBody, reqPath, err = adapter.TranslateGoogleRequestWithResolver(routeBody, route.ModelName, p.mediaResolverNoAuth(pv))
-		case "cline":
-			canonicalizeReasoning(routeBody, route.Defaults)
-			delete(routeBody, "thinking_budget")
-			delete(routeBody, "reasoning_exclude")
-			routeBody["model"] = route.ModelName
-			sessionID = cline.PrepareBody(routeBody)
-			p.injectStreamUsage(routeBody, path)
-			reqBody, err = json.Marshal(routeBody)
-			reqPath = path
-		case "workbuddy":
-			reqBody, err = p.translateWorkbuddyRoute(route, routeBody)
-			reqPath = workbuddy.ChatPath
+	case "cline":
+		canonicalizeReasoning(routeBody, route.Defaults)
+		delete(routeBody, "thinking_budget")
+		delete(routeBody, "reasoning_exclude")
+		routeBody["model"] = route.ModelName
+		sessionID = cline.PrepareBody(routeBody)
+		p.injectStreamUsage(routeBody, path)
+		reqBody, err = json.Marshal(routeBody)
+		reqPath = path
+	case "workbuddy":
+		reqBody, err = p.translateWorkbuddyRoute(route, routeBody)
+		reqPath = workbuddy.ChatPath
 	case "chat":
 		routeBody["model"] = route.ModelName
 		if pv.ReasoningStyle == "raw" {
