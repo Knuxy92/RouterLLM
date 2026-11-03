@@ -18,6 +18,7 @@ import {
   getRecentFailures,
   getState,
   getStatus,
+  getRuntimeConfig,
   getUptimeSeconds,
   loadLogsPage,
   POLL_MS,
@@ -35,17 +36,12 @@ import {
 
 export const $ = (s) => document.querySelector(s);
 
-// Mirrors the server-side reasoning whitelist (internal/admin editor.go).
-const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
-const STYLECALLS = ["chat", "responses", "messages"];
-
-// Mirrors the server caps in internal/admin/test.go.
-const TEST_MAX_TOKENS = 8192;
-const TEST_DEFAULT_TOKENS = 256;
-const TEST_TIMEOUT_FLOOR = 5;
-const TEST_TIMEOUT_CEILING = 120;
-const TEST_DEFAULT_TIMEOUT = 20;
-const TEST_DEFAULT_PROMPT = "Say 'pong' and nothing else.";
+// Whitelists and test caps come from GET /admin/api/config so the console and
+// the server cannot drift; state.js holds the fetched values (with bundled
+// fallbacks for the unreachable case).
+const efforts = () => getRuntimeConfig().efforts;
+const stylecalls = () => getRuntimeConfig().stylecalls;
+const testCaps = () => getRuntimeConfig().test;
 
 const ALL_PROVIDERS = "All providers";
 const ALL_MODELS = "All models";
@@ -740,9 +736,9 @@ export function openProvider(name) {
           <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Upstream model</span><div id="pd-test-model" class="dd"></div></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Effort</span><div id="pd-test-effort" class="dd"></div></div>
           <div class="flex flex-col gap-1"><span class="text-muted-foreground">Call style</span><div id="pd-test-stylecall" class="dd"></div></div>
-          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc(TEST_DEFAULT_PROMPT)}</textarea></div>
-          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="${TEST_MAX_TOKENS}" value="${TEST_DEFAULT_TOKENS}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
-          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="${TEST_TIMEOUT_FLOOR}" max="${TEST_TIMEOUT_CEILING}" value="${TEST_DEFAULT_TIMEOUT}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="col-span-2 flex flex-col gap-1"><span class="text-muted-foreground">Prompt</span><textarea id="pd-test-prompt" rows="2" class="resize-y rounded-md border bg-background px-2 py-1 text-xs">${esc(testCaps().default_prompt)}</textarea></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Max tokens</span><input id="pd-test-max-tokens" type="number" min="1" max="${testCaps().max_tokens}" value="${testCaps().default_tokens}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
+          <div class="flex flex-col gap-1"><span class="text-muted-foreground">Timeout (s)</span><input id="pd-test-timeout" type="number" min="${testCaps().timeout_floor}" max="${testCaps().timeout_ceiling}" value="${testCaps().default_timeout}" class="rounded-md border bg-background px-2 py-1 text-xs" /></div>
         </div>
         <button id="pd-test-run" class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"><i data-lucide="play" class="size-3.5"></i>Run test</button>
         <div id="pd-test-result" class="mt-3 hidden"></div>
@@ -798,7 +794,7 @@ export function openProvider(name) {
     });
     buildDD(
       "pd-test-effort",
-      ["(none)", ...EFFORTS],
+      ["(none)", ...efforts()],
       "(none)",
       (v) => {
         testEffort = v === "(none)" ? "" : v;
@@ -806,7 +802,7 @@ export function openProvider(name) {
     );
     buildDD(
       "pd-test-stylecall",
-      ["(auto)", ...STYLECALLS],
+      ["(auto)", ...stylecalls()],
       "(auto)",
       (v) => {
         testStylecall = v === "(auto)" ? "" : v;
@@ -823,9 +819,9 @@ export function openProvider(name) {
       const body = {
         model: testModel,
         prompt: $("#pd-test-prompt").value,
-        max_tokens: clamp($("#pd-test-max-tokens").value, 1, TEST_MAX_TOKENS, TEST_DEFAULT_TOKENS),
+        max_tokens: clamp($("#pd-test-max-tokens").value, 1, testCaps().max_tokens, testCaps().default_tokens),
         effort: testEffort,
-        timeout_seconds: clamp($("#pd-test-timeout").value, TEST_TIMEOUT_FLOOR, TEST_TIMEOUT_CEILING, TEST_DEFAULT_TIMEOUT),
+        timeout_seconds: clamp($("#pd-test-timeout").value, testCaps().timeout_floor, testCaps().timeout_ceiling, testCaps().default_timeout),
       };
       if (testStylecall) body.stylecall = testStylecall;
       e.currentTarget.disabled = true;
@@ -901,12 +897,12 @@ export function openLegDialog(modelName) {
   );
   buildDD(
     "leg-dialog-effort",
-    ["(none)", ...EFFORTS],
+    ["(none)", ...efforts()],
     "(none)",
   );
   buildDD(
     "leg-dialog-stylecall",
-    ["(auto)", ...STYLECALLS],
+    ["(auto)", ...stylecalls()],
     "(auto)",
   );
   $("#leg-dialog-upstream").value = "";
@@ -1095,9 +1091,22 @@ export function stopUptimeTicker() {
   uptimeTimer = null;
 }
 
+// syncLiveBadge renders the poll cadence the server reported, so the static
+// markup in index.html never claims a stale interval.
+function syncLiveBadge(paused = getLogFilters().paused) {
+  const badge = $("#log-live-badge");
+  if (!badge) return;
+  badge.className =
+    "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground";
+  badge.innerHTML = paused
+    ? `<span class="dot dot-warn"></span>paused`
+    : `<span class="dot dot-live"></span>auto-refresh ${POLL_MS / 1000}s`;
+}
+
 export function initDynamic() {
   refreshAll();
   startUptimeTicker();
+  syncLiveBadge();
 
   if (wired) return;
   wired = true;
@@ -1210,12 +1219,7 @@ export function initDynamic() {
     $("#log-pause").innerHTML = paused
       ? `<i data-lucide="play" class="size-3.5"></i>Resume`
       : `<i data-lucide="pause" class="size-3.5"></i>Pause`;
-    const badge = $("#log-live-badge");
-    badge.className =
-      "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground";
-    badge.innerHTML = paused
-      ? `<span class="dot dot-warn"></span>paused`
-      : `<span class="dot dot-live"></span>auto-refresh ${POLL_MS / 1000}s`;
+    syncLiveBadge(paused);
     refreshIcons();
   });
 

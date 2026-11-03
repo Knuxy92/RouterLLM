@@ -1,12 +1,13 @@
 import { applyAuth, wireAuth } from "./js/auth.js"
 import { initDynamic, refreshIcons } from "./js/render.js"
 import { wireCmdk } from "./js/search.js"
-import { startPolling } from "./js/state.js"
+import { initConfig, startPolling } from "./js/state.js"
 import { route, wireRouter } from "./js/router.js"
 import { initTheme } from "./js/theme.js"
 import { wireUi } from "./js/ui.js"
 
-function onAuthed() {
+async function onAuthed() {
+  await initConfig()
   initDynamic()
   startPolling()
   route()

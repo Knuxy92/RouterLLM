@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 const watchInterval = 3 * time.Second
@@ -90,6 +92,7 @@ func (r *Reloader) applyLocked(data []byte, next [32]byte) error {
 
 	r.current = next
 	r.lastReject = ""
+	settings.Set(cfg.Settings)
 	r.apply(cfg)
 
 	return nil
@@ -112,11 +115,12 @@ func (r *Reloader) fail(err error) {
 	}
 }
 
-// Watch polls the config file every watchInterval. It compares SHA-256 of the
-// contents rather than mtime, because mtime propagation through Docker Desktop
-// bind mounts on Windows is unreliable.
+// Watch polls the config file every server.watch_interval. It compares SHA-256
+// of the contents rather than mtime, because mtime propagation through Docker
+// Desktop bind mounts on Windows is unreliable. The interval is read once, so
+// changing it needs a restart.
 func (r *Reloader) Watch(ctx context.Context) {
-	ticker := time.NewTicker(watchInterval)
+	ticker := time.NewTicker(settings.Current().Server.WatchInterval)
 	defer ticker.Stop()
 
 	for {

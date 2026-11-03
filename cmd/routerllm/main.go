@@ -20,15 +20,9 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/routers"
 	"routerllm/internal/services"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
-)
-
-const (
-	serverReadHeaderTimeout = 10 * time.Second
-	serverIdleTimeout       = 120 * time.Second
-	shutdownTimeout         = 10 * time.Second
-	metricsPruneInterval    = time.Hour
 )
 
 func main() {
@@ -94,6 +88,8 @@ func main() {
 	if len(cfg.Providers) == 0 {
 		logger.Fatal("no providers configured — add at least one provider to routerllm.yaml")
 	}
+
+	serverLimits := settings.Current().Server
 
 	debug := os.Getenv("ROUTERLLM_DEBUG") == "true"
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
@@ -179,8 +175,8 @@ func main() {
 			Addr:              ":" + port,
 			Handler:           adminMux,
 			TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
-			ReadHeaderTimeout: serverReadHeaderTimeout,
-			IdleTimeout:       serverIdleTimeout,
+			ReadHeaderTimeout: serverLimits.ReadHeaderTimeout,
+			IdleTimeout:       serverLimits.IdleTimeout,
 		}
 		go func() {
 			logger.Printf("admin console (TLS) on :%s — cert %s, key %s", port, certPath, keyPath)
@@ -206,7 +202,7 @@ func main() {
 	go reloader.Watch(watchCtx)
 
 	go func() {
-		ticker := time.NewTicker(metricsPruneInterval)
+		ticker := time.NewTicker(serverLimits.MetricsPruneInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -221,8 +217,8 @@ func main() {
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
-		ReadHeaderTimeout: serverReadHeaderTimeout,
-		IdleTimeout:       serverIdleTimeout,
+		ReadHeaderTimeout: serverLimits.ReadHeaderTimeout,
+		IdleTimeout:       serverLimits.IdleTimeout,
 	}
 
 	go func() {
@@ -241,7 +237,7 @@ func main() {
 	proxy.FlushAccounts()
 	logger.Println("shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), serverLimits.ShutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Fatal("server forced to shutdown:", err)

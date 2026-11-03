@@ -77,6 +77,402 @@
       "items": {
         "$ref": "#/$defs/modelRoute"
       }
+    },
+    "settings": {
+      "description": "Tunables that used to be hardcoded. Every key is optional; an absent key keeps its built-in default, and an absent block is equivalent to the defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limits": {
+          "description": "Request and response payload bounds. Hot-reloadable.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "request_body_bytes": {
+              "type": "integer",
+              "description": "Largest client request body buffered per request. Applies to /v1/chat/completions, /v1/responses and /v1/messages.",
+              "default": 104857600,
+              "minimum": 1
+            },
+            "error_body_bytes": {
+              "type": "integer",
+              "description": "How much of an upstream error body is read for logging and telemetry.",
+              "default": 65536,
+              "minimum": 1
+            },
+            "brief_body_bytes": {
+              "type": "integer",
+              "description": "How much of a request body is echoed into trace lines.",
+              "default": 500,
+              "minimum": 1
+            },
+            "upstream_tools": {
+              "type": "integer",
+              "description": "Tool-definition cap enforced before dispatch. Gateways reject larger requests; 128 is the OpenAI/DeepSeek ceiling.",
+              "default": 128,
+              "minimum": 1,
+              "maximum": 128
+            },
+            "schema_max_depth": {
+              "type": "integer",
+              "description": "Depth budget for the tool-schema clamp when clamp_tool_schemas is on and tool_schema_max_depth is unset. Stays below the gateways' limit of 10.",
+              "default": 8,
+              "minimum": 1
+            },
+            "media": {
+              "description": "Bounds for resolving media references before dispatch.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "resolved_size_bytes": {
+                  "type": "integer",
+                  "description": "Largest single media reference the proxy will fetch.",
+                  "default": 20971520,
+                  "minimum": 1
+                },
+                "refs_per_request": {
+                  "type": "integer",
+                  "description": "How many media references one request may resolve.",
+                  "default": 8,
+                  "minimum": 1
+                },
+                "bytes_per_request": {
+                  "type": "integer",
+                  "description": "Total media bytes one request may fetch.",
+                  "default": 52428800,
+                  "minimum": 1
+                },
+                "redirects": {
+                  "type": "integer",
+                  "description": "Redirect hops allowed per media fetch.",
+                  "default": 10,
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "retry": {
+          "description": "Per-key retry policy. Hot-reloadable.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "description": "Retries on one key for transient failures (408/429/5xx) before moving to the next key.",
+              "default": 3,
+              "minimum": 1
+            },
+            "backoff_base_ms": {
+              "type": "integer",
+              "description": "Exponential backoff base between retries; attempt n waits base * 2^n.",
+              "default": 100,
+              "minimum": 1
+            }
+          }
+        },
+        "telemetry": {
+          "description": "Event ring, metrics and jsonl persistence. Hot-reloadable; retention only affects the replay.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ring_capacity": {
+              "type": "integer",
+              "description": "In-memory event ring size, also the console's request-log ceiling.",
+              "default": 2000,
+              "minimum": 1
+            },
+            "retention": {
+              "type": "string",
+              "description": "How far back events are kept and replayed. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "168h"
+            },
+            "file_bytes": {
+              "type": "integer",
+              "description": "Rotate the jsonl once it grows past this many bytes.",
+              "default": 10485760,
+              "minimum": 1
+            },
+            "rewrite_bytes": {
+              "type": "integer",
+              "description": "Cap for a rotation rewrite. Must be smaller than file_bytes; a value at or above it is reset to file_bytes/2.",
+              "default": 5242880,
+              "minimum": 1
+            },
+            "rotate_retry_interval": {
+              "type": "string",
+              "description": "How long to wait before retrying a rotation that failed. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "1m"
+            },
+            "bucket_width": {
+              "type": "string",
+              "description": "Width of one metric bucket. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "5m"
+            },
+            "line_bytes": {
+              "type": "integer",
+              "description": "Longest jsonl line the replay will read; longer lines are skipped whole.",
+              "default": 1048576,
+              "minimum": 1
+            },
+            "field_bytes": {
+              "type": "integer",
+              "description": "Clamp for free-form identifier fields (model, request id, attempt note).",
+              "default": 512,
+              "minimum": 1
+            },
+            "error_bytes": {
+              "type": "integer",
+              "description": "Clamp for a stored failure detail string.",
+              "default": 4096,
+              "minimum": 1
+            },
+            "resp_body_bytes": {
+              "type": "integer",
+              "description": "Clamp for a captured upstream error body per event and per attempt.",
+              "default": 2048,
+              "minimum": 1
+            },
+            "ttft_reservoir": {
+              "type": "integer",
+              "description": "TTFT samples kept per metric bucket.",
+              "default": 64,
+              "minimum": 1
+            },
+            "model_series": {
+              "type": "integer",
+              "description": "Per-model metric series cap; the oldest series is evicted.",
+              "default": 256,
+              "minimum": 1
+            },
+            "usage_tail_bytes": {
+              "type": "integer",
+              "description": "How much of the previous read is re-scanned so a usage object straddling a read boundary is still found.",
+              "default": 4096,
+              "minimum": 1
+            },
+            "default_per_page": {
+              "type": "integer",
+              "description": "Page size for /admin/api/requests when the caller omits one.",
+              "default": 50,
+              "minimum": 1
+            }
+          }
+        },
+        "admin": {
+          "description": "Admin console session store and provider-test panel.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "session_ttl": {
+              "type": "string",
+              "description": "Console session lifetime. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "12h"
+            },
+            "challenge_ttl": {
+              "type": "string",
+              "description": "Auth challenge lifetime; a nonce is single-use. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "60s"
+            },
+            "max_sessions": {
+              "type": "integer",
+              "description": "Live console sessions kept before the oldest is evicted.",
+              "default": 100,
+              "minimum": 1
+            },
+            "max_challenges": {
+              "type": "integer",
+              "description": "Outstanding auth challenges kept. The challenge endpoint is the only unauthenticated one, so its map is capped.",
+              "default": 1000,
+              "minimum": 1
+            },
+            "json_body_bytes": {
+              "type": "integer",
+              "description": "Largest admin API request body decoded.",
+              "default": 1048576,
+              "minimum": 1
+            },
+            "test": {
+              "description": "Provider-test panel clamps. Served to the console through /admin/api/config.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "prompt_bytes": {
+                  "type": "integer",
+                  "description": "Longest provider-test prompt accepted.",
+                  "default": 4000,
+                  "minimum": 1
+                },
+                "max_tokens": {
+                  "type": "integer",
+                  "description": "Upper clamp for a provider test's max_tokens.",
+                  "default": 8192,
+                  "minimum": 1
+                },
+                "default_tokens": {
+                  "type": "integer",
+                  "description": "max_tokens applied when the test omits it. Must not exceed max_tokens.",
+                  "default": 256,
+                  "minimum": 1
+                },
+                "timeout_floor_seconds": {
+                  "type": "integer",
+                  "description": "Shortest provider-test deadline accepted.",
+                  "default": 5,
+                  "minimum": 1
+                },
+                "timeout_ceiling_seconds": {
+                  "type": "integer",
+                  "description": "Longest provider-test deadline accepted.",
+                  "default": 120,
+                  "minimum": 1
+                },
+                "default_timeout_seconds": {
+                  "type": "integer",
+                  "description": "Deadline applied when the test omits it; must sit between the floor and the ceiling.",
+                  "default": 20,
+                  "minimum": 1
+                },
+                "default_prompt": {
+                  "type": "string",
+                  "description": "Prompt pre-filled in the test panel.",
+                  "default": "Say 'pong' and nothing else."
+                }
+              }
+            },
+            "ui": {
+              "description": "Console runtime knobs, served through /admin/api/config.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "poll_ms": {
+                  "type": "integer",
+                  "description": "Console poll cadence in milliseconds. Served to the bundle so the UI and server agree.",
+                  "default": 3000,
+                  "minimum": 1
+                },
+                "log_per_page": {
+                  "type": "integer",
+                  "description": "Request-log rows per page in the console.",
+                  "default": 20,
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "audit": {
+          "description": "Request audit trail, written only when ROUTERLLM_DEBUG_ADVANCED and ROUTERLLM_LOG_FILE are set.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "body_bytes": {
+              "type": "integer",
+              "description": "How much of any one body the audit trail keeps before marking it truncated.",
+              "default": 10485760,
+              "minimum": 1
+            },
+            "render_bytes": {
+              "type": "integer",
+              "description": "How much of one body reaches the log; larger bodies are shown head and tail.",
+              "default": 65536,
+              "minimum": 1
+            }
+          }
+        },
+        "transport": {
+          "description": "Shared upstream HTTP transport. Startup-only: requires a restart.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_idle_conns": {
+              "type": "integer",
+              "description": "Upstream transport idle connection pool size.",
+              "default": 100,
+              "minimum": 1
+            },
+            "max_idle_conns_per_host": {
+              "type": "integer",
+              "description": "Idle connections kept per upstream host.",
+              "default": 10,
+              "minimum": 1
+            },
+            "idle_conn_timeout": {
+              "type": "string",
+              "description": "How long an idle upstream connection is kept. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "90s"
+            },
+            "response_header_timeout": {
+              "type": "string",
+              "description": "How long to wait for upstream response headers. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "600s"
+            },
+            "tls_handshake_timeout": {
+              "type": "string",
+              "description": "Upstream TLS handshake deadline. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "10s"
+            }
+          }
+        },
+        "server": {
+          "description": "HTTP server and background tickers. Startup-only: requires a restart.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read_header_timeout": {
+              "type": "string",
+              "description": "HTTP server request-header deadline. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "10s"
+            },
+            "idle_timeout": {
+              "type": "string",
+              "description": "HTTP server idle keep-alive deadline. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "120s"
+            },
+            "shutdown_timeout": {
+              "type": "string",
+              "description": "Grace period for in-flight requests on shutdown. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "10s"
+            },
+            "metrics_prune_interval": {
+              "type": "string",
+              "description": "How often expired metric buckets are pruned. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "1h"
+            },
+            "watch_interval": {
+              "type": "string",
+              "description": "How often routerllm.yaml is polled for changes. Go duration syntax (e.g. 30s, 5m, 168h).",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "default": "3s"
+            }
+          }
+        },
+        "admin_tls": {
+          "description": "Self-signed console certificate. Startup-only: requires a restart.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cert_validity_days": {
+              "type": "integer",
+              "description": "Validity of the auto-generated self-signed console certificate.",
+              "default": 825,
+              "minimum": 1
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

@@ -14,6 +14,7 @@ import (
 	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
 	"routerllm/internal/quota"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/workbuddy"
 )
@@ -195,11 +196,11 @@ func (p *Proxy) SetDedupeTools(enabled bool) {
 
 // SetClampToolSchemas turns the global tool-schema depth clamp on or off and
 // sets the depth budget every leg is held to. A non-positive maxDepth falls
-// back to defaultToolSchemaMaxDepth.
+// back to the settings default.
 func (p *Proxy) SetClampToolSchemas(enabled bool, maxDepth int) {
 	p.clampTools.Store(enabled)
 	if maxDepth <= 0 {
-		maxDepth = defaultToolSchemaMaxDepth
+		maxDepth = settings.Current().Limits.SchemaMaxDepth
 	}
 	p.toolSchemaMaxDepth.Store(int64(maxDepth))
 }
@@ -211,7 +212,7 @@ func (p *Proxy) schemaDepthBudget() int {
 		return int(depth)
 	}
 
-	return defaultToolSchemaMaxDepth
+	return settings.Current().Limits.SchemaMaxDepth
 }
 
 func (p *Proxy) storeAllowClientHeaders(allow []string) {

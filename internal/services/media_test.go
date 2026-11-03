@@ -14,6 +14,7 @@ import (
 
 	"routerllm/internal/keys"
 	"routerllm/internal/provider"
+	"routerllm/internal/settings"
 )
 
 // stubPublicHost replaces the package host check for one test and restores the
@@ -191,7 +192,7 @@ func TestMediaResolverCapsReferencesPerRequest(t *testing.T) {
 	proxy := newMediaTestProxy(nil)
 	resolve := proxy.mediaResolver(&provider.Provider{Name: "fake"})
 
-	for i := 0; i < maxMediaRefsPerRequest; i++ {
+	for i := 0; i < settings.Default().Limits.Media.RefsPerRequest; i++ {
 		if _, _, err := resolve(upstream.URL + "/media"); err != nil {
 			t.Fatalf("reference %d: %v", i+1, err)
 		}
@@ -208,10 +209,10 @@ func TestMediaResolverCapsTotalBytesPerRequest(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.Itoa(maxResolvedMediaSize))
+		w.Header().Set("Content-Length", strconv.Itoa(settings.Default().Limits.Media.ResolvedSizeBytes))
 
 		buf := make([]byte, 64<<10)
-		for sent := 0; sent < maxResolvedMediaSize; sent += len(buf) {
+		for sent := 0; sent < settings.Default().Limits.Media.ResolvedSizeBytes; sent += len(buf) {
 			if _, err := w.Write(buf); err != nil {
 				return
 			}
@@ -223,7 +224,7 @@ func TestMediaResolverCapsTotalBytesPerRequest(t *testing.T) {
 	resolve := proxy.mediaResolver(&provider.Provider{Name: "fake"})
 
 	var exceeded bool
-	for i := 0; i < maxMediaRefsPerRequest; i++ {
+	for i := 0; i < settings.Default().Limits.Media.RefsPerRequest; i++ {
 		if _, _, err := resolve(upstream.URL + "/big"); err != nil {
 			if !strings.Contains(err.Error(), "media budget exceeded") {
 				t.Fatalf("reference %d: unexpected error %v", i+1, err)
@@ -233,6 +234,6 @@ func TestMediaResolverCapsTotalBytesPerRequest(t *testing.T) {
 		}
 	}
 	if !exceeded {
-		t.Fatalf("resolving %d references of %d bytes never hit the %d-byte budget", maxMediaRefsPerRequest, maxResolvedMediaSize, maxMediaBytesPerRequest)
+		t.Fatalf("resolving %d references of %d bytes never hit the %d-byte budget", settings.Default().Limits.Media.RefsPerRequest, settings.Default().Limits.Media.ResolvedSizeBytes, settings.Default().Limits.Media.BytesPerRequest)
 	}
 }

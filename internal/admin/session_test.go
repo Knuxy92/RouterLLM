@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"testing"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 // An anonymous client can spam /auth/challenge — the map must stay bounded.
 func TestChallengeStoreCapsUnderFlood(t *testing.T) {
 	store := NewSessionStore(func() string { return "secret" })
-	for i := 0; i < maxChallenges+50; i++ {
+	for i := 0; i < settings.Default().Admin.MaxChallenges+50; i++ {
 		store.Challenge()
 	}
 
@@ -19,8 +21,8 @@ func TestChallengeStoreCapsUnderFlood(t *testing.T) {
 	count := len(store.challenges)
 	store.mu.Unlock()
 
-	if count != maxChallenges {
-		t.Fatalf("challenges = %d, want cap %d enforced", count, maxChallenges)
+	if count != settings.Default().Admin.MaxChallenges {
+		t.Fatalf("challenges = %d, want cap %d enforced", count, settings.Default().Admin.MaxChallenges)
 	}
 }
 
@@ -34,8 +36,8 @@ func TestChallengeIsSingleUseAndExpires(t *testing.T) {
 	}
 
 	id, nonce, expiresIn := store.Challenge()
-	if expiresIn != int(challengeTTL/time.Second) {
-		t.Fatalf("expires_in = %d, want %d", expiresIn, int(challengeTTL/time.Second))
+	if expiresIn != int(settings.Default().Admin.ChallengeTTL/time.Second) {
+		t.Fatalf("expires_in = %d, want %d", expiresIn, int(settings.Default().Admin.ChallengeTTL/time.Second))
 	}
 
 	if _, _, ok := store.Verify(id, "not-hex"); ok {

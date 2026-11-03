@@ -8,15 +8,8 @@ import (
 	"encoding/hex"
 	"sync"
 	"time"
-)
 
-const (
-	challengeTTL = 60 * time.Second
-	sessionTTL   = 12 * time.Hour
-	maxSessions  = 100
-	// Challenge is the only unauthenticated endpoint, so its map is the one
-	// an anonymous client can grow; cap it like sessions.
-	maxChallenges = 1000
+	"routerllm/internal/settings"
 )
 
 type challenge struct {
@@ -27,7 +20,7 @@ type challenge struct {
 // SessionStore issues single-use challenges and validates HMAC proofs. The
 // admin secret itself never crosses the wire: the client proves knowledge of
 // it by computing HMAC-SHA256(secret, nonce). State is bounded — sessions are
-// capped at maxSessions with lazy expiry sweeps, matching the repo policy of
+// capped at admin.max_sessions with lazy expiry sweeps, matching the repo policy of
 // no unbounded in-memory growth.
 type SessionStore struct {
 	secret func() string
@@ -55,20 +48,21 @@ func randomToken() string {
 }
 
 // Challenge returns {id, nonce} for one proof attempt. The nonce expires after
-// challengeTTL and is consumed on the first verify, win or lose.
+// admin.challenge_ttl and is consumed on the first verify, win or lose.
 func (s *SessionStore) Challenge() (id, nonce string, expiresIn int) {
 	id = randomToken()
 	nonce = randomToken()
 
 	s.mu.Lock()
 	s.sweepLocked()
-	if len(s.challenges) >= maxChallenges {
+	limits := settings.Current().Admin
+	if len(s.challenges) >= limits.MaxChallenges {
 		s.dropOldestChallengeLocked()
 	}
-	s.challenges[id] = challenge{nonce: nonce, expiry: time.Now().Add(challengeTTL)}
+	s.challenges[id] = challenge{nonce: nonce, expiry: time.Now().Add(limits.ChallengeTTL)}
 	s.mu.Unlock()
 
-	return id, nonce, int(challengeTTL / time.Second)
+	return id, nonce, int(limits.ChallengeTTL / time.Second)
 }
 
 // Verify consumes the challenge and, if proof == hex(HMAC-SHA256(secret, nonce)),
@@ -102,12 +96,13 @@ func (s *SessionStore) Verify(id, proof string) (session string, expiresIn int, 
 	}
 
 	session = randomToken()
-	if len(s.sessions) >= maxSessions {
+	limits := settings.Current().Admin
+	if len(s.sessions) >= limits.MaxSessions {
 		s.dropOldestSessionLocked()
 	}
-	s.sessions[session] = time.Now().Add(sessionTTL)
+	s.sessions[session] = time.Now().Add(limits.SessionTTL)
 
-	return session, int(sessionTTL / time.Second), true
+	return session, int(limits.SessionTTL / time.Second), true
 }
 
 // Valid reports whether a session id is live.

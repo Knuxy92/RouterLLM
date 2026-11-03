@@ -15,31 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-const (
-	// Event ring kept in RAM for the admin console.
-	ringCapacity = 2000
-	// 5-minute metric buckets, retained a week back.
-	bucketWidth = 5 * time.Minute
-	retention   = 7 * 24 * time.Hour
-	// Rotate the jsonl once it grows past this (bytes).
-	maxFileSize = 10 << 20
-	// A rewrite keeps only the newest events up to this size, leaving headroom
-	// so fresh records append instead of tripping rotation on every call.
-	maxRewriteBytes = maxFileSize / 2
-	// A rotation that fails (locked destination, read-only directory) is not
-	// retried on every single record; the file keeps growing until one succeeds.
-	rotateRetryInterval = time.Minute
-	// Longest jsonl line the replay reads; longer lines are skipped whole.
-	// defaultPerPage is the page size for Query when the caller omits one.
-	defaultPerPage = 50
-	maxLineSize    = 1 << 20
-	// Free-form identifier fields (model, request id, attempt note) are clamped
-	// to this many bytes.
-	maxFieldSize = 512
-	// Failure detail may embed an upstream error body and gets its own cap.
-	maxErrSize = 4 << 10
+	"routerllm/internal/settings"
 )
 
 type Attempt struct {
@@ -69,7 +46,9 @@ type Event struct {
 }
 
 // RespBodyCap bounds a captured upstream error body per event/attempt.
-const RespBodyCap = 2 << 10
+func RespBodyCap() int {
+	return settings.Current().Telemetry.RespBodyBytes
+}
 
 // ClampBody truncates a captured upstream response body for storage. Error
 // bodies are the debugging payload of a failed request — the thing that says
@@ -102,13 +81,14 @@ func clampText(s string, limit int) string {
 // oversized value makes the line unreadable to the replay, which silently
 // disables disk persistence until the file is repaired by hand.
 func clampEvent(e Event) Event {
-	e.Model = clampText(e.Model, maxFieldSize)
-	e.RequestID = clampText(e.RequestID, maxFieldSize)
-	e.Err = clampText(e.Err, maxErrSize)
-	e.RespBody = clampText(e.RespBody, RespBodyCap)
+	limits := settings.Current().Telemetry
+	e.Model = clampText(e.Model, limits.FieldBytes)
+	e.RequestID = clampText(e.RequestID, limits.FieldBytes)
+	e.Err = clampText(e.Err, limits.ErrorBytes)
+	e.RespBody = clampText(e.RespBody, limits.RespBodyBytes)
 	for i := range e.Attempts {
-		e.Attempts[i].Note = clampText(e.Attempts[i].Note, maxFieldSize)
-		e.Attempts[i].RespBody = clampText(e.Attempts[i].RespBody, RespBodyCap)
+		e.Attempts[i].Note = clampText(e.Attempts[i].Note, limits.FieldBytes)
+		e.Attempts[i].RespBody = clampText(e.Attempts[i].RespBody, limits.RespBodyBytes)
 	}
 
 	return e
@@ -206,7 +186,7 @@ func (s *Store) load(path string) error {
 
 	now := time.Now()
 	var kept []Event
-	reader := bufio.NewReaderSize(f, maxLineSize)
+	reader := bufio.NewReaderSize(f, settings.Current().Telemetry.LineBytes)
 	for {
 		line, err := reader.ReadSlice('\n')
 		if err == nil {
@@ -248,7 +228,7 @@ func (s *Store) load(path string) error {
 // event inside the retention window. Malformed and expired lines are skipped.
 func appendKept(kept []Event, line []byte, now time.Time) []Event {
 	var e Event
-	if json.Unmarshal(line, &e) != nil || e.Time.IsZero() || now.Sub(e.Time) > retention {
+	if json.Unmarshal(line, &e) != nil || e.Time.IsZero() || now.Sub(e.Time) > settings.Current().Telemetry.Retention {
 		return kept
 	}
 
@@ -276,7 +256,7 @@ func (s *Store) pruneNeeded(kept []Event) bool {
 	if err != nil {
 		return false
 	}
-	if info.Size() > maxFileSize/2 {
+	if info.Size() > int64(settings.Current().Telemetry.FileBytes)/2 {
 		return true
 	}
 
@@ -310,7 +290,7 @@ func (s *Store) rewrite(kept []Event) error {
 			continue
 		}
 		n := int64(len(line)) + 1
-		if size+n > maxRewriteBytes && start < len(kept) {
+		if size+n > int64(settings.Current().Telemetry.RewriteBytes) && start < len(kept) {
 			break
 		}
 		size += n
@@ -368,8 +348,8 @@ func (s *Store) remember(e Event) Event {
 	s.next++
 	e.Seq = s.next
 	s.ring = append(s.ring, e)
-	if len(s.ring) > ringCapacity {
-		s.ring = s.ring[len(s.ring)-ringCapacity:]
+	if capacity := settings.Current().Telemetry.RingCapacity; len(s.ring) > capacity {
+		s.ring = s.ring[len(s.ring)-capacity:]
 	}
 	s.metrics.Record(e)
 
@@ -395,7 +375,7 @@ func (s *Store) Record(e Event) {
 		return
 	}
 	s.size += int64(n)
-	if s.size >= maxFileSize && (s.rotateFailedAt.IsZero() || time.Since(s.rotateFailedAt) > rotateRetryInterval) {
+	if limit := int64(settings.Current().Telemetry.FileBytes); s.size >= limit && (s.rotateFailedAt.IsZero() || time.Since(s.rotateFailedAt) > settings.Current().Telemetry.RotateRetryInterval) {
 		if err := s.rewrite(s.ring); err != nil && s.rotateFailedAt.IsZero() {
 			s.rotateFailedAt = time.Now()
 		}
@@ -449,10 +429,10 @@ func (s *Store) Query(o QueryOpts) Page {
 
 	perPage := o.PerPage
 	if perPage <= 0 {
-		perPage = defaultPerPage
+		perPage = settings.Current().Telemetry.DefaultPerPage
 	}
-	if perPage > ringCapacity {
-		perPage = ringCapacity
+	if capacity := settings.Current().Telemetry.RingCapacity; perPage > capacity {
+		perPage = capacity
 	}
 	page := o.Page
 	if page <= 0 {

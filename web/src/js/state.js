@@ -9,10 +9,50 @@ import { adaptLogs, adaptModels, adaptProviders } from "./data.js"
 // immediately, then is replaced by the API's fresh Status; on failure the
 // state rolls back by re-fetching /status.
 
-// Shared knobs: poll cadence (also rendered into the LIVE badge) and the
-// newest-first delta-ring cap (also the CSV export page size).
-export const POLL_MS = 3000
-export const RING_CAP = 2000
+// Fallbacks used until /admin/api/config answers. The server owns the real
+// values (settings.admin.ui in routerllm.yaml); these only keep the console
+// usable if that endpoint is unreachable.
+const DEFAULT_CONFIG = {
+  ui: { poll_ms: 3000, log_per_page: 20 },
+  test: {
+    prompt_bytes: 4000,
+    max_tokens: 8192,
+    default_tokens: 256,
+    timeout_floor: 5,
+    timeout_ceiling: 120,
+    default_timeout: 20,
+    default_prompt: "Say 'pong' and nothing else.",
+  },
+  efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+  stylecalls: ["chat", "responses", "messages"],
+  ring_capacity: 2000,
+}
+
+let runtimeConfig = DEFAULT_CONFIG
+
+// Live bindings: render.js imports these and re-renders after initConfig, so a
+// reassignment here reaches every reader.
+export let POLL_MS = DEFAULT_CONFIG.ui.poll_ms
+export let RING_CAP = DEFAULT_CONFIG.ring_capacity
+
+/** Server-provided console settings, falling back to the bundled defaults. */
+export function getRuntimeConfig() {
+  return runtimeConfig
+}
+
+/** Fetch the console's tunables. A failure keeps the bundled defaults. */
+export async function initConfig() {
+  try {
+    const remote = await api.config()
+    runtimeConfig = { ...DEFAULT_CONFIG, ...remote, ui: { ...DEFAULT_CONFIG.ui, ...remote?.ui }, test: { ...DEFAULT_CONFIG.test, ...remote?.test } }
+  } catch {
+    runtimeConfig = DEFAULT_CONFIG
+  }
+
+  POLL_MS = runtimeConfig.ui.poll_ms
+  RING_CAP = runtimeConfig.ring_capacity
+  logMeta = { ...logMeta, per_page: runtimeConfig.ui.log_per_page }
+}
 
 let lastStatus = null
 let lastMetrics = null
@@ -29,9 +69,7 @@ let polling = false
 // Live updates flow through the delta ring: page 1 is re-fetched only when new
 // events actually arrived, and pages >1 stay put while you browse them.
 
-const LOG_PER_PAGE = 20
-
-let logMeta = { page: 1, per_page: LOG_PER_PAGE, total: 0, total_pages: 1, error_total: 0, latest: 0 }
+let logMeta = { page: 1, per_page: DEFAULT_CONFIG.ui.log_per_page, total: 0, total_pages: 1, error_total: 0, latest: 0 }
 let logPageCache = new Map()
 let logFilters = { provider: "", model: "", level: "", q: "", hours: 24, paused: false }
 let recentFailures = []
@@ -75,7 +113,7 @@ export function getUptimeSeconds() {
 }
 
 function filterParams() {
-  const p = { page: logMeta.page, perPage: LOG_PER_PAGE }
+  const p = { page: logMeta.page, perPage: logMeta.per_page }
   if (logFilters.provider) p.provider = logFilters.provider
   if (logFilters.model) p.model = logFilters.model
   if (logFilters.level) p.level = logFilters.level

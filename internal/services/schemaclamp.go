@@ -3,8 +3,6 @@ package services
 import (
 	"fmt"
 	"strings"
-
-	"routerllm/internal/config"
 )
 
 // Upstream gateways validate every tool definition in a request and reject the
@@ -14,12 +12,6 @@ import (
 // routinely exceed that on their own, so the proxy flattens the offending
 // subtree before dispatch: property names and descriptions survive, only the
 // deep structure below them is replaced by a stub.
-
-// defaultToolSchemaMaxDepth is the depth budget applied when the config does
-// not set one. It sits below the gateway's own limit of 10 because the two
-// counters do not agree at the edges (properties wrappers, $defs, tuple
-// items), and a request that passes locally must still pass upstream.
-const defaultToolSchemaMaxDepth = config.DefaultToolSchemaMaxDepth
 
 var (
 	// schemaChildKeys hold named sub-schemas, one per entry.

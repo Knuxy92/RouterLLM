@@ -10,6 +10,7 @@ import (
 	"routerllm/internal/adapter"
 	"routerllm/internal/model"
 	"routerllm/internal/services"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 )
@@ -34,7 +35,7 @@ func (h *Handlers) Responses(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, int64(settings.Current().Limits.RequestBodyBytes))
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read body: "+err.Error())
@@ -73,7 +74,7 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				note = err.Error()
 			}
-			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, note, respTokens(resp), telemetry.ClampBody(eb, telemetry.RespBodyCap)))
+			h.proxy.RecordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, note, respTokens(resp), telemetry.ClampBody(eb, telemetry.RespBodyCap())))
 			return
 		}
 

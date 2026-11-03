@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"routerllm/internal/settings"
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
@@ -112,7 +113,7 @@ func TestClampToolSchemaDepthsLeavesShallowToolsUntouched(t *testing.T) {
 		t.Fatalf("marshal before: %v", err)
 	}
 
-	if touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth); len(touched) != 0 {
+	if touched := clampToolSchemaDepths(body, settings.Default().Limits.SchemaMaxDepth); len(touched) != 0 {
 		t.Fatalf("clamped = %v, want none", touched)
 	}
 
@@ -128,17 +129,17 @@ func TestClampToolSchemaDepthsLeavesShallowToolsUntouched(t *testing.T) {
 func TestClampToolSchemaDepthsFlattensDeepChatTool(t *testing.T) {
 	body := chatToolBody("deep", nestedSchema(12))
 
-	touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
+	touched := clampToolSchemaDepths(body, settings.Default().Limits.SchemaMaxDepth)
 	if len(touched) != 1 || touched[0].Name != "deep" {
 		t.Fatalf("clamped = %+v, want the deep tool", touched)
 	}
-	if touched[0].After > defaultToolSchemaMaxDepth {
-		t.Fatalf("after depth = %d, want <= %d", touched[0].After, defaultToolSchemaMaxDepth)
+	if touched[0].After > settings.Default().Limits.SchemaMaxDepth {
+		t.Fatalf("after depth = %d, want <= %d", touched[0].After, settings.Default().Limits.SchemaMaxDepth)
 	}
 
 	schema := toolParameters(t, body)
-	if got := schemaDepth(schema); got != defaultToolSchemaMaxDepth {
-		t.Fatalf("clamped depth = %d, want exactly %d", got, defaultToolSchemaMaxDepth)
+	if got := schemaDepth(schema); got != settings.Default().Limits.SchemaMaxDepth {
+		t.Fatalf("clamped depth = %d, want exactly %d", got, settings.Default().Limits.SchemaMaxDepth)
 	}
 
 	properties, ok := schema["properties"].(map[string]any)
@@ -225,7 +226,7 @@ func TestClampToolSchemaDepthsKeepsDescriptiveFields(t *testing.T) {
 	}
 
 	body := chatToolBody("described", parameters)
-	clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
+	clampToolSchemaDepths(body, settings.Default().Limits.SchemaMaxDepth)
 
 	schema := toolParameters(t, body)
 	config := schema["properties"].(map[string]any)["config"].(map[string]any)
@@ -250,15 +251,15 @@ func TestClampToolSchemaDepthsHandlesFlatResponsesToolShape(t *testing.T) {
 		}},
 	}
 
-	touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
+	touched := clampToolSchemaDepths(body, settings.Default().Limits.SchemaMaxDepth)
 	if len(touched) != 1 || touched[0].Name != "flat_deep" {
 		t.Fatalf("clamped = %+v, want the flat_deep tool", touched)
 	}
 
 	tool := body["tools"].([]any)[0].(map[string]any)
 	schema := tool["parameters"].(map[string]any)
-	if got := schemaDepth(schema); got > defaultToolSchemaMaxDepth {
-		t.Fatalf("clamped depth = %d, want <= %d", got, defaultToolSchemaMaxDepth)
+	if got := schemaDepth(schema); got > settings.Default().Limits.SchemaMaxDepth {
+		t.Fatalf("clamped depth = %d, want <= %d", got, settings.Default().Limits.SchemaMaxDepth)
 	}
 }
 
@@ -268,7 +269,7 @@ func TestClampToolSchemaDepthsSkipsWhenDisabled(t *testing.T) {
 	if touched := clampToolSchemaDepths(body, 0); len(touched) != 0 {
 		t.Fatalf("clamped = %v, want none when the budget is zero", touched)
 	}
-	if got := schemaDepth(toolParameters(t, body)); got <= defaultToolSchemaMaxDepth {
+	if got := schemaDepth(toolParameters(t, body)); got <= settings.Default().Limits.SchemaMaxDepth {
 		t.Fatalf("depth = %d, want the deep schema left intact when disabled", got)
 	}
 }
@@ -279,15 +280,15 @@ func TestForwardClampsAnthropicToolSchemasOnOpenCodeMessagesLeg(t *testing.T) {
 	if upstreamDepth == 0 {
 		t.Fatal("client tool never reached the upstream messages payload")
 	}
-	if upstreamDepth > defaultToolSchemaMaxDepth {
-		t.Fatalf("upstream input_schema depth = %d, want <= %d", upstreamDepth, defaultToolSchemaMaxDepth)
+	if upstreamDepth > settings.Default().Limits.SchemaMaxDepth {
+		t.Fatalf("upstream input_schema depth = %d, want <= %d", upstreamDepth, settings.Default().Limits.SchemaMaxDepth)
 	}
 }
 
 // The clamp-off case proves the assertion above is not vacuous: without the
 // clamp the very same schema reaches the upstream intact.
 func TestForwardLeavesAnthropicToolSchemasWhenClampOff(t *testing.T) {
-	if depth := runAnthropicLeg(t, false); depth <= defaultToolSchemaMaxDepth {
+	if depth := runAnthropicLeg(t, false); depth <= settings.Default().Limits.SchemaMaxDepth {
 		t.Fatalf("upstream input_schema depth = %d, want the schema untouched while the clamp is off", depth)
 	}
 }
@@ -394,8 +395,8 @@ func TestForwardClampsToolSchemaDepthOnLeg(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
-	if upstreamDepth > defaultToolSchemaMaxDepth {
-		t.Fatalf("upstream schema depth = %d, want <= %d", upstreamDepth, defaultToolSchemaMaxDepth)
+	if upstreamDepth > settings.Default().Limits.SchemaMaxDepth {
+		t.Fatalf("upstream schema depth = %d, want <= %d", upstreamDepth, settings.Default().Limits.SchemaMaxDepth)
 	}
 }
 
@@ -427,7 +428,7 @@ func TestForwardLeavesToolSchemaDepthWhenClampOff(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
-	if upstreamDepth <= defaultToolSchemaMaxDepth {
+	if upstreamDepth <= settings.Default().Limits.SchemaMaxDepth {
 		t.Fatalf("upstream schema depth = %d, want the schema untouched while the clamp is off", upstreamDepth)
 	}
 }
@@ -459,14 +460,14 @@ func TestClampFlattensSchemasHiddenBehindUnaryKeywords(t *testing.T) {
 	for _, keyword := range []string{"additionalProperties", "not", "contains", "items"} {
 		body := chatToolBody("hidden_"+keyword, build(keyword, 12))
 
-		touched := clampToolSchemaDepths(body, defaultToolSchemaMaxDepth)
+		touched := clampToolSchemaDepths(body, settings.Default().Limits.SchemaMaxDepth)
 		if len(touched) != 1 {
 			t.Fatalf("%s: clamped = %+v, want the deep tool to be caught", keyword, touched)
 		}
 
 		schema := toolParameters(t, body)
-		if got := schemaDepth(schema); got > defaultToolSchemaMaxDepth {
-			t.Errorf("%s: depth after clamp = %d, want <= %d", keyword, got, defaultToolSchemaMaxDepth)
+		if got := schemaDepth(schema); got > settings.Default().Limits.SchemaMaxDepth {
+			t.Errorf("%s: depth after clamp = %d, want <= %d", keyword, got, settings.Default().Limits.SchemaMaxDepth)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"routerllm/internal/model"
+	"routerllm/internal/settings"
 )
 
 type ProviderConfig struct {
@@ -35,6 +36,7 @@ type Config struct {
 	ForwardClientHeaders bool
 	AllowClientHeaders   []string
 	SystemPrompt         string
+	Settings             settings.Settings
 	Providers            []ProviderConfig
 	Client               *http.Client
 	Routes               []model.Rule
@@ -53,6 +55,8 @@ func Load() *Config {
 		}
 		cfg.Port = port
 	}
+
+	settings.Set(cfg.Settings)
 
 	return cfg
 }
@@ -73,21 +77,13 @@ func validatePort(port string) error {
 	return nil
 }
 
-const (
-	transportMaxIdleConns        = 100
-	transportMaxIdleConnsPerHost = 10
-	transportIdleConnTimeout     = 90 * time.Second
-	transportRespHeaderTimeout   = 600 * time.Second
-	transportTLSHandshakeTimeout = 10 * time.Second
-)
-
-func newTransport() *http.Transport {
+func newTransport(s settings.Transport) *http.Transport {
 	return &http.Transport{
-		MaxIdleConns:          transportMaxIdleConns,
-		MaxIdleConnsPerHost:   transportMaxIdleConnsPerHost,
-		IdleConnTimeout:       transportIdleConnTimeout,
-		ResponseHeaderTimeout: transportRespHeaderTimeout,
-		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
+		MaxIdleConns:          s.MaxIdleConns,
+		MaxIdleConnsPerHost:   s.MaxIdleConnsPerHost,
+		IdleConnTimeout:       s.IdleConnTimeout,
+		ResponseHeaderTimeout: s.ResponseHeaderTimeout,
+		TLSHandshakeTimeout:   s.TLSHandshakeTimeout,
 	}
 }
 

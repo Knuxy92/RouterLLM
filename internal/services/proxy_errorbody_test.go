@@ -15,26 +15,16 @@ import (
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 )
 
-func TestReadErrorBodyCapsAt64KiB(t *testing.T) {
-	body := ReadErrorBody(bytes.NewReader(make([]byte, 1<<20)))
+func TestReadErrorBodyCapsAtConfiguredLimit(t *testing.T) {
+	limit := settings.Default().Limits.ErrorBodyBytes
+	body := ReadErrorBody(bytes.NewReader(make([]byte, limit*4)))
 
-	if len(body) != maxErrorBodyRead {
-		t.Fatalf("read %d bytes, want the %d-byte cap", len(body), maxErrorBodyRead)
-	}
-}
-
-func TestTruncateErrorBodyCapsAt16KiB(t *testing.T) {
-	short := []byte("small")
-	if got := TruncateErrorBody(short); string(got) != "small" {
-		t.Fatalf("short body = %q", got)
-	}
-
-	long := bytes.Repeat([]byte("x"), maxClientErrorBytes+100)
-	if got := TruncateErrorBody(long); len(got) != maxClientErrorBytes {
-		t.Fatalf("long body = %d bytes, want %d", len(got), maxClientErrorBytes)
+	if len(body) != limit {
+		t.Fatalf("read %d bytes, want the %d-byte cap", len(body), limit)
 	}
 }
 

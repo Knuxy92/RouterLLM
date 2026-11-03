@@ -18,10 +18,9 @@ import (
 
 	"routerllm/internal/audit"
 	"routerllm/internal/handlers"
+	"routerllm/internal/settings"
 	"routerllm/internal/util"
 )
-
-const auditBodyLimit = 10 << 20
 
 func New(h *handlers.Handlers, logger *log.Logger, authToken func() string, mountAdmin func(chi.Router)) http.Handler {
 	r := chi.NewRouter()
@@ -119,7 +118,7 @@ func (w *auditResponseWriter) Write(body []byte) (int, error) {
 		w.status = http.StatusOK
 	}
 
-	remaining := auditBodyLimit - w.body.Len()
+	remaining := settings.Current().Audit.BodyBytes - w.body.Len()
 	if remaining > 0 {
 		captured := body
 		if len(captured) > remaining {
@@ -196,10 +195,11 @@ func captureRequestBody(r *http.Request) (capturedBody, error) {
 		return capturedBody{}, nil
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(r.Body, auditBodyLimit+1))
+	limit := settings.Current().Audit.BodyBytes
+	raw, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), r.Body))
-	if len(raw) > auditBodyLimit {
-		return capturedBody{body: string(raw[:auditBodyLimit]), truncated: true}, err
+	if len(raw) > limit {
+		return capturedBody{body: string(raw[:limit]), truncated: true}, err
 	}
 
 	return capturedBody{body: string(raw)}, err

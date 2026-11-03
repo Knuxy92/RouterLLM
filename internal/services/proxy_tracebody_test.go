@@ -115,11 +115,11 @@ func TestSuccessEventHasNoBody(t *testing.T) {
 }
 
 func TestClampBodyTruncates(t *testing.T) {
-	got := telemetry.ClampBody([]byte(strings.Repeat("x", 5000)), telemetry.RespBodyCap)
-	if len(got) > telemetry.RespBodyCap+16 || !strings.HasSuffix(got, "…(truncated)") {
+	got := telemetry.ClampBody([]byte(strings.Repeat("x", 5000)), telemetry.RespBodyCap())
+	if len(got) > telemetry.RespBodyCap()+16 || !strings.HasSuffix(got, "…(truncated)") {
 		t.Fatalf("ClampBody did not truncate: len=%d suffix=%q", len(got), got[len(got)-20:])
 	}
-	if telemetry.ClampBody(nil, telemetry.RespBodyCap) != "" {
+	if telemetry.ClampBody(nil, telemetry.RespBodyCap()) != "" {
 		t.Fatal("empty body should stay empty")
 	}
 }

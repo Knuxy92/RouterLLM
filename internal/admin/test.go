@@ -8,17 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"routerllm/internal/services"
+	"routerllm/internal/settings"
 	"routerllm/internal/util"
-)
-
-const (
-	testPromptCap        = 4000
-	testMaxTokensCap     = 8192
-	testDefaultTokens    = 256
-	testDefaultTimeout   = 20
-	testTimeoutFloor     = 5
-	testTimeoutCeiling   = 120
-	testDefaultPromptTxt = "Say 'pong' and nothing else."
 )
 
 // handleProviderTest runs a one-shot chat request pinned to a single provider.
@@ -47,8 +38,9 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "model is required")
 		return
 	}
-	if len(in.Prompt) > testPromptCap {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("prompt exceeds %d characters", testPromptCap))
+	limits := settings.Current().Admin.Test
+	if len(in.Prompt) > limits.PromptBytes {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("prompt exceeds %d characters", limits.PromptBytes))
 		return
 	}
 	if in.Effort != "" && !validReasoningEffort[in.Effort] {
@@ -62,18 +54,18 @@ func (d Deps) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 
 	maxTokens := in.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = testDefaultTokens
+		maxTokens = limits.DefaultTokens
 	}
-	maxTokens = min(maxTokens, testMaxTokensCap)
+	maxTokens = min(maxTokens, limits.MaxTokens)
 
 	timeout := in.TimeoutSeconds
 	if timeout <= 0 {
-		timeout = testDefaultTimeout
+		timeout = limits.DefaultTimeoutSeconds
 	}
-	timeout = min(max(timeout, testTimeoutFloor), testTimeoutCeiling)
+	timeout = min(max(timeout, limits.TimeoutFloorSeconds), limits.TimeoutCeilingSeconds)
 
 	if in.Prompt == "" {
-		in.Prompt = testDefaultPromptTxt
+		in.Prompt = limits.DefaultPrompt
 	}
 
 	result := d.Test(r, services.TestRequest{

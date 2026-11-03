@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 func testEvent(provider, upstream string, status int, ttft int64) Event {
@@ -31,17 +33,17 @@ func TestRecordKeepsRingAndSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for range ringCapacity + 50 {
+	for range settings.Default().Telemetry.RingCapacity + 50 {
 		s.Record(testEvent("p", "u", 200, 100))
 	}
 
-	if got := len(s.ring); got != ringCapacity {
-		t.Fatalf("ring size = %d, want %d", got, ringCapacity)
+	if got := len(s.ring); got != settings.Default().Telemetry.RingCapacity {
+		t.Fatalf("ring size = %d, want %d", got, settings.Default().Telemetry.RingCapacity)
 	}
 	if s.ring[0].Seq != uint64(50)+1 {
 		t.Fatalf("oldest seq = %d, want 51 (drop-oldest)", s.ring[0].Seq)
 	}
-	if s.Latest() != uint64(ringCapacity+50) {
+	if s.Latest() != uint64(settings.Default().Telemetry.RingCapacity+50) {
 		t.Fatalf("Latest() = %d", s.Latest())
 	}
 }
@@ -131,7 +133,7 @@ func TestRotateOnOversize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() > maxFileSize+1<<20 {
+	if info.Size() > int64(settings.Default().Telemetry.FileBytes)+1<<20 {
 		t.Fatalf("file did not rotate: %d bytes", info.Size())
 	}
 }
@@ -179,7 +181,7 @@ func TestFailedRotationLeavesAUsableFileHandle(t *testing.T) {
 func TestModelSeriesAreCapped(t *testing.T) {
 	m := NewMetrics()
 
-	for i := range maxModelSeries + 200 {
+	for i := range settings.Default().Telemetry.ModelSeries + 200 {
 		m.Record(Event{Time: time.Now(), Model: fmt.Sprintf("client-model-%d", i), Provider: "alpha", Status: 200})
 	}
 
@@ -189,8 +191,8 @@ func TestModelSeriesAreCapped(t *testing.T) {
 			models++
 		}
 	}
-	if models > maxModelSeries {
-		t.Fatalf("model series = %d, want at most %d — client-supplied names must not grow the map forever", models, maxModelSeries)
+	if models > settings.Default().Telemetry.ModelSeries {
+		t.Fatalf("model series = %d, want at most %d — client-supplied names must not grow the map forever", models, settings.Default().Telemetry.ModelSeries)
 	}
 	if _, ok := m.buckets["p:alpha"]; !ok {
 		t.Fatal("provider series was evicted; only client-supplied model series should be capped")
@@ -492,7 +494,7 @@ func TestRecordClampsOversizedFields(t *testing.T) {
 	assertClampedEvent(t, got[0])
 
 	for _, line := range jsonlLines(t, path) {
-		if len(line) >= maxLineSize {
+		if len(line) >= settings.Default().Telemetry.LineBytes {
 			t.Fatalf("jsonl line = %d bytes, must stay readable by the replay", len(line))
 		}
 	}
@@ -510,12 +512,12 @@ func assertClampedEvent(t *testing.T, e Event) {
 		value string
 		limit int
 	}{
-		{"model", e.Model, maxFieldSize},
-		{"request_id", e.RequestID, maxFieldSize},
-		{"err", e.Err, maxErrSize},
-		{"resp_body", e.RespBody, RespBodyCap},
-		{"attempt note", e.Attempts[0].Note, maxFieldSize},
-		{"attempt resp_body", e.Attempts[0].RespBody, RespBodyCap},
+		{"model", e.Model, settings.Default().Telemetry.FieldBytes},
+		{"request_id", e.RequestID, settings.Default().Telemetry.FieldBytes},
+		{"err", e.Err, settings.Default().Telemetry.ErrorBytes},
+		{"resp_body", e.RespBody, RespBodyCap()},
+		{"attempt note", e.Attempts[0].Note, settings.Default().Telemetry.FieldBytes},
+		{"attempt resp_body", e.Attempts[0].RespBody, RespBodyCap()},
 	}
 	for _, c := range checks {
 		if len(c.value) == 0 || len(c.value) > c.limit+16 {
@@ -570,7 +572,7 @@ func TestLoadSkipsOversizedLine(t *testing.T) {
 		t.Fatalf("file not compacted: %d bytes, was %d", info.Size(), dirtySize)
 	}
 	for _, line := range jsonlLines(t, path) {
-		if len(line) >= maxLineSize {
+		if len(line) >= settings.Default().Telemetry.LineBytes {
 			t.Fatalf("oversized line survived compaction: %d bytes", len(line))
 		}
 	}

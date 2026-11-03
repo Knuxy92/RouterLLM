@@ -13,6 +13,7 @@ import (
 	"routerllm/internal/codex"
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
+	"routerllm/internal/settings"
 	"routerllm/internal/workbuddy"
 
 	"gopkg.in/yaml.v3"
@@ -39,8 +40,43 @@ type yamlConfig struct {
 	ForwardClientHeaders *bool          `yaml:"forward_client_headers,omitempty"`
 	AllowClientHeaders   []string       `yaml:"allow_client_headers,omitempty"`
 	SystemPromptFile     string         `yaml:"system_prompt_file,omitempty"`
+	Settings             yamlSettings   `yaml:"settings,omitempty"`
 	Providers            []yamlProvider `yaml:"providers"`
 	Routes               []model.Rule   `yaml:"routes,omitempty"`
+}
+
+// yamlSettings starts from settings.Default so an absent key keeps its built-in
+// value. Decoding into a pre-seeded struct is what makes the block optional:
+// only the keys the file actually names are overwritten.
+type yamlSettings struct {
+	settings.Settings `yaml:",inline"`
+
+	// present records that the file carried a settings block at all. Without it
+	// an absent block would decode to the zero struct and fail validation on
+	// every limit being 0.
+	present bool
+}
+
+func (s *yamlSettings) UnmarshalYAML(value *yaml.Node) error {
+	seeded := yamlSettings{Settings: settings.Default(), present: true}
+	type plain yamlSettings
+	if err := value.Decode((*plain)(&seeded)); err != nil {
+		return err
+	}
+	seeded.Normalize()
+	*s = seeded
+
+	return nil
+}
+
+// resolved returns the settings to apply: the parsed block, or the built-in
+// defaults when the file had none.
+func (s yamlSettings) resolved() settings.Settings {
+	if !s.present {
+		return settings.Default()
+	}
+
+	return s.Settings
 }
 
 type yamlProvider struct {
@@ -173,7 +209,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		providers = append(providers, p)
 	}
 
-	client := &http.Client{Transport: newTransport()}
+	client := &http.Client{Transport: newTransport(yc.Settings.resolved().Transport)}
 	forwardClientHeaders := true
 	if yc.ForwardClientHeaders != nil {
 		forwardClientHeaders = *yc.ForwardClientHeaders
@@ -184,7 +220,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		toolSchemaMaxDepth = DefaultToolSchemaMaxDepth
 	}
 
-	return &Config{
+	cfg := &Config{
 		Port:                 port,
 		Cooldown:             cooldown,
 		ForceStream:          yc.ForceStream,
@@ -194,10 +230,19 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		ForwardClientHeaders: forwardClientHeaders,
 		AllowClientHeaders:   yc.AllowClientHeaders,
 		SystemPrompt:         systemPrompt,
+		Settings:             yc.Settings.resolved(),
 		Providers:            providers,
 		Client:               client,
 		Routes:               yc.Routes,
-	}, nil
+	}
+
+	// The legacy top-level tool_schema_max_depth predates the settings block and
+	// still wins when it is set, so an existing config keeps its behaviour.
+	if yc.ToolSchemaMaxDepth > 0 {
+		cfg.Settings.Limits.SchemaMaxDepth = yc.ToolSchemaMaxDepth
+	}
+
+	return cfg, nil
 }
 
 func loadSystemPrompt(path, configPath string) (string, error) {
@@ -220,6 +265,10 @@ func loadSystemPrompt(path, configPath string) (string, error) {
 
 func validateConfig(yc *yamlConfig) error {
 	if err := validatePort(yc.Port); err != nil {
+		return err
+	}
+
+	if err := yc.Settings.resolved().Validate(); err != nil {
 		return err
 	}
 

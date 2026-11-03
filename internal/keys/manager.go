@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 type entry struct {
@@ -12,10 +14,7 @@ type entry struct {
 	manual    bool
 }
 
-// manualDisableHorizonYears marks a manually disabled key as dead for far
-// longer than any cooldown; Restore treats anything past half the horizon as a
-// manual disable rather than a transient one.
-const manualDisableHorizonYears = 100
+
 
 type Manager struct {
 	mu       sync.Mutex
@@ -79,7 +78,7 @@ func (m *Manager) SetDisabledByIndex(index int, disabled bool) error {
 	}
 
 	if disabled {
-		m.entries[index].deadUntil = time.Now().AddDate(manualDisableHorizonYears, 0, 0)
+		m.entries[index].deadUntil = time.Now().AddDate(settings.ManualDisableHorizonYears, 0, 0)
 		m.entries[index].manual = true
 	} else {
 		m.entries[index].deadUntil = time.Time{}
@@ -176,7 +175,7 @@ func (m *Manager) Restore(state map[string]time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	manualHorizon := now.AddDate(manualDisableHorizonYears/2, 0, 0)
+	manualHorizon := now.AddDate(settings.ManualDisableHorizonYears/2, 0, 0)
 
 	for i := range m.entries {
 		if deadUntil, ok := state[m.entries[i].value]; ok && deadUntil.After(now) {

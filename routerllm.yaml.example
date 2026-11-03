@@ -18,7 +18,8 @@
 # --- Server settings ---------------------------------------------------------
 # This file is hot-reloaded: the server re-reads it every 3s and applies changes
 # without a restart. Invalid YAML or a failed validation is rejected — the
-# previous working config keeps serving. `port` still requires a restart.
+# previous working config keeps serving. `port`, the `transport`/`server`/
+# `admin_tls` settings groups and the ROUTERLLM_* env vars still need a restart.
 
 port: 1765                          # listen port (default: 1765)
 cooldown: 60s                       # key cooldown duration (default: 60s)
@@ -33,6 +34,79 @@ forward_client_headers: true        # forward safe client headers upstream (defa
 system_prompt_file: system_prompt.txt  # prepend this file's content as a system message (default: none)
                                     # when a key gets 401/402/403, it's
                                     # skipped for this duration
+
+# --- Settings ----------------------------------------------------------------
+# Every value below was hardcoded before this block existed. Each key is
+# optional: an absent key keeps its built-in default, so deleting the whole
+# block restores the old behaviour exactly. Editing these hot-reloads with the
+# rest of the file, except the three startup-only groups at the bottom.
+#
+# settings:
+#   limits:                          # request/response payload bounds
+#     request_body_bytes: 104857600  # 100 MiB, /v1/chat/completions + /v1/responses + /v1/messages
+#     error_body_bytes: 65536        # upstream error body read for logging
+#     brief_body_bytes: 500          # request-body excerpt in trace lines
+#     upstream_tools: 128            # gateways reject more; 128 is the OpenAI/DeepSeek ceiling
+#     schema_max_depth: 8            # clamp budget; legacy top-level tool_schema_max_depth wins
+#     media:
+#       resolved_size_bytes: 20971520
+#       refs_per_request: 8
+#       bytes_per_request: 52428800
+#       redirects: 10
+#   retry:                           # transient-failure policy on one key
+#     attempts: 3                    # 408/429/5xx retries before moving to the next key
+#     backoff_base_ms: 100           # attempt n waits base * 2^n
+#   telemetry:
+#     ring_capacity: 2000            # in-memory event ring, also the console log ceiling
+#     retention: 168h
+#     file_bytes: 10485760           # rotation threshold
+#     rewrite_bytes: 5242880         # must be < file_bytes; at/above it resets to file_bytes/2
+#     rotate_retry_interval: 1m
+#     bucket_width: 5m
+#     line_bytes: 1048576
+#     field_bytes: 512
+#     error_bytes: 4096
+#     resp_body_bytes: 2048
+#     ttft_reservoir: 64
+#     model_series: 256
+#     usage_tail_bytes: 4096
+#     default_per_page: 50
+#   admin:
+#     session_ttl: 12h
+#     challenge_ttl: 60s
+#     max_sessions: 100
+#     max_challenges: 1000
+#     json_body_bytes: 1048576
+#     test:                          # provider-test panel, also served to the console
+#       prompt_bytes: 4000
+#       max_tokens: 8192
+#       default_tokens: 256
+#       timeout_floor_seconds: 5
+#       timeout_ceiling_seconds: 120
+#       default_timeout_seconds: 20
+#       default_prompt: "Say 'pong' and nothing else."
+#     ui:                            # console cadence, served through /admin/api/config
+#       poll_ms: 3000
+#       log_per_page: 20
+#   audit:                           # only written with ROUTERLLM_DEBUG_ADVANCED + ROUTERLLM_LOG_FILE
+#     body_bytes: 10485760
+#     render_bytes: 65536
+#
+#   # --- startup-only: changing these needs a restart ---
+#   transport:
+#     max_idle_conns: 100
+#     max_idle_conns_per_host: 10
+#     idle_conn_timeout: 90s
+#     response_header_timeout: 600s
+#     tls_handshake_timeout: 10s
+#   server:
+#     read_header_timeout: 10s
+#     idle_timeout: 120s
+#     shutdown_timeout: 10s
+#     metrics_prune_interval: 1h
+#     watch_interval: 3s
+#   admin_tls:
+#     cert_validity_days: 825
 
 # --- Providers ---------------------------------------------------------------
 # Each provider requires at minimum: name, api_key, style, base_url.

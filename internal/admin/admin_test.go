@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 	"github.com/go-chi/chi/v5"
 
 	"routerllm/internal/config"
 	"routerllm/internal/model"
 	"routerllm/internal/provider"
+	"routerllm/internal/settings"
 )
 
 func testDeps(t *testing.T, path string) (Deps, *int) {
@@ -304,21 +304,21 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 
 func TestSessionStoreCapsAtMaxSessions(t *testing.T) {
 	store := NewSessionStore(func() string { return "secret" })
-	for i := 0; i < maxSessions; i++ {
+	for i := 0; i < settings.Default().Admin.MaxSessions; i++ {
 		if _, _, ok := store.Verify(mustChallenge(t, store), proofOf(t, store, "secret")); !ok {
 			t.Fatal("verify failed for correct proof")
 		}
 	}
-	if len(store.sessions) != maxSessions {
-		t.Fatalf("sessions = %d, want %d", len(store.sessions), maxSessions)
+	if len(store.sessions) != settings.Default().Admin.MaxSessions {
+		t.Fatalf("sessions = %d, want %d", len(store.sessions), settings.Default().Admin.MaxSessions)
 	}
 
 	// One more mints a session and evicts the oldest — never exceeds the cap.
 	if _, _, ok := store.Verify(mustChallenge(t, store), proofOf(t, store, "secret")); !ok {
 		t.Fatal("verify failed when store is full")
 	}
-	if len(store.sessions) != maxSessions {
-		t.Fatalf("sessions = %d, want cap %d enforced", len(store.sessions), maxSessions)
+	if len(store.sessions) != settings.Default().Admin.MaxSessions {
+		t.Fatalf("sessions = %d, want cap %d enforced", len(store.sessions), settings.Default().Admin.MaxSessions)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"routerllm/internal/services"
+	"routerllm/internal/settings"
 )
 
 // stubTest wires a Deps.Test closure that captures the parsed TestRequest so
@@ -47,13 +48,13 @@ func TestProviderTestClampsAndDefaults(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	if captured.MaxTokens != testMaxTokensCap {
-		t.Fatalf("max_tokens = %d, want clamped %d", captured.MaxTokens, testMaxTokensCap)
+	if captured.MaxTokens != settings.Default().Admin.Test.MaxTokens {
+		t.Fatalf("max_tokens = %d, want clamped %d", captured.MaxTokens, settings.Default().Admin.Test.MaxTokens)
 	}
-	if captured.Timeout != testTimeoutCeiling*time.Second {
-		t.Fatalf("timeout = %s, want clamped %d s", captured.Timeout, testTimeoutCeiling)
+	if captured.Timeout != time.Duration(settings.Default().Admin.Test.TimeoutCeilingSeconds)*time.Second {
+		t.Fatalf("timeout = %s, want clamped %d s", captured.Timeout, settings.Default().Admin.Test.TimeoutCeilingSeconds)
 	}
-	if captured.Prompt != testDefaultPromptTxt {
+	if captured.Prompt != settings.Default().Admin.Test.DefaultPrompt {
 		t.Fatalf("prompt = %q, want default", captured.Prompt)
 	}
 	if captured.Provider != "alpha" {
@@ -78,8 +79,8 @@ func TestProviderTestDefaultsToTwentySeconds(t *testing.T) {
 	if captured.Timeout != 20*time.Second {
 		t.Fatalf("timeout = %s, want default 20s", captured.Timeout)
 	}
-	if captured.MaxTokens != testDefaultTokens {
-		t.Fatalf("max_tokens = %d, want default %d", captured.MaxTokens, testDefaultTokens)
+	if captured.MaxTokens != settings.Default().Admin.Test.DefaultTokens {
+		t.Fatalf("max_tokens = %d, want default %d", captured.MaxTokens, settings.Default().Admin.Test.DefaultTokens)
 	}
 }
 
@@ -97,7 +98,7 @@ func TestProviderTestRejectsBadInput(t *testing.T) {
 	}{
 		{"missing model", `{"prompt":"hi"}`, http.StatusBadRequest},
 		{"bad effort", `{"model":"m","effort":"turbo"}`, http.StatusBadRequest},
-		{"prompt too long", `{"model":"m","prompt":"` + strings.Repeat("x", testPromptCap+1) + `"}`, http.StatusBadRequest},
+		{"prompt too long", `{"model":"m","prompt":"` + strings.Repeat("x", settings.Default().Admin.Test.PromptBytes+1) + `"}`, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		if w := postTest(t, srv, session, tc.body); w.Code != tc.want {

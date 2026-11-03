@@ -6,14 +6,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"routerllm/internal/settings"
 )
-
-// ttftReservoirCap bounds the TTFT samples kept per bucket.
-const ttftReservoirCap = 64
-
-// maxModelSeries bounds the per-model series. Model names come from the request
-// body, so without a cap a caller could grow the metrics map indefinitely.
-const maxModelSeries = 256
 
 // bucketStats accumulates one 5-minute slice of traffic for one series key.
 type bucketStats struct {
@@ -32,7 +27,7 @@ func (b *bucketStats) add(e Event) {
 	b.tokens += e.TokensOut
 	b.duration += e.DurationMS
 	if e.TTFTMS > 0 {
-		if len(b.ttft) < ttftReservoirCap {
+		if len(b.ttft) < settings.Current().Telemetry.TTFTReservoir {
 			b.ttft = append(b.ttft, e.TTFTMS)
 		} else {
 			// Reservoir-of-one replacement keeps late samples fresh without
@@ -55,7 +50,9 @@ func NewMetrics() *Metrics {
 }
 
 func bucketStart(t time.Time) int64 {
-	return t.Unix() / int64(bucketWidth/time.Second) * int64(bucketWidth/time.Second)
+	width := settings.Current().Telemetry.BucketWidth
+
+	return t.Unix() / int64(width/time.Second) * int64(width/time.Second)
 }
 
 func seriesKeys(e Event) []string {
@@ -100,7 +97,7 @@ func (m *Metrics) Record(e Event) {
 // client-supplied string); provider and leg series come from the config and are
 // never evicted.
 func (m *Metrics) trimModelSeries() {
-	for m.modelSeriesCount() >= maxModelSeries {
+	for m.modelSeriesCount() >= settings.Current().Telemetry.ModelSeries {
 		victim := ""
 		var victimAt int64
 
@@ -314,7 +311,7 @@ func (m *Metrics) Prune() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cutoff := bucketStart(time.Now().Add(-retention))
+	cutoff := bucketStart(time.Now().Add(-settings.Current().Telemetry.Retention))
 	for key, series := range m.buckets {
 		for start := range series {
 			if start < cutoff {

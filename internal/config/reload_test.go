@@ -1,6 +1,7 @@
 package config
 
 import (
+	"routerllm/internal/settings"
 	"context"
 	"log"
 	"os"
@@ -343,5 +344,72 @@ func TestConfigPathHonoursEnv(t *testing.T) {
 	t.Setenv("ROUTERLLM_CONFIG_FILE", "")
 	if got := ConfigPath(); got != "routerllm.yaml" {
 		t.Fatalf("ConfigPath() = %q, want routerllm.yaml", got)
+	}
+}
+
+func TestReloadPublishesSettingsSnapshot(t *testing.T) {
+	original := *settings.Current()
+	t.Cleanup(func() { settings.Set(original) })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routerllm.yaml")
+	writeConfig(t, path, validConfig)
+
+	// A zero baseline forces the first Reload to apply instead of no-opping on
+	// an unchanged hash.
+	reloader := NewReloader(path, [32]byte{}, log.New(&syncBuffer{}, "", 0), func(*Config) {}, nil)
+	if err := reloader.Reload(); err != nil {
+		t.Fatalf("initial Reload() = %v", err)
+	}
+
+	writeConfig(t, path, validConfig+`
+settings:
+  limits:
+    request_body_bytes: 2048
+  retry:
+    attempts: 7
+`)
+	if err := reloader.Reload(); err != nil {
+		t.Fatalf("Reload() after the settings edit = %v", err)
+	}
+
+	if got := settings.Current().Limits.RequestBodyBytes; got != 2048 {
+		t.Fatalf("request_body_bytes = %d, want 2048 — a reload must publish the new snapshot", got)
+	}
+	if got := settings.Current().Retry.Attempts; got != 7 {
+		t.Fatalf("retry.attempts = %d, want 7", got)
+	}
+}
+
+func TestReloadKeepsSettingsWhenTheEditIsRejected(t *testing.T) {
+	original := *settings.Current()
+	t.Cleanup(func() { settings.Set(original) })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routerllm.yaml")
+	writeConfig(t, path, validConfig+`
+settings:
+  limits:
+    request_body_bytes: 4096
+`)
+
+	// A zero baseline forces the first Reload to apply instead of no-opping on
+	// an unchanged hash.
+	reloader := NewReloader(path, [32]byte{}, log.New(&syncBuffer{}, "", 0), func(*Config) {}, nil)
+	if err := reloader.Reload(); err != nil {
+		t.Fatalf("initial Reload() = %v", err)
+	}
+
+	writeConfig(t, path, validConfig+`
+settings:
+  limits:
+    request_body_bytes: 0
+`)
+	if err := reloader.Reload(); err == nil {
+		t.Fatal("Reload() = nil, want a rejection for request_body_bytes: 0")
+	}
+
+	if got := settings.Current().Limits.RequestBodyBytes; got != 4096 {
+		t.Fatalf("request_body_bytes = %d, want the last accepted 4096", got)
 	}
 }

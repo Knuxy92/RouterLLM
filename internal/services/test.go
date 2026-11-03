@@ -12,12 +12,8 @@ import (
 
 	"routerllm/internal/adapter"
 	"routerllm/internal/provider"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
-)
-
-const (
-	testDefaultTimeout   = 20 * time.Second
-	testDefaultMaxTokens = 256
 )
 
 // TestRequest describes one manual provider test run driven from the admin
@@ -68,7 +64,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 
 	timeout := req.Timeout
 	if timeout <= 0 {
-		timeout = testDefaultTimeout
+		timeout = time.Duration(settings.Current().Admin.Test.DefaultTimeoutSeconds) * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -107,7 +103,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 
 	if resp.StatusCode != http.StatusOK {
 		eb := ReadErrorBody(resp.Body)
-		clamped := telemetry.ClampBody(eb, telemetry.RespBodyCap)
+		clamped := telemetry.ClampBody(eb, telemetry.RespBodyCap())
 		result.Status = resp.StatusCode
 		result.Error = fmt.Sprintf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, clamped)
 		p.finishTestEvent(start, pv, result, maskKey(servedKey(resp, pv)), clamped)
@@ -128,7 +124,7 @@ func (p *Proxy) RunTest(ctx context.Context, req TestRequest) *TestResult {
 	result.Status = http.StatusOK
 	result.TTFTMS = watcher.TTFTMS()
 	result.Tokens = watcher.Tokens()
-	result.Content = telemetry.ClampBody([]byte(content), telemetry.RespBodyCap)
+	result.Content = telemetry.ClampBody([]byte(content), telemetry.RespBodyCap())
 	p.finishTestEvent(start, pv, result, key, "")
 
 	return result
@@ -168,7 +164,7 @@ func (p *Proxy) testProvider(name string) (*provider.Provider, int, error) {
 func testBody(req TestRequest) map[string]any {
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = testDefaultMaxTokens
+		maxTokens = settings.Current().Admin.Test.DefaultTokens
 	}
 
 	body := map[string]any{
@@ -194,7 +190,7 @@ func (p *Proxy) finishTestFailure(start time.Time, ctx context.Context, pv *prov
 	case served:
 		result.Error = "request cancelled"
 	default:
-		clamped := telemetry.ClampBody(errBody, telemetry.RespBodyCap)
+		clamped := telemetry.ClampBody(errBody, telemetry.RespBodyCap())
 		result.Status = status
 		result.Error = fmt.Sprintf("all keys exhausted for %s (status=%d): %s", pv.Name, status, clamped)
 		p.finishTestEvent(start, pv, result, "", clamped)

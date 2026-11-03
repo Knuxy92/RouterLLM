@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 func fileSize(t *testing.T, path string) int64 {
@@ -31,7 +33,7 @@ func TestRotationKeepsAppendHeadroom(t *testing.T) {
 	}
 	defer s.Close()
 
-	body := strings.Repeat("b", RespBodyCap)
+	body := strings.Repeat("b", RespBodyCap())
 	attempts := make([]Attempt, 3)
 	for i := range attempts {
 		attempts[i] = Attempt{Provider: "upstream", Model: "model", Status: 502, RespBody: body}
@@ -42,16 +44,16 @@ func TestRotationKeepsAppendHeadroom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int64(len(line))*ringCapacity <= maxFileSize {
-		t.Fatalf("payload too small: serialized ring = %d bytes, need > %d", len(line)*ringCapacity, maxFileSize)
+	if int64(len(line))*int64(settings.Default().Telemetry.RingCapacity) <= int64(settings.Default().Telemetry.FileBytes) {
+		t.Fatalf("payload too small: serialized ring = %d bytes, need > %d", len(line)*settings.Default().Telemetry.RingCapacity, settings.Default().Telemetry.FileBytes)
 	}
 
 	// Every Record must return with the file below the cap; an unbounded ring
 	// rewrite leaves it at the (oversized) ring's size instead.
-	for i := range ringCapacity + 300 {
+	for i := range settings.Default().Telemetry.RingCapacity + 300 {
 		s.Record(big)
-		if size := fileSize(t, path); size >= maxFileSize {
-			t.Fatalf("record %d left the file at %d bytes, want < %d (rewrite kept the whole ring)", i, size, maxFileSize)
+		if size := fileSize(t, path); size >= int64(settings.Default().Telemetry.FileBytes) {
+			t.Fatalf("record %d left the file at %d bytes, want < %d (rewrite kept the whole ring)", i, size, settings.Default().Telemetry.FileBytes)
 		}
 	}
 
@@ -69,8 +71,8 @@ func TestRotationKeepsAppendHeadroom(t *testing.T) {
 	if !rotated {
 		t.Fatal("rotation never compacted the file")
 	}
-	if prev >= maxFileSize {
-		t.Fatalf("post-rotation size = %d, want < %d", prev, maxFileSize)
+	if prev >= int64(settings.Default().Telemetry.FileBytes) {
+		t.Fatalf("post-rotation size = %d, want < %d", prev, settings.Default().Telemetry.FileBytes)
 	}
 
 	// The rotation left headroom: records must append and grow the file
@@ -84,7 +86,7 @@ func TestRotationKeepsAppendHeadroom(t *testing.T) {
 		prev = got
 	}
 
-	if n := len(s.Since(0)); n != ringCapacity {
-		t.Fatalf("ring = %d events, want %d", n, ringCapacity)
+	if n := len(s.Since(0)); n != settings.Default().Telemetry.RingCapacity {
+		t.Fatalf("ring = %d events, want %d", n, settings.Default().Telemetry.RingCapacity)
 	}
 }

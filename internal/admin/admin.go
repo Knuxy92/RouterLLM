@@ -15,6 +15,7 @@ import (
 	"routerllm/internal/provider"
 	"routerllm/internal/quota"
 	"routerllm/internal/services"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 )
@@ -52,6 +53,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Use(deps.requireSession())
 
 			authed.Post("/auth/logout", deps.handleAuthLogout)
+			authed.Get("/config", deps.handleConfig)
 			authed.Get("/pulse", deps.handlePulse)
 			authed.Get("/status", deps.handleStatus)
 			authed.Get("/requests", deps.handleRequests)
@@ -408,7 +410,7 @@ func (d Deps) applyNow(w http.ResponseWriter) {
 func decodeJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
 
-	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(target)
+	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, int64(settings.Current().Admin.JSONBodyBytes))).Decode(target)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

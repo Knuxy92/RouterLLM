@@ -7,32 +7,16 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-)
 
-const (
-	// maxErrorBodyRead bounds how much of an upstream error body is captured.
-	maxErrorBodyRead = 64 << 10
-	// maxClientErrorBytes bounds the upstream error text kept for the
-	// TruncateErrorBody helper (unit-tested, no live callers since client
-	// errors went generic).
-	maxClientErrorBytes = 16 << 10
+	"routerllm/internal/settings"
 )
 
 // ReadErrorBody drains an error response body for logging and telemetry, capped
 // so a broken or hostile upstream cannot feed the proxy an unbounded stream.
 func ReadErrorBody(r io.Reader) []byte {
-	body, _ := io.ReadAll(io.LimitReader(r, maxErrorBodyRead))
+	body, _ := io.ReadAll(io.LimitReader(r, int64(settings.Current().Limits.ErrorBodyBytes)))
 
 	return body
-}
-
-// TruncateErrorBody caps the upstream error text echoed back to a client.
-func TruncateErrorBody(body []byte) []byte {
-	if len(body) <= maxClientErrorBytes {
-		return body
-	}
-
-	return body[:maxClientErrorBytes]
 }
 
 // redactURLError renders a transport error with the outbound query string

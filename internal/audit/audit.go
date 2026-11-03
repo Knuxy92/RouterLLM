@@ -2,7 +2,7 @@
 // client, what the router made of it, what was sent upstream, what came back,
 // what the translator produced, and what went out on the wire.
 //
-// It is a leaf package (stdlib only) so both internal/routers and
+// It is a leaf package (stdlib plus internal/settings, itself stdlib-only) so both internal/routers and
 // internal/services can record into the same trace without importing each
 // other: routers already reaches services through handlers, so the reverse
 // edge would close a cycle.
@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 // Phase names, in the order a healthy request produces them. prov_req and
@@ -45,13 +47,17 @@ const (
 
 // BodyLimit caps how much of any one body is kept. Beyond it the entry is
 // marked truncated and the rest is dropped.
-const BodyLimit = 10 << 20
+func BodyLimit() int {
+	return settings.Current().Audit.BodyBytes
+}
 
 // bodyRenderLimit caps how much of one body reaches the log. A body over the
 // limit is shown head and tail — half each, aligned to line boundaries — with
 // the omitted middle replaced by a marker, so the entry stays scannable
 // instead of collapsing into one enormous line.
-const bodyRenderLimit = 64 << 10
+func bodyRenderLimit() int {
+	return settings.Current().Audit.RenderBytes
+}
 
 // Entry is one phase of the journey. Fields that do not apply to a phase stay
 // zero and are omitted from the JSON.
@@ -83,11 +89,11 @@ func (e *Entry) Write(p []byte) (int, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.body.Len() >= BodyLimit {
+	if limit := BodyLimit(); e.body.Len() >= limit {
 		e.truncated = true
 		return len(p), nil
 	}
-	if room := BodyLimit - e.body.Len(); len(p) > room {
+	if room := BodyLimit() - e.body.Len(); len(p) > room {
 		e.body.Write(p[:room])
 		e.truncated = true
 
@@ -266,7 +272,8 @@ func renderBody(meta map[string]any, raw []byte, truncated bool) []byte {
 		return nil
 	}
 
-	if obj, ok := parseJSON(raw); ok && len(raw) <= bodyRenderLimit && !truncated {
+	renderLimit := bodyRenderLimit()
+	if obj, ok := parseJSON(raw); ok && len(raw) <= renderLimit && !truncated {
 		meta["body"] = obj
 
 		return nil
@@ -282,12 +289,12 @@ func renderBody(meta map[string]any, raw []byte, truncated bool) []byte {
 		meta["body_truncated"] = true
 	}
 
-	shown, omitted := clip(text, bodyRenderLimit)
+	shown, omitted := clip(text, renderLimit)
 
 	var section bytes.Buffer
 	fmt.Fprintf(&section, "---- body: %s, %s", kind, fmtSize(len(raw)))
 	if omitted > 0 {
-		fmt.Fprintf(&section, " (first + last %s shown)", fmtSize(bodyRenderLimit/2))
+		fmt.Fprintf(&section, " (first + last %s shown)", fmtSize(renderLimit/2))
 	}
 	section.WriteString(" ----\n")
 	section.Write(shown)

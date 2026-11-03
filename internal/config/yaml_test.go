@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"routerllm/internal/model"
+	"routerllm/internal/settings"
 )
 
 func writeTempYAML(t *testing.T, content string) string {
@@ -1174,5 +1175,149 @@ routes:
 
 	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "unsupported auth_mode") {
 		t.Fatalf("error = %v, want unsupported auth_mode", err)
+	}
+}
+
+func TestLoadYAMLWithoutSettingsUsesDefaults(t *testing.T) {
+	path := writeTempYAML(t, `
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream
+`)
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+
+	want := settings.Default()
+	if cfg.Settings != want {
+		t.Fatalf("settings = %+v, want the built-in defaults", cfg.Settings)
+	}
+}
+
+func TestLoadYAMLReadsSettingsBlock(t *testing.T) {
+	path := writeTempYAML(t, `
+settings:
+  limits:
+    request_body_bytes: 4096
+    upstream_tools: 64
+    media:
+      refs_per_request: 2
+  retry:
+    attempts: 5
+    backoff_base_ms: 250
+  telemetry:
+    ring_capacity: 100
+    retention: 24h
+    file_bytes: 2097152
+  admin:
+    session_ttl: 1h
+    ui:
+      poll_ms: 1500
+      log_per_page: 5
+    test:
+      max_tokens: 512
+      default_tokens: 128
+  server:
+    watch_interval: 9s
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream
+`)
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+
+	got := cfg.Settings
+	if got.Limits.RequestBodyBytes != 4096 {
+		t.Errorf("limits.request_body_bytes = %d, want 4096", got.Limits.RequestBodyBytes)
+	}
+	if got.Limits.UpstreamTools != 64 {
+		t.Errorf("limits.upstream_tools = %d, want 64", got.Limits.UpstreamTools)
+	}
+	if got.Limits.Media.RefsPerRequest != 2 {
+		t.Errorf("limits.media.refs_per_request = %d, want 2", got.Limits.Media.RefsPerRequest)
+	}
+	if got.Retry.Attempts != 5 || got.Retry.BackoffBaseMS != 250 {
+		t.Errorf("retry = %+v, want 5 attempts at 250ms", got.Retry)
+	}
+	if got.Telemetry.RingCapacity != 100 || got.Telemetry.Retention.Hours() != 24 {
+		t.Errorf("telemetry = %+v, want ring 100 and 24h retention", got.Telemetry)
+	}
+	if got.Telemetry.RewriteBytes != got.Telemetry.FileBytes/2 {
+		t.Errorf("telemetry.rewrite_bytes = %d, want half of file_bytes", got.Telemetry.RewriteBytes)
+	}
+	if got.Admin.UI.PollMS != 1500 || got.Admin.UI.LogPerPage != 5 {
+		t.Errorf("admin.ui = %+v, want poll 1500 and 5 per page", got.Admin.UI)
+	}
+	if got.Admin.Test.MaxTokens != 512 || got.Admin.Test.DefaultTokens != 128 {
+		t.Errorf("admin.test = %+v, want 512 max / 128 default tokens", got.Admin.Test)
+	}
+	if got.Server.WatchInterval.Seconds() != 9 {
+		t.Errorf("server.watch_interval = %s, want 9s", got.Server.WatchInterval)
+	}
+
+	// Unspecified keys keep their defaults instead of collapsing to zero.
+	if got.Limits.ErrorBodyBytes != settings.Default().Limits.ErrorBodyBytes {
+		t.Errorf("limits.error_body_bytes = %d, want the default", got.Limits.ErrorBodyBytes)
+	}
+	if got.Transport.MaxIdleConns != settings.Default().Transport.MaxIdleConns {
+		t.Errorf("transport.max_idle_conns = %d, want the default", got.Transport.MaxIdleConns)
+	}
+}
+
+func TestLoadYAMLRejectsInvalidSettings(t *testing.T) {
+	cases := map[string]string{
+		"zero body cap": `
+settings:
+  limits:
+    request_body_bytes: 0
+`,
+		"tools over upstream cap": `
+settings:
+  limits:
+    upstream_tools: 200
+`,
+		"floor above ceiling": `
+settings:
+  admin:
+    test:
+      timeout_floor_seconds: 300
+`,
+	}
+
+	for name, block := range cases {
+		path := writeTempYAML(t, block+`
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: test-model
+    routes:
+      - provider: test
+        model: upstream
+`)
+		if _, err := LoadFile(path); err == nil {
+			t.Errorf("%s: LoadFile() accepted invalid settings", name)
+		}
 	}
 }

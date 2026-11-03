@@ -10,14 +10,7 @@ import (
 
 	"routerllm/internal/adapter"
 	"routerllm/internal/provider"
-)
-
-const (
-	maxResolvedMediaSize = 20 << 20
-
-	maxMediaRedirects       = 10
-	maxMediaRefsPerRequest  = 8
-	maxMediaBytesPerRequest = 50 << 20
+	"routerllm/internal/settings"
 )
 
 // mediaBudget tracks what one request may still resolve: the number of
@@ -26,16 +19,17 @@ const (
 type mediaBudget struct {
 	refs  int
 	bytes int
+	limit settings.Media
 }
 
 func newMediaBudget() *mediaBudget {
-	return &mediaBudget{}
+	return &mediaBudget{limit: settings.Current().Limits.Media}
 }
 
 // reserveRef claims one reference slot.
 func (b *mediaBudget) reserveRef() error {
-	if b.refs >= maxMediaRefsPerRequest {
-		return fmt.Errorf("media budget exceeded: more than %d references per request", maxMediaRefsPerRequest)
+	if b.refs >= b.limit.RefsPerRequest {
+		return fmt.Errorf("media budget exceeded: more than %d references per request", b.limit.RefsPerRequest)
 	}
 	b.refs++
 
@@ -45,9 +39,9 @@ func (b *mediaBudget) reserveRef() error {
 // fetchLimit is the largest body allowed for one fetch: the smaller of the
 // single-media cap and what remains of the per-request byte budget.
 func (b *mediaBudget) fetchLimit() int {
-	remaining := maxMediaBytesPerRequest - b.bytes
-	if remaining > maxResolvedMediaSize {
-		return maxResolvedMediaSize
+	remaining := b.limit.BytesPerRequest - b.bytes
+	if remaining > b.limit.ResolvedSizeBytes {
+		return b.limit.ResolvedSizeBytes
 	}
 
 	return remaining
@@ -160,7 +154,7 @@ func (p *Proxy) fetchMediaNoAuth(rawURL string, budget *mediaBudget) ([]byte, st
 func (p *Proxy) doMedia(req *http.Request, budget *mediaBudget) ([]byte, string, error) {
 	limit := budget.fetchLimit()
 	if limit <= 0 {
-		return nil, "", fmt.Errorf("media budget exceeded: %d bytes already fetched", maxMediaBytesPerRequest)
+		return nil, "", fmt.Errorf("media budget exceeded: %d bytes already fetched", budget.limit.BytesPerRequest)
 	}
 
 	resp, err := p.mediaClient().Do(req)
@@ -200,11 +194,13 @@ func (p *Proxy) doMedia(req *http.Request, budget *mediaBudget) ([]byte, string,
 // that guards the initial URL; p.client itself serves upstream API calls and
 // must not carry a CheckRedirect.
 func (p *Proxy) mediaClient() *http.Client {
+	redirects := settings.Current().Limits.Media.Redirects
+
 	return &http.Client{
 		Transport: p.client.Transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxMediaRedirects {
-				return fmt.Errorf("media fetch stopped after %d redirects", maxMediaRedirects)
+			if len(via) >= redirects {
+				return fmt.Errorf("media fetch stopped after %d redirects", redirects)
 			}
 			if !isPublicHost(req.URL.Hostname()) {
 				return fmt.Errorf("media redirect target is not public")

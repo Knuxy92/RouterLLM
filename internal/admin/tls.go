@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"routerllm/internal/settings"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -87,7 +88,7 @@ func generateSelfSigned() (certPEM, keyPEM []byte, err error) {
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "RouterLLM Admin"},
 		NotBefore:             time.Now().Add(-24 * time.Hour),
-		NotAfter:              time.Now().AddDate(0, 0, 825), // 825 days: the longest span iOS trusts for certs
+		NotAfter:              time.Now().AddDate(0, 0, settings.Current().AdminTLS.CertValidityDays),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

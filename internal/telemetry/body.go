@@ -6,11 +6,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
-)
 
-// usageTailBounds how much of the previous read is re-scanned so a usage
-// object straddling a read boundary is still found.
-const usageTail = 4 << 10
+	"routerllm/internal/settings"
+)
 
 var usageFields = [][]byte{
 	[]byte(`"completion_tokens":`),
@@ -114,8 +112,8 @@ func (w *Watcher) scan(chunk []byte) {
 		}
 	}
 
-	if len(buf) > usageTail {
-		buf = buf[len(buf)-usageTail:]
+	if tail := settings.Current().Telemetry.UsageTailBytes; len(buf) > tail {
+		buf = buf[len(buf)-tail:]
 	}
 	w.tail = append(w.tail[:0], buf...)
 }

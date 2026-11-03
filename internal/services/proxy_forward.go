@@ -18,29 +18,16 @@ import (
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
+	"routerllm/internal/settings"
 	"routerllm/internal/telemetry"
 	"routerllm/internal/util"
 	"routerllm/internal/workbuddy"
 )
 
-const maxRetries = 3
-
 const (
-	// maxRequestBodyBytes caps the buffered client body per request.
-	maxRequestBodyBytes = 10 << 20
-	// maxBriefBodyLen caps how much of a request body is echoed into traces.
-	maxBriefBodyLen = 500
-	// retryBackoffBaseMS is the exponential backoff base between retries.
-	retryBackoffBaseMS = 100
-
 	// googleAPIKeyHeader carries Google-style credentials.
 	googleAPIKeyHeader = "x-goog-api-key"
 )
-
-// The alysis gateway enforces OpenAI's 128-tool cap and rejects larger
-// requests with a generic invalid-request error, so the guard fires before
-// the upstream call and the client gets an actionable 400 instead.
-const maxUpstreamTools = 128
 
 var (
 	errTooManyTools     = errors.New("too many tools")
@@ -159,7 +146,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 		if resp == nil {
 			p.logErr(fmt.Sprintf("all keys exhausted for %s via %s", modelName, pv.Name), status, errBody)
 			lastErr = fmt.Errorf("%w: all keys exhausted for %s via %s (status=%d)", ErrModelOverloaded, modelName, pv.Name, status)
-			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted", RespBody: telemetry.ClampBody(errBody, telemetry.RespBodyCap)}
+			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: status, Note: "all keys exhausted", RespBody: telemetry.ClampBody(errBody, telemetry.RespBodyCap())}
 			if trace != nil && attempt.RespBody != "" {
 				trace.setLastBody(attempt.RespBody)
 			}
@@ -179,7 +166,7 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 			lastRestore = toolNameRestore
 			p.logResp(fmt.Sprintf("upstream %s returned non-200", pv.Name), resp, eb)
 			lastErr = fmt.Errorf("upstream %s returned status %d: %s", pv.Name, resp.StatusCode, briefBody(eb))
-			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200", RespBody: telemetry.ClampBody(eb, telemetry.RespBodyCap)}
+			attempt := telemetry.Attempt{Provider: pv.Name, Model: route.ModelName, Status: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Note: "non-200", RespBody: telemetry.ClampBody(eb, telemetry.RespBodyCap())}
 			if trace != nil && attempt.RespBody != "" {
 				trace.setLastBody(attempt.RespBody)
 			}
@@ -250,11 +237,12 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 	}
 
-	// The alysis gateway enforces OpenAI's 128-tool cap regardless of which
-	// dialect the leg is emitted in, so the guard runs before the dispatch.
+	// The alysis gateway enforces OpenAI's tool cap regardless of which dialect
+	// the leg is emitted in, so the guard runs before the dispatch.
 	if pv.Style == "alysis" {
-		if tools, ok := routeBody["tools"].([]any); ok && len(tools) > maxUpstreamTools {
-			return nil, "", "", nil, fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), maxUpstreamTools, pv.Name)
+		limit := settings.Current().Limits.UpstreamTools
+		if tools, ok := routeBody["tools"].([]any); ok && len(tools) > limit {
+			return nil, "", "", nil, fmt.Errorf("%w: %d tools exceeds the alysis gateway limit of %d (provider %s) — disable some MCP servers or route the model elsewhere", errTooManyTools, len(tools), limit, pv.Name)
 		}
 	}
 
@@ -419,7 +407,7 @@ func requestID(r *http.Request) string {
 }
 
 func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, forceStream bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, int64(settings.Current().Limits.RequestBodyBytes))
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		util.WriteError(w, http.StatusBadRequest, "invalid_request", "failed to read request body: "+err.Error())
@@ -448,7 +436,7 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 		if resp.StatusCode != http.StatusOK {
 			eb := ReadErrorBody(resp.Body)
 			util.WriteUpstreamError(w, resp.StatusCode)
-			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0, telemetry.ClampBody(eb, telemetry.RespBodyCap)))
+			p.recordTelemetry(trace.Event(modelName, reqID, resp.StatusCode, briefBody(eb), 0, telemetry.ClampBody(eb, telemetry.RespBodyCap())))
 			return
 		}
 
@@ -494,14 +482,14 @@ func (p *Proxy) forward(path string, w http.ResponseWriter, r *http.Request, for
 			upstreamErr := p.serveOpenAI(resp, clientStream, coalescer, toolNameRestore)
 			coalescer.flushPending()
 			if upstreamErr != "" {
-				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap)))
+				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap())))
 				return
 			}
 		default:
 			if path == "/v1/responses" {
 				serveResponses(resp, clientStream, w, toolNameRestore)
 			} else if upstreamErr := p.serveOpenAI(resp, clientStream, w, toolNameRestore); upstreamErr != "" {
-				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap)))
+				p.recordTelemetry(trace.Event(modelName, reqID, http.StatusBadGateway, briefBody([]byte(upstreamErr)), 0, telemetry.ClampBody([]byte(upstreamErr), telemetry.RespBodyCap())))
 				return
 			}
 		}
@@ -651,6 +639,8 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
 	}
+
+	maxRetries := settings.Current().Retry.Attempts
 
 	pv.RecordRequest()
 	var lastStatus int
@@ -861,6 +851,8 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 func (p *Proxy) tryKeyless(pv *provider.Provider, call upstreamCall, r *http.Request) (*http.Response, int, []byte, bool) {
 	pv.RecordRequest()
 
+	maxRetries := settings.Current().Retry.Attempts
+
 	var lastStatus int
 	var lastErrBody []byte
 
@@ -983,14 +975,15 @@ func briefBody(body []byte) string {
 		return ""
 	}
 	s := string(body)
-	if len(s) > maxBriefBodyLen {
-		s = s[:maxBriefBodyLen] + "..."
+	if limit := settings.Current().Limits.BriefBodyBytes; len(s) > limit {
+		s = s[:limit] + "..."
 	}
 	return s
 }
 
 func (p *Proxy) backoff(ctx context.Context, retry int) bool {
-	d := time.Duration(retryBackoffBaseMS*(1<<retry)) * time.Millisecond
+	base := settings.Current().Retry.BackoffBaseMS
+	d := time.Duration(base*(1<<retry)) * time.Millisecond
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {

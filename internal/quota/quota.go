@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"routerllm/internal/settings"
 )
 
 // WarnPercent is the used-percentage threshold at which the proxy logs a
-// one-line warning as a key crosses it.
-const WarnPercent = 80
+// one-line warning as a key crosses it. It is a vendor contract value, not a
+// tunable: the warning tracks the upstream's own quota accounting.
+const WarnPercent = settings.QuotaWarnPercent
 
 // Window is one Codex rate-limit window as advertised on upstream
 // response headers (X-Codex-Primary-* / X-Codex-Secondary-*).
