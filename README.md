@@ -353,7 +353,9 @@ NONCE_JSON=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/challenge)
 CID=$(echo "$NONCE_JSON" | jq -r .challenge_id)
 NONCE=$(echo "$NONCE_JSON" | jq -r .nonce)
 PROOF=$(printf %s "$NONCE" | openssl dgst -sha256 -hmac "$ROUTERLLM_ADMIN_TOKEN" -hex | awk '{print $2}')
-SESSION=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/verify   -d "{"challenge_id":"$CID","proof":"$PROOF"}" | jq -r .session)
+SESSION=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/verify \
+  -H 'Content-Type: application/json' \
+  -d "{\"challenge_id\":\"$CID\",\"proof\":\"$PROOF\"}" | jq -r .session)
 
 # With ROUTERLLM_ADMIN_TLS_PORT set, reach the console over HTTPS instead:
 # curl -s https://127.0.0.1:1766/admin/api/status --cacert admin-tls.crt -H "Authorization: Bearer $SESSION"
