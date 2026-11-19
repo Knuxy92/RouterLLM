@@ -4,5 +4,5 @@ import AppLayout from "../layouts/AppLayout.astro"
 ---
 
 <AppLayout title="Models detail">
-  <ModelsDetail client:load />
+  <ModelsDetail client:only="react" />
 </AppLayout>

@@ -1,4 +1,4 @@
-import type { ModelStatus, StatusPayload } from "./types"
+import type { StatusPayload } from "./types"
 
 export interface OpenCodeReasoningOption {
   type: string
@@ -108,8 +108,8 @@ export function toModelRow(nativeId: string, source: string, model: OpenCodeMode
   }
 }
 
-export function enrichRows(nativeIds: string[], source: string, index: Map<string, OpenCodeModel>): ModelRow[] {
-  return nativeIds.map((id) => toModelRow(id, source, resolveMetadata(id, index)))
+export function enrichRows(nativeIds: string[] | null | undefined, source: string, index: Map<string, OpenCodeModel>): ModelRow[] {
+  return (nativeIds ?? []).map((id) => toModelRow(id, source, resolveMetadata(id, index)))
 }
 
 export function enrichFromStatus(status: StatusPayload | null, index: Map<string, OpenCodeModel>): ModelRow[] {
@@ -125,9 +125,10 @@ export function enrichFromStatus(status: StatusPayload | null, index: Map<string
     rows.push(toModelRow(id, source, resolveMetadata(id, index)))
   }
 
-  for (const model of status.models as ModelStatus[]) {
+  for (const model of status.models ?? []) {
     if (model.disabled) continue
-    const leg = model.chain.find((entry) => !entry.disabled && !entry.provider_disabled) ?? model.chain[0]
+    const chain = model.chain ?? []
+    const leg = chain.find((entry) => !entry.disabled && !entry.provider_disabled) ?? chain[0]
     if (!leg) continue
     add(model.model_id, leg.provider)
     add(leg.model, leg.provider)
