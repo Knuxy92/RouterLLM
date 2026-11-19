@@ -33,6 +33,7 @@ routerllm-telemetry.jsonl.tmp
 # so `go build ./...` must work in a clean clone without running Node.
 web/node_modules/
 web/.vite/
+web/.astro/
 
 # Admin write-back backups
 *.bak

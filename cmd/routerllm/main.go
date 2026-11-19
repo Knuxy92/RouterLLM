@@ -141,6 +141,7 @@ func main() {
 		StartedAt: time.Now(),
 		Reload:    reloader.Reload,
 		Quota:     proxy.Quota,
+		Models:    proxy.ListProviderModels,
 		Test: func(r *http.Request, req services.TestRequest) *services.TestResult {
 			return proxy.RunTest(r.Context(), req)
 		},

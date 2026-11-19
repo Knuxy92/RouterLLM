@@ -1,0 +1,131 @@
+---
+import "../styles/global.css"
+import LoginGate from "../components/LoginGate"
+import Sidebar from "../components/Sidebar"
+import ThemeToggle from "../components/ThemeToggle"
+
+interface Props {
+  title?: string
+}
+
+const { title = "Dashboard" } = Astro.props
+const base = import.meta.env.BASE_URL
+const activeSlug = Astro.url.pathname.replace(/\/$/, "").split("/").pop() || "dashboard"
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{title} · RouterLLM admin</title>
+    <link rel="icon" href={base + "favicon.svg"} type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      try {
+        if (localStorage.getItem("routerllm.admin.theme") === "dark") {
+          document.documentElement.classList.add("dark")
+        }
+      } catch (_) {}
+    </script>
+    <script is:inline src={base + "vendor/lucide.min.js"}></script>
+    <script is:inline>
+      window.addEventListener("load", function () {
+        window.setTimeout(function () {
+          window.lucide?.createIcons()
+        }, 1000)
+      })
+    </script>
+  </head>
+  <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+    <LoginGate client:load />
+
+    <div id="app" class="hidden min-h-dvh">
+      <Sidebar client:load activeSlug={activeSlug} />
+
+      <div class="md:pl-64">
+        <header
+          class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur"
+        >
+          <button id="menu-btn" class="rounded-md border p-1.5 md:hidden" type="button">
+            <i data-lucide="menu" class="size-4"></i>
+          </button>
+
+          <div class="flex items-center gap-1.5 text-sm">
+            <span class="font-medium">RouterLLM</span>
+            <i data-lucide="chevron-right" class="size-3.5 text-muted-foreground"></i>
+            <span id="page-title" class="text-muted-foreground">{title}</span>
+          </div>
+
+          <div class="ml-auto flex items-center gap-2">
+            <button
+              id="global-search"
+              type="button"
+              class="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent sm:flex"
+            >
+              <i data-lucide="search" class="size-3.5"></i>
+              <span class="text-xs">Search requests, models…</span>
+              <span class="kbd ml-6">⌘K</span>
+            </button>
+            <ThemeToggle client:load />
+            <div class="relative">
+              <button
+                id="avatar-btn"
+                type="button"
+                class="flex size-8 items-center justify-center rounded-full border bg-secondary text-xs font-semibold"
+              >
+                PA
+              </button>
+              <div
+                id="avatar-menu"
+                class="hidden absolute right-0 top-10 z-30 w-44 rounded-md border bg-card p-1 shadow-md"
+              >
+                <div class="px-2.5 py-2">
+                  <p class="text-sm font-medium">pavar</p>
+                  <p class="text-xs text-muted-foreground">admin · local</p>
+                </div>
+                <div class="my-1 h-px bg-border"></div>
+                <button
+                  id="signout-btn"
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-destructive hover:bg-accent"
+                >
+                  <i data-lucide="log-out" class="size-4"></i>Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+          <slot />
+        </main>
+      </div>
+    </div>
+
+    <div id="drawer-root"></div>
+    <div id="dialog-root"></div>
+    <dialog id="cmdk" class="cmdk-dialog">
+      <div class="flex items-center gap-2.5 border-b px-4 py-3">
+        <i data-lucide="search" class="size-4 flex-none text-muted-foreground"></i>
+        <input
+          id="cmdk-input"
+          name="cmdk-query"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Search models, providers, logs, pages…"
+          class="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        />
+        <span class="kbd flex-none">esc</span>
+      </div>
+      <div id="cmdk-results" class="max-h-80 overflow-y-auto p-1.5"></div>
+    </dialog>
+  </body>
+</html>

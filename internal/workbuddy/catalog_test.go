@@ -19,6 +19,34 @@ func TestParseModelsPicksLongestAgentList(t *testing.T) {
 	}
 }
 
+func TestParseModelsLiveSchema(t *testing.T) {
+	body := []byte(`{"code":0,"data":{"agents":[{"name":"cli","models":["default-model","hy4flash","deepseek-v4.1-flash-sg"]}],"models":[{"id":"default-model","name":"Auto"},{"id":"hy4flash","name":"Hy4 flash"},{"id":"deepseek-v4.1-flash-sg","name":"DeepSeek"},{"id":"hy4flash-free","name":"Hy4 flash"},{"id":"kling-video-v3","name":"Kling"}]}}`)
+	ids, err := ParseModels(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"default-model", "hy4flash", "deepseek-v4.1-flash-sg"}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
+func TestParseModelsModelsFallback(t *testing.T) {
+	body := []byte(`{"data":{"models":[{"id":"a"},{"id":"b"}]}}`)
+	ids, err := ParseModels(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("ids = %v", ids)
+	}
+}
+
 func TestParseModelsEmptyCatalog(t *testing.T) {
 	ids, err := ParseModels([]byte(`{"data":{"agents":{}}}`))
 	if err != nil {

@@ -11,6 +11,7 @@ A lightweight Go proxy/router for LLM APIs. Accepts OpenAI-compatible requests (
 | POST   | `/v1/chat/completions`  | OpenAI chat completions (stream or non-stream)      |
 | POST   | `/v1/messages`          | Anthropic `/v1/messages` (translated to OpenAI)     |
 | POST   | `/v1/responses`         | OpenAI responses (only `openai`-style providers)    |
+| GET    | `/admin/api/providers/{name}/models` | Per-provider live model catalog (admin session required) |
 
 ## Requirements
 
@@ -352,12 +353,24 @@ NONCE_JSON=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/challenge)
 CID=$(echo "$NONCE_JSON" | jq -r .challenge_id)
 NONCE=$(echo "$NONCE_JSON" | jq -r .nonce)
 PROOF=$(printf %s "$NONCE" | openssl dgst -sha256 -hmac "$ROUTERLLM_ADMIN_TOKEN" -hex | awk '{print $2}')
-SESSION=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/verify   -d "{"challenge_id":"$CID","proof":"$PROOF"}" | jq -r .session)
+SESSION=$(curl -s -X POST http://127.0.0.1:1765/admin/api/auth/verify \
+  -H 'Content-Type: application/json' \
+  -d "{\"challenge_id\":\"$CID\",\"proof\":\"$PROOF\"}" | jq -r .session)
 
 # With ROUTERLLM_ADMIN_TLS_PORT set, reach the console over HTTPS instead:
 # curl -s https://127.0.0.1:1766/admin/api/status --cacert admin-tls.crt -H "Authorization: Bearer $SESSION"
 curl -s http://127.0.0.1:1765/admin/api/status -H "Authorization: Bearer $SESSION"
 ```
+
+Fetch a provider's live model catalog (no cache; useful for account-auth providers that have no plain `/v1/models`):
+
+```bash
+curl -s http://127.0.0.1:1765/admin/api/providers/codex/models \
+  -H "Authorization: Bearer $SESSION"
+# {"provider":"codex","style":"codex","source":"catalog","models":["gpt-5.6-codex", ...]}
+```
+
+`source` is `catalog` (native provider endpoint) or `fallback` (`GET {base_url}/v1/models`). Codex reads `models[].slug`, WorkBuddy reads `/v3/config`, Cline reads the `clinePass`/`free`/`clineCloud` buckets; other styles use the standard `/v1/models` shape. Timeout and response cap come from `settings.admin.models` (defaults 10s / 4 MiB).
 
 For the proxy API, pass the `AUTHTOKEN` value on write endpoints:
 

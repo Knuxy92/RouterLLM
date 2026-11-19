@@ -3,7 +3,7 @@
 FROM node:22-alpine AS web-builder
 WORKDIR /src/web
 RUN npm install -g pnpm@11
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build

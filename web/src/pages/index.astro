@@ -1,0 +1,18 @@
+---
+const target = (import.meta.env.BASE_URL || "/admin/") + "dashboard"
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content={`0;url=${target}`} />
+    <title>RouterLLM admin</title>
+  </head>
+  <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+    <p class="p-6 text-sm text-muted-foreground">
+      Redirecting to <a class="underline" href={target}>Dashboard</a>… 
+    </p>
+  </body>
+</html>

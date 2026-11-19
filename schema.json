@@ -297,6 +297,25 @@
               "default": 1048576,
               "minimum": 1
             },
+            "models": {
+              "description": "Model catalog fetch limits.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "timeout_seconds": {
+                  "type": "integer",
+                  "description": "Per-provider model catalog fetch timeout in seconds.",
+                  "default": 10,
+                  "minimum": 1
+                },
+                "body_bytes": {
+                  "type": "integer",
+                  "description": "Cap on the model catalog response body.",
+                  "default": 4194304,
+                  "minimum": 1
+                }
+              }
+            },
             "test": {
               "description": "Provider-test panel clamps. Served to the console through /admin/api/config.",
               "type": "object",
