@@ -93,22 +93,30 @@ export function buildOpenCodeIndex(models: OpenCodeModel[]): Map<string, OpenCod
   return index
 }
 
+function withoutVariant(value: string): string {
+  const colon = value.lastIndexOf(":")
+  return colon > 0 ? value.slice(0, colon) : value
+}
+
 export function resolveMetadata(nativeId: string, index: Map<string, OpenCodeModel>): OpenCodeModel | null {
   if (!nativeId) return null
 
-  const exact = index.get(normalize(nativeId))
+  const base = normalize(nativeId)
+  const exact = index.get(base) ?? index.get(normalize(withoutVariant(nativeId)))
   if (exact) return exact
 
-  const wantedTail = tail(nativeId)
-  let found: OpenCodeModel | null = null
+  const wantedTails = new Set([tail(nativeId), tail(withoutVariant(nativeId))])
+  const candidates = new Map<string, OpenCodeModel>()
   for (const [key, model] of index) {
     if (key.includes("/")) continue
-    if (tail(key) !== wantedTail) continue
-    if (found && found.id !== model.id) return null
-    found = model
+    const modelTail = tail(key)
+    if (wantedTails.has(modelTail) || wantedTails.has(tail(withoutVariant(modelTail)))) {
+      candidates.set(model.id, model)
+    }
   }
+  if (candidates.size === 1) return [...candidates.values()][0]
 
-  return found
+  return null
 }
 
 function reasoningOf(model: OpenCodeModel | null): { label: string; values: string[] } {
