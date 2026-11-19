@@ -37,12 +37,24 @@ func MountUI(r chi.Router) {
 				return
 			}
 
-			if _, err := fs.Stat(dist, path); err != nil {
+			info, err := fs.Stat(dist, path)
+			if err != nil {
 				serveIndex(w, index)
 				return
 			}
 
-			if strings.HasPrefix(path, "assets/") {
+			if info.IsDir() {
+				if page, err := fs.ReadFile(dist, path+"/index.html"); err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("Cache-Control", "no-store")
+					w.Write(page)
+					return
+				}
+				serveIndex(w, index)
+				return
+			}
+
+			if strings.HasPrefix(path, "assets/") || strings.HasPrefix(path, "_astro/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
 
