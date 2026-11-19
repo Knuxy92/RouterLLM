@@ -14,9 +14,19 @@ import { fmtCompact } from "../lib/data"
 import type { ModelCatalog, ProviderStatus } from "../lib/types"
 import { adminStore } from "../lib/store"
 import { RefreshCwIcon } from "./icons"
+import FilterDropdown from "./shared/FilterDropdown"
 
 const OPENCODE_CATALOG_URL = "https://models.opencode.ai/api.json"
 const EMPTY_ROWS: ModelRow[] = []
+
+const REASONING_FILTERS = [
+  { label: "All reasoning", value: "all" },
+  { label: "Effort", value: "effort" },
+  { label: "Toggle", value: "toggle" },
+  { label: "No metadata", value: "none" },
+]
+const ALL_SOURCES = "All sources"
+const PAGE_SIZES = [10, 20, 50, 100]
 
 type Tab = { key: string; label: string }
 
@@ -50,7 +60,32 @@ export default function ModelsDetail(): JSX.Element {
   const [query, setQuery] = useState("")
   const [reasoningFilter, setReasoningFilter] = useState("all")
   const [sourceFilter, setSourceFilter] = useState("all")
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(10)
   const loadedOnce = useRef(false)
+
+  useEffect(() => {
+    const onDocClick = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      if (!target?.closest?.(".dd")) setOpenDropdown(null)
+    }
+    document.addEventListener("click", onDocClick)
+    return () => document.removeEventListener("click", onDocClick)
+  }, [])
+
+  function toggleDropdown(id: string) {
+    setOpenDropdown((current) => (current === id ? null : id))
+  }
+
+  function resetPage() {
+    setPage(1)
+  }
+
+  function selectTab(key: string) {
+    setActiveTab(key)
+    resetPage()
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -133,6 +168,54 @@ export default function ModelsDetail(): JSX.Element {
 
   const sources = useMemo(() => [...new Set(rows.map((row) => row.source))].sort(), [rows])
 
+  const totalPages = Math.max(1, Math.ceil(visible.length / perPage))
+  const currentPage = Math.min(page, totalPages)
+  const start = (currentPage - 1) * perPage
+  const pageRows = visible.slice(start, start + perPage)
+
+  function goToPage(target: number) {
+    if (target < 1 || target > totalPages) return
+    setPage(target)
+  }
+
+  function renderPagination(): JSX.Element[] {
+    const buttons: JSX.Element[] = []
+    const first = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+    const last = Math.min(totalPages, first + 4)
+    let key = 0
+
+    const push = (label: string | number, target: number, opts: { active?: boolean; disabled?: boolean; ellipsis?: boolean } = {}) => {
+      if (opts.ellipsis) {
+        buttons.push(<span key={key++} className="px-1 text-xs text-muted-foreground">…</span>)
+        return
+      }
+      buttons.push(
+        <button
+          key={key++}
+          type="button"
+          disabled={opts.disabled}
+          onClick={() => goToPage(target)}
+          className={`rounded border px-2 py-1 hover:bg-accent disabled:opacity-40${opts.active ? " bg-primary font-medium text-primary-foreground" : ""}`}
+        >
+          {label}
+        </button>,
+      )
+    }
+
+    push("Prev", currentPage - 1, { disabled: currentPage === 1 })
+    if (first > 1) {
+      push(1, 1)
+      if (first > 2) push("…", 0, { ellipsis: true })
+    }
+    for (let n = first; n <= last; n++) push(n, n, { active: n === currentPage })
+    if (last < totalPages) {
+      if (last < totalPages - 1) push("…", 0, { ellipsis: true })
+      push(totalPages, totalPages)
+    }
+    push("Next", currentPage + 1, { disabled: currentPage === totalPages })
+    return buttons
+  }
+
   return (
     <section>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -158,7 +241,7 @@ export default function ModelsDetail(): JSX.Element {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => selectTab(tab.key)}
               className={`border-b-2 px-3.5 py-2.5 text-xs transition-colors ${
                 activeTab === tab.key
                   ? "border-foreground font-semibold text-foreground"
@@ -175,33 +258,47 @@ export default function ModelsDetail(): JSX.Element {
         <div className="flex flex-wrap gap-2 p-4">
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              resetPage()
+            }}
             placeholder="Search model id, name, family…"
             aria-label="Search models"
             className="min-w-[200px] flex-1 rounded-md border bg-background px-3 py-2 text-xs"
           />
-          <select
-            value={reasoningFilter}
-            onChange={(event) => setReasoningFilter(event.target.value)}
-            aria-label="Filter by reasoning"
-            className="rounded-md border bg-background px-2.5 py-2 text-xs"
-          >
-            <option value="all">All reasoning</option>
-            <option value="effort">Effort</option>
-            <option value="toggle">Toggle</option>
-            <option value="none">No metadata</option>
-          </select>
-          <select
-            value={sourceFilter}
-            onChange={(event) => setSourceFilter(event.target.value)}
-            aria-label="Filter by source"
-            className="rounded-md border bg-background px-2.5 py-2 text-xs"
-          >
-            <option value="all">All sources</option>
-            {sources.map((source) => (
-              <option key={source} value={source}>{source}</option>
-            ))}
-          </select>
+          <FilterDropdown
+            options={REASONING_FILTERS.map((filter) => filter.label)}
+            selected={REASONING_FILTERS.find((filter) => filter.value === reasoningFilter)?.label ?? "All reasoning"}
+            open={openDropdown === "reasoning"}
+            onToggle={() => toggleDropdown("reasoning")}
+            onPick={(label) => {
+              setReasoningFilter(REASONING_FILTERS.find((filter) => filter.label === label)?.value ?? "all")
+              resetPage()
+              setOpenDropdown(null)
+            }}
+          />
+          <FilterDropdown
+            options={[ALL_SOURCES, ...sources]}
+            selected={sourceFilter === "all" ? ALL_SOURCES : sourceFilter}
+            open={openDropdown === "source"}
+            onToggle={() => toggleDropdown("source")}
+            onPick={(label) => {
+              setSourceFilter(label === ALL_SOURCES ? "all" : label)
+              resetPage()
+              setOpenDropdown(null)
+            }}
+          />
+          <FilterDropdown
+            options={PAGE_SIZES.map((size) => String(size))}
+            selected={String(perPage)}
+            open={openDropdown === "perPage"}
+            onToggle={() => toggleDropdown("perPage")}
+            onPick={(label) => {
+              setPerPage(Number(label))
+              resetPage()
+              setOpenDropdown(null)
+            }}
+          />
         </div>
 
         <div className="overflow-x-auto">
@@ -217,7 +314,7 @@ export default function ModelsDetail(): JSX.Element {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {visible.map((row, index) => (
+              {pageRows.map((row, index) => (
                 <tr key={`${row.source}-${row.id}-${index}`} className="hover:bg-muted/30">
                   <td className="px-3 py-2.5">
                     <div className="font-mono font-medium">{row.id}</div>
@@ -242,7 +339,7 @@ export default function ModelsDetail(): JSX.Element {
                   <td className="px-3 py-2.5"><span className="badge tone-info">{row.source}</span></td>
                 </tr>
               ))}
-              {visible.length === 0 && (
+              {pageRows.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-3 py-8 text-center text-xs text-muted-foreground">
                     {loading ? "Loading catalog…" : "No models match these filters."}
@@ -252,8 +349,13 @@ export default function ModelsDetail(): JSX.Element {
             </tbody>
           </table>
         </div>
-        <div className="border-t px-4 py-2.5 text-[11px] text-muted-foreground">
-          Showing {visible.length} of {rows.length} · values marked — are not provided by that source
+        <div className="flex items-center justify-between border-t px-4 py-2.5 text-[11px] text-muted-foreground">
+          <span>
+            Rows{" "}
+            <span className="font-mono text-foreground">{visible.length ? `${start + 1}–${start + pageRows.length}` : "0"}</span>{" "}
+            of <span className="font-mono text-foreground">{visible.length}</span> · values marked — are not provided by that source
+          </span>
+          <div className="flex items-center gap-1">{renderPagination()}</div>
         </div>
       </div>
     </section>

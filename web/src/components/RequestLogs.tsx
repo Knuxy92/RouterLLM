@@ -5,7 +5,6 @@ import { adminStore } from "../lib/store"
 import type { LogEvent, LogFilters } from "../lib/types"
 import {
   AlertTriangleIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   DownloadIcon,
   PauseIcon,
@@ -13,6 +12,7 @@ import {
   SearchIcon,
 } from "./icons"
 import Drawer from "./shared/Drawer"
+import FilterDropdown from "./shared/FilterDropdown"
 
 const ALL_PROVIDERS = "All providers"
 const ALL_MODELS = "All models"
@@ -53,37 +53,6 @@ function formatBody(s: string): string {
   } catch {
     return s
   }
-}
-
-interface FilterDropdownProps {
-  options: string[]
-  selected: string
-  open: boolean
-  onToggle: () => void
-  onPick: (value: string) => void
-}
-
-function FilterDropdown({ options, selected, open, onToggle, onPick }: FilterDropdownProps) {
-  return (
-    <div className={`dd ${open ? "open" : ""}`}>
-      <button type="button" className="dd-btn" onClick={onToggle}>
-        <span className="dd-label">{selected}</span>
-        <ChevronDownIcon />
-      </button>
-      <div className="dd-menu">
-        {options.map((option) => (
-          <button
-            type="button"
-            key={option}
-            className={`dd-item${option === selected ? " active" : ""}`}
-            onClick={() => onPick(option)}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 interface TraceBody {
