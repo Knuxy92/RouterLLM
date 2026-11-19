@@ -41,7 +41,8 @@ export function parseOpenCodeCatalog(payload: OpenCodeCatalog | null | undefined
       (candidate.limit?.context ? 2 : 0) +
       (candidate.limit?.output ? 2 : 0) +
       (candidate.reasoning_options?.length ?? 0) +
-      (candidate.description ? 1 : 0)
+      (candidate.description ? 1 : 0) +
+      (candidate.canonical_model_id && normalize(candidate.canonical_model_id) === normalize(candidate.id) ? 3 : 0)
     if (!previous || score(model) > score(previous)) best.set(key, model)
   }
 
@@ -113,7 +114,20 @@ export function resolveMetadata(nativeId: string, index: Map<string, OpenCodeMod
       candidates.set(model.id, model)
     }
   }
-  if (candidates.size === 1) return [...candidates.values()][0]
+  if (candidates.size === 0) return null
+
+  const rank = (model: OpenCodeModel): number => {
+    let score = 0
+    if (!model.id.includes(":")) score += 8
+    if (wantedTails.has(normalize(model.id))) score += 4
+    if (model.canonical_model_id && normalize(model.canonical_model_id) === normalize(model.id)) score += 2
+    if (model.reasoning_options?.length) score += 1
+    if (model.limit?.context) score += 1
+    return score
+  }
+
+  const ranked = [...candidates.values()].sort((a, b) => rank(b) - rank(a))
+  if (ranked.length === 1 || rank(ranked[0]) > rank(ranked[1])) return ranked[0]
 
   return null
 }
