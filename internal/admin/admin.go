@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,6 +36,8 @@ type Deps struct {
 	// Quota reports the last Codex rate-limit snapshot for one provider key;
 	// nil simply omits quota display.
 	Quota func(provider, key string) (quota.Snapshot, bool)
+	// Models lists a provider's live model catalog; nil disables the endpoint.
+	Models func(context.Context, string) (services.ModelCatalog, error)
 }
 
 func Mount(r chi.Router, deps Deps) {
@@ -61,6 +64,7 @@ func Mount(r chi.Router, deps Deps) {
 			authed.Post("/reload", deps.handleReload)
 			authed.Post("/providers/{name}", deps.handleProviderToggle)
 			authed.Post("/providers/{name}/test", deps.handleProviderTest)
+			authed.Get("/providers/{name}/models", deps.handleProviderModels)
 			authed.Post("/providers/{name}/keys/{index}", deps.handleKeyToggle)
 			authed.Post("/routes/{model}/move", deps.handleRouteMove)
 			authed.Post("/routes/{model}/add", deps.handleRouteAdd)
@@ -208,11 +212,11 @@ func (d Deps) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			time.Now().Add(-14*24*time.Hour),
 			time.Now().Add(-7*24*time.Hour),
 		),
-		"providers":     providers,
-		"legs":          legs,
-		"models":        models,
-		"hourly":        m.Windows("g", time.Hour, 24),
-		"weekly":        m.Windows("g", 24*time.Hour, 7),
+		"providers": providers,
+		"legs":      legs,
+		"models":    models,
+		"hourly":    m.Windows("g", time.Hour, 24),
+		"weekly":    m.Windows("g", 24*time.Hour, 7),
 	})
 }
 
