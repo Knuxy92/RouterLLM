@@ -43,10 +43,12 @@ func (c *Client) FetchModels(ctx context.Context, realm, uid, accessToken string
 	return ParseModels(body)
 }
 
-// ParseModels extracts the model ids from a /v3/config response. The picker's
-// list rides in agents[].models as bare ids — under "data" in the endpoint's
-// answer, at the top level in the desktop cache file; an unusable credential
-// answers HTTP 200 with an empty list.
+// ParseModels extracts the model ids from a /v3/config response. The live
+// schema carries agents as an array of {name, models:[id]} — the chat picker's
+// routable list — plus a broader data.models array of {id, …} objects that also
+// includes image/video models. Older cache fixtures use agents as a name→{models}
+// map. Agent ids are preferred; data.models is only a fallback. An unusable
+// credential answers HTTP 200 with an empty list.
 func ParseModels(body []byte) ([]string, error) {
 	var payload struct {
 		Data json.RawMessage `json:"data"`
@@ -56,40 +58,36 @@ func ParseModels(body []byte) ([]string, error) {
 	}
 
 	roots := []json.RawMessage{body, payload.Data}
-	var pool [][]string
+	var agentPools, modelPools [][]string
 	for _, root := range roots {
 		if len(root) == 0 {
 			continue
 		}
 		var doc struct {
-			Agents map[string]struct {
-				Models []string `json:"models"`
-			} `json:"agents"`
+			Agents json.RawMessage `json:"agents"`
+			Models json.RawMessage `json:"models"`
 		}
 		if json.Unmarshal(root, &doc) != nil {
 			continue
 		}
-		for _, entry := range doc.Agents {
-			if len(entry.Models) == 0 {
-				continue
-			}
-			ids := make([]string, 0, len(entry.Models))
-			for _, id := range entry.Models {
-				if id != "" {
-					ids = append(ids, id)
-				}
-			}
-			if len(ids) > 0 {
-				pool = append(pool, ids)
-			}
+		if ids := parseAgentModels(doc.Agents); len(ids) > 0 {
+			agentPools = append(agentPools, ids)
+		}
+		if ids := parseModelIDs(doc.Models); len(ids) > 0 {
+			modelPools = append(modelPools, ids)
 		}
 	}
-	if len(pool) == 0 {
+
+	pools := agentPools
+	if len(pools) == 0 {
+		pools = modelPools
+	}
+	if len(pools) == 0 {
 		return nil, nil
 	}
 
-	best := pool[0]
-	for _, ids := range pool[1:] {
+	best := pools[0]
+	for _, ids := range pools[1:] {
 		if len(ids) > len(best) {
 			best = ids
 		}
@@ -98,13 +96,68 @@ func ParseModels(body []byte) ([]string, error) {
 	seen := make(map[string]bool, len(best))
 	out := make([]string, 0, len(best))
 	for _, id := range best {
-		if !seen[id] {
+		if id != "" && !seen[id] {
 			seen[id] = true
 			out = append(out, id)
 		}
 	}
 
 	return out, nil
+}
+
+// parseAgentModels reads agents[].models in the live array shape and the older
+// name→{models} map shape, returning the union of every agent's model ids.
+func parseAgentModels(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var ids []string
+	var list []struct {
+		Models []string `json:"models"`
+	}
+	if json.Unmarshal(raw, &list) == nil {
+		for _, entry := range list {
+			ids = append(ids, entry.Models...)
+		}
+		if len(ids) > 0 {
+			return ids
+		}
+	}
+
+	var byName map[string]struct {
+		Models []string `json:"models"`
+	}
+	if json.Unmarshal(raw, &byName) == nil {
+		for _, entry := range byName {
+			ids = append(ids, entry.Models...)
+		}
+	}
+
+	return ids
+}
+
+// parseModelIDs reads the rich data.models array of objects and returns their ids.
+func parseModelIDs(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var models []struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &models) != nil {
+		return nil
+	}
+
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		if model.ID != "" {
+			ids = append(ids, model.ID)
+		}
+	}
+
+	return ids
 }
 
 // CatalogClient is a convenience constructor for one-shot catalog pulls.
