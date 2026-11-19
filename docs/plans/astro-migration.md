@@ -58,11 +58,13 @@ React islands in `web/src/components/`: `Dashboard.tsx`, `RequestLogs.tsx`, `Pro
 
 Preserve exactly: HMAC login, session storage, 401 teardown, 3s pulse cadence from `/admin/api/config`, gzip-friendly API calls, drawers/dialogs, provider test panel, leg editing, dark mode. **No Go handler changes in Phase 1.** Delete old Vite-only entry files (`web/src/main.js`, `web/src/js/router.js`, `state.js`, `render.js`, `ui.js`, `auth.js`, `search.js`, `theme.js`) only after behavior is ported; keep `web/wireframe/` and `web/scripts/` as reference.
 
-## Phase 2 spec (written now, executed later — frontend only)
+## Phase 2 — implemented (frontend only)
 
-- "docs → Models detail" goes live: `ModelsDetail.tsx` lists per-provider catalogs via the **existing** `GET /admin/api/providers/{name}/models`. It consumes `{provider, style, source, models: string[]}` as-is. **No changes to** `internal/services/proxy_models.go`, `internal/{codex,cline}/catalog.go`, `internal/workbuddy/catalog.go`, `internal/admin/models.go`, settings, schema, or tests.
-- Columns: **Model Id** (from `models[]`), **Reasoning / Max Context / Max Response Token** — display em-dash + "upstream does not provide" because the endpoint returns ids only. Adding rich metadata is explicitly out of scope for this plan and needs its own future plan with a real Codex catalog fixture. Field policy deferred by user.
-- Phase 2 may add UI-side per-provider grouping/filter/search over the existing response; no new network contract.
+- "docs → Models detail" is live at `/admin/models`, mounted as `ModelsDetail.tsx` with the Option A layout (tabs `Configured | OpenCode | <providers>`, search + reasoning/source filters, table Model Id / Reasoning / Context / Max output / Modalities / Source). Layout chosen by the user from three reviewed HTML mockups.
+- Metadata comes from the public `https://models.opencode.ai/api.json`, fetched on page entry from the browser (CORS confirmed OK; no cache). `api.kilo.ai/api/gateway/models` is CORS-blocked and deliberately skipped. Provider tabs use the **existing** session-gated `GET /admin/api/providers/{name}/models` via `api.providerModels`; no Go handler changed.
+- The id spaces differ (OpenCode `vendor/Name` + `canonical_model_id`; Cline `cline-pass/…`; Codex bare slug; configured routes local aliases). `web/src/lib/catalog.ts` is a pure join layer: exact lower-cased id → exact canonical id → normalized tail **only when unique**; no match → em-dash. Never fuzzy-guesses a wrong model.
+- Field mapping: `reasoning_options[].type/values` → Reasoning, `limit.context`/`limit.output` → Context/Max output (via `fmtCompact`), `modalities.input + output` → chips. Untrusted JSON is rendered as JSX text only.
+- No changes to `internal/services/proxy_models.go`, `internal/{codex,cline}/catalog.go`, `internal/admin/models.go`, settings, schema, or tests. Get Models API response stays `{provider, style, source, models: string[]}`.
 
 ## SubAgent fan-out (Phase 1)
 
