@@ -107,9 +107,8 @@ export function resolveMetadata(nativeId: string, index: Map<string, OpenCodeMod
 
   const wantedTails = new Set([tail(nativeId), tail(withoutVariant(nativeId))])
   const candidates = new Map<string, OpenCodeModel>()
-  for (const [key, model] of index) {
-    if (key.includes("/")) continue
-    const modelTail = tail(key)
+  for (const model of index.values()) {
+    const modelTail = tail(model.id)
     if (wantedTails.has(modelTail) || wantedTails.has(tail(withoutVariant(modelTail)))) {
       candidates.set(model.id, model)
     }
