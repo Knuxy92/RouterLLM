@@ -19,7 +19,42 @@ export interface OpenCodeModel {
   cost?: Record<string, number>
 }
 
-export type OpenCodeCatalog = Record<string, OpenCodeModel>
+export interface OpenCodeProvider {
+  models?: Record<string, OpenCodeModel>
+}
+
+export type OpenCodeCatalog = Record<string, OpenCodeModel | OpenCodeProvider>
+
+function isProvider(value: OpenCodeModel | OpenCodeProvider): value is OpenCodeProvider {
+  return Object.prototype.hasOwnProperty.call(value, "models")
+}
+
+export function parseOpenCodeCatalog(payload: OpenCodeCatalog | null | undefined): OpenCodeModel[] {
+  if (!payload) return []
+
+  const best = new Map<string, OpenCodeModel>()
+  const consider = (model: OpenCodeModel) => {
+    if (!model.id) return
+    const key = normalize(model.id)
+    const previous = best.get(key)
+    const score = (candidate: OpenCodeModel) =>
+      (candidate.limit?.context ? 2 : 0) +
+      (candidate.limit?.output ? 2 : 0) +
+      (candidate.reasoning_options?.length ?? 0) +
+      (candidate.description ? 1 : 0)
+    if (!previous || score(model) > score(previous)) best.set(key, model)
+  }
+
+  for (const value of Object.values(payload)) {
+    if (isProvider(value)) {
+      for (const model of Object.values(value.models ?? {})) consider(model)
+      continue
+    }
+    consider(value)
+  }
+
+  return [...best.values()]
+}
 
 export interface ModelRow {
   id: string
@@ -44,9 +79,8 @@ function tail(value: string): string {
   return normalize(slash >= 0 ? value.slice(slash + 1) : value)
 }
 
-export function buildOpenCodeIndex(catalog: OpenCodeCatalog): Map<string, OpenCodeModel> {
+export function buildOpenCodeIndex(models: OpenCodeModel[]): Map<string, OpenCodeModel> {
   const index = new Map<string, OpenCodeModel>()
-  const models = Object.values(catalog)
 
   for (const model of models) {
     if (!model.id) continue
@@ -137,8 +171,8 @@ export function enrichFromStatus(status: StatusPayload | null, index: Map<string
   return rows
 }
 
-export function enrichOpenCodeCatalog(catalog: OpenCodeCatalog): ModelRow[] {
-  return Object.values(catalog)
+export function enrichOpenCodeCatalog(models: OpenCodeModel[]): ModelRow[] {
+  return models
     .filter((model) => Boolean(model.id))
     .map((model) => toModelRow(model.id, "opencode", model))
 }

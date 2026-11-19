@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from "react"
 import { api } from "../lib/api"
 import {
+  parseOpenCodeCatalog,
   buildOpenCodeIndex,
   enrichFromStatus,
   enrichOpenCodeCatalog,
   enrichRows,
   type ModelRow,
   type OpenCodeCatalog,
+  type OpenCodeModel,
 } from "../lib/catalog"
 import { fmtCompact } from "../lib/data"
 import type { ModelCatalog, ProviderStatus } from "../lib/types"
@@ -14,7 +16,6 @@ import { adminStore } from "../lib/store"
 import { RefreshCwIcon } from "./icons"
 
 const OPENCODE_CATALOG_URL = "https://models.opencode.ai/api.json"
-const EMPTY_INDEX = new Map()
 const EMPTY_ROWS: ModelRow[] = []
 
 type Tab = { key: string; label: string }
@@ -42,7 +43,7 @@ export default function ModelsDetail(): JSX.Element {
   const getSnapshot = useCallback(() => adminStore.getSnapshot(), [])
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
-  const [catalog, setCatalog] = useState<OpenCodeCatalog | null>(null)
+  const [catalogModels, setCatalogModels] = useState<OpenCodeModel[]>([])
   const [providerCatalogs, setProviderCatalogs] = useState<Record<string, ModelCatalog>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("configured")
@@ -58,9 +59,9 @@ export default function ModelsDetail(): JSX.Element {
       const response = await fetch(OPENCODE_CATALOG_URL)
       if (!response.ok) throw new Error(`status ${response.status}`)
       const payload = (await response.json()) as OpenCodeCatalog
-      setCatalog(payload)
+      setCatalogModels(parseOpenCodeCatalog(payload))
     } catch {
-      setCatalog(null)
+      setCatalogModels([])
     }
 
     const catalogStyles = new Set(["codex", "cline", "workbuddy", "opencode", "alysis"])
@@ -93,7 +94,7 @@ export default function ModelsDetail(): JSX.Element {
     }
   }, [state.status, load])
 
-  const index = useMemo(() => (catalog ? buildOpenCodeIndex(catalog) : EMPTY_INDEX), [catalog])
+  const index = useMemo(() => buildOpenCodeIndex(catalogModels), [catalogModels])
 
   const tabs = useMemo<Tab[]>(() => {
     const list: Tab[] = [
@@ -110,13 +111,13 @@ export default function ModelsDetail(): JSX.Element {
   const rowsByTab = useMemo<Record<string, ModelRow[]>>(() => {
     const result: Record<string, ModelRow[]> = {
       configured: enrichFromStatus(state.status ?? null, index),
-      opencode: catalog ? enrichOpenCodeCatalog(catalog) : [],
+      opencode: enrichOpenCodeCatalog(catalogModels),
     }
     for (const [name, data] of Object.entries(providerCatalogs)) {
       result[name] = enrichRows(data.models, data.source || name, index)
     }
     return result
-  }, [state.status, index, catalog, providerCatalogs])
+  }, [state.status, index, catalogModels, providerCatalogs])
 
   const rows = rowsByTab[activeTab] ?? EMPTY_ROWS
   const q = query.trim().toLowerCase()

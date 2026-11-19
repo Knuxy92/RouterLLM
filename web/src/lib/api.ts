@@ -87,6 +87,7 @@ export interface RequestInitLike {
 export async function call<T>(path: string, init: RequestInitLike = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers || {}) }
   const token = getToken()
+  const hadToken = Boolean(token)
   if (token) headers.Authorization = "Bearer " + token
 
   if (init.body !== undefined && !headers["Content-Type"]) {
@@ -102,7 +103,7 @@ export async function call<T>(path: string, init: RequestInitLike = {}): Promise
     // non-JSON body (proxy error page etc.) — fall through to status handling
   }
 
-  if (res.status === 401 && path !== "/auth/challenge" && path !== "/auth/verify") {
+  if (res.status === 401 && hadToken && path !== "/auth/challenge" && path !== "/auth/verify") {
     clearToken()
     window.dispatchEvent(new Event("routerllm:unauthorized"))
     throw new ApiError(401, errorMessage(payload, "session expired — sign in again"))
