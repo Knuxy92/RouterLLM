@@ -205,7 +205,6 @@ export function enrichFromStatus(status: StatusPayload | null, index: Map<string
     const leg = chain.find((entry) => !entry.disabled && !entry.provider_disabled) ?? chain[0]
     if (!leg) continue
     add(model.model_id, leg.provider)
-    add(leg.model, leg.provider)
   }
 
   return rows
