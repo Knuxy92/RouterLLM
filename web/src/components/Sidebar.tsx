@@ -1,30 +1,28 @@
-import { useEffect } from "react"
+import { useEffect, type ComponentType } from "react"
+import { BoxIcon, LayoutDashboardIcon, ScrollTextIcon, ServerIcon, WaypointsIcon } from "./icons"
 
 const BASE = import.meta.env.BASE_URL || "/admin/"
 
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
+type NavIcon = ComponentType<{ className?: string }>
 
-const NAV_GROUPS = [
+const NAV_GROUPS: { label: string; items: { slug: string; label: string; icon: NavIcon }[] }[] = [
   {
     label: "Platform",
     items: [
-      { slug: "dashboard", label: "Dashboard", icon: "layout-dashboard" },
-      { slug: "logs", label: "Request logs", icon: "scroll-text" },
+      { slug: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon },
+      { slug: "logs", label: "Request logs", icon: ScrollTextIcon },
     ],
   },
   {
     label: "Management",
     items: [
-      { slug: "providers", label: "Providers & Models", icon: "server" },
+      { slug: "providers", label: "Providers & Models", icon: ServerIcon },
     ],
   },
   {
     label: "docs",
     items: [
-      { slug: "models", label: "Models detail", icon: "box" },
+      { slug: "models", label: "Models detail", icon: BoxIcon },
     ],
   },
 ]
@@ -34,10 +32,6 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeSlug = "dashboard" }: SidebarProps) {
-  useEffect(() => {
-    refreshIcons()
-  })
-
   useEffect(() => {
     const sidebar = document.querySelector("#sidebar")
     const scrim = document.querySelector("#sidebar-scrim")
@@ -73,7 +67,7 @@ export default function Sidebar({ activeSlug = "dashboard" }: SidebarProps) {
       >
         <div className="flex h-14 items-center gap-2.5 border-b px-4">
           <div className="flex size-7 items-center justify-center rounded-md border bg-background">
-            <i data-lucide="waypoints" className="size-4"></i>
+            <WaypointsIcon className="size-4" />
           </div>
           <div className="leading-tight">
             <p className="text-sm font-semibold">RouterLLM</p>
@@ -89,16 +83,19 @@ export default function Sidebar({ activeSlug = "dashboard" }: SidebarProps) {
               <p className="px-2.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
                 {group.label}
               </p>
-              {group.items.map((item) => (
-                <a
-                  key={item.slug}
-                  className={`nav-item ${activeSlug === item.slug ? "active" : ""}`}
-                  data-nav={item.slug}
-                  href={BASE + item.slug}
-                >
-                  <i data-lucide={item.icon}></i>{item.label}
-                </a>
-              ))}
+              {group.items.map((item) => {
+                const ItemIcon = item.icon
+                return (
+                  <a
+                    key={item.slug}
+                    className={`nav-item ${activeSlug === item.slug ? "active" : ""}`}
+                    data-nav={item.slug}
+                    href={BASE + item.slug}
+                  >
+                    <ItemIcon />{item.label}
+                  </a>
+                )
+              })}
             </div>
           ))}
         </nav>

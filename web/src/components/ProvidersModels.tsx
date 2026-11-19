@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from "react"
+import { useCallback, useState, useSyncExternalStore, type JSX } from "react"
 import { api } from "../lib/api"
 import {
   KEY_TONE,
@@ -15,11 +15,16 @@ import { adminStore } from "../lib/store"
 import type { QuotaSnapshot, TestProviderBody, TestProviderResult } from "../lib/types"
 import Dialog from "./shared/Dialog"
 import Drawer from "./shared/Drawer"
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  BarChart3Icon,
+  ChevronUpIcon,
+  FlaskConicalIcon,
+  PlayIcon,
+  PlusIcon,
+  XIcon,
+} from "./icons"
 
 function errorDisplay(err: string): JSX.Element {
   const destructive = err.includes("text-destructive")
@@ -156,10 +161,6 @@ export default function ProvidersModels(): JSX.Element {
   const [legEffort, setLegEffort] = useState("")
   const [legStylecall, setLegStylecall] = useState("")
   const [legDisabled, setLegDisabled] = useState(false)
-
-  useEffect(() => {
-    refreshIcons()
-  })
 
   const view = adminStore.getView()
   const config = adminStore.getConfig()
@@ -331,7 +332,7 @@ export default function ProvidersModels(): JSX.Element {
                   onClick={() => void adminStore.moveLeg(m.name, i, -1)}
                   className="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"
                 >
-                  <i data-lucide="arrow-up" className="size-3"></i>
+                  <ArrowUpIcon className="size-3" />
                 </button>
                 <button
                   type="button"
@@ -339,7 +340,7 @@ export default function ProvidersModels(): JSX.Element {
                   onClick={() => void adminStore.moveLeg(m.name, i, 1)}
                   className="rounded border p-1 text-muted-foreground hover:bg-accent disabled:opacity-30"
                 >
-                  <i data-lucide="arrow-down" className="size-3"></i>
+                  <ArrowDownIcon className="size-3" />
                 </button>
                 <button
                   type="button"
@@ -347,7 +348,7 @@ export default function ProvidersModels(): JSX.Element {
                   onClick={() => void adminStore.removeLeg(m.name, i)}
                   className="rounded border p-1 text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-30"
                 >
-                  <i data-lucide="x" className="size-3"></i>
+                  <XIcon className="size-3" />
                 </button>
                 <input
                   type="checkbox"
@@ -364,7 +365,7 @@ export default function ProvidersModels(): JSX.Element {
               onClick={() => openLegDialog(m.name)}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-accent"
             >
-              <i data-lucide="plus" className="size-3"></i>Add failover leg
+              <PlusIcon className="size-3" />Add failover leg
             </button>
           </li>
         </ul>
@@ -604,11 +605,11 @@ export default function ProvidersModels(): JSX.Element {
                   >
                     {testOpen ? (
                       <>
-                        <i data-lucide="chevron-up" className="size-3"></i>Close test
+                        <ChevronUpIcon className="size-3" />Close test
                       </>
                     ) : (
                       <>
-                        <i data-lucide="flask-conical" className="size-3"></i>Open test
+                        <FlaskConicalIcon className="size-3" />Open test
                       </>
                     )}
                   </button>
@@ -699,7 +700,7 @@ export default function ProvidersModels(): JSX.Element {
                         onClick={() => void runTest(drawerP.name)}
                         className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
                       >
-                        <i data-lucide="play" className="size-3.5"></i>
+                        <PlayIcon className="size-3.5" />
                         {testRunning ? "Testing…" : "Run test"}
                       </button>
                       {testResult && (
@@ -722,11 +723,11 @@ export default function ProvidersModels(): JSX.Element {
               >
                 {analyticsOpen ? (
                   <>
-                    <i data-lucide="chevron-up" className="size-3"></i>Hide analytics
+                    <ChevronUpIcon className="size-3" />Hide analytics
                   </>
                 ) : (
                   <>
-                    <i data-lucide="bar-chart-3" className="size-3"></i>View analytics
+                    <BarChart3Icon className="size-3" />View analytics
                   </>
                 )}
               </button>

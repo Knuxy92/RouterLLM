@@ -36,7 +36,11 @@ const activeSlug = Astro.url.pathname.replace(/\/$/, "").split("/").pop() || "da
     </script>
     <script is:inline src={base + "vendor/lucide.min.js"}></script>
     <script is:inline>
-      window.lucide?.createIcons()
+      window.addEventListener("load", function () {
+        window.setTimeout(function () {
+          window.lucide?.createIcons()
+        }, 1000)
+      })
     </script>
   </head>
   <body class="min-h-dvh bg-background font-sans text-foreground antialiased">

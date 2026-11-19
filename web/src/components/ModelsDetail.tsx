@@ -11,17 +11,13 @@ import {
 import { fmtCompact } from "../lib/data"
 import type { ModelCatalog, ProviderStatus } from "../lib/types"
 import { adminStore } from "../lib/store"
+import { RefreshCwIcon } from "./icons"
 
 const OPENCODE_CATALOG_URL = "https://models.opencode.ai/api.json"
 const EMPTY_INDEX = new Map()
 const EMPTY_ROWS: ModelRow[] = []
 
 type Tab = { key: string; label: string }
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons?: () => void } }).lucide
-  lucide?.createIcons?.()
-}
 
 function ReasoningCell({ row }: { row: ModelRow }): JSX.Element {
   if (row.reasoning === "—") return <span className="text-muted-foreground">—</span>
@@ -48,8 +44,6 @@ export default function ModelsDetail(): JSX.Element {
 
   const [catalog, setCatalog] = useState<OpenCodeCatalog | null>(null)
   const [providerCatalogs, setProviderCatalogs] = useState<Record<string, ModelCatalog>>({})
-  const [providerErrors, setProviderErrors] = useState<Record<string, string>>({})
-  const [catalogError, setCatalogError] = useState("")
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("configured")
   const [query, setQuery] = useState("")
@@ -59,44 +53,36 @@ export default function ModelsDetail(): JSX.Element {
 
   const load = useCallback(async () => {
     setLoading(true)
-    setCatalogError("")
-    setProviderErrors({})
 
     try {
       const response = await fetch(OPENCODE_CATALOG_URL)
       if (!response.ok) throw new Error(`status ${response.status}`)
       const payload = (await response.json()) as OpenCodeCatalog
       setCatalog(payload)
-    } catch (error) {
+    } catch {
       setCatalog(null)
-      setCatalogError(error instanceof Error ? error.message : "request failed")
     }
 
+    const catalogStyles = new Set(["codex", "cline", "workbuddy", "opencode", "alysis"])
     const providers = (adminStore.getStatus()?.providers ?? []).filter(
-      (provider: ProviderStatus) => !provider.disabled && provider.keys_alive > 0,
+      (provider: ProviderStatus) =>
+        !provider.disabled && provider.keys_alive > 0 && catalogStyles.has(provider.style),
     )
     const results = await Promise.all(
       providers.map(async (provider) => {
         try {
-          return { name: provider.name, data: await api.providerModels(provider.name), error: "" }
-        } catch (error) {
-          return {
-            name: provider.name,
-            data: null,
-            error: error instanceof Error ? error.message : "request failed",
-          }
+          return { name: provider.name, data: await api.providerModels(provider.name) }
+        } catch {
+          return { name: provider.name, data: null }
         }
       }),
     )
 
     const loaded: Record<string, ModelCatalog> = {}
-    const errors: Record<string, string> = {}
     for (const result of results) {
       if (result.data) loaded[result.name] = result.data
-      else errors[result.name] = result.error
     }
     setProviderCatalogs(loaded)
-    setProviderErrors(errors)
     setLoading(false)
   }, [])
 
@@ -106,10 +92,6 @@ export default function ModelsDetail(): JSX.Element {
       void load()
     }
   }, [state.status, load])
-
-  useEffect(() => {
-    refreshIcons()
-  })
 
   const index = useMemo(() => (catalog ? buildOpenCodeIndex(catalog) : EMPTY_INDEX), [catalog])
 
@@ -163,7 +145,7 @@ export default function ModelsDetail(): JSX.Element {
           disabled={loading}
           className="inline-flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs font-medium shadow-sm transition-colors hover:bg-muted/60 disabled:opacity-50"
         >
-          <i data-lucide="refresh-cw" className="size-3.5" />
+          <RefreshCwIcon className="size-3.5" />
           {loading ? "Loading…" : "Refresh catalog"}
         </button>
       </div>
@@ -220,13 +202,6 @@ export default function ModelsDetail(): JSX.Element {
             ))}
           </select>
         </div>
-
-        {(catalogError || providerErrors[activeTab]) && (
-          <div className="mx-4 mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            {catalogError && `OpenCode catalog unavailable (${catalogError}). `}
-            {providerErrors[activeTab] && `Could not load catalog for ${activeTab} (${providerErrors[activeTab]}).`}
-          </div>
-        )}
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-xs">

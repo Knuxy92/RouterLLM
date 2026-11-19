@@ -3,6 +3,15 @@ import { api } from "../lib/api"
 import { adaptLogs, fmtDur, fmtInt } from "../lib/data"
 import { adminStore } from "../lib/store"
 import type { LogEvent, LogFilters } from "../lib/types"
+import {
+  AlertTriangleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  PauseIcon,
+  PlayIcon,
+  SearchIcon,
+} from "./icons"
 import Drawer from "./shared/Drawer"
 
 const ALL_PROVIDERS = "All providers"
@@ -30,11 +39,6 @@ const LEVEL_BADGE: Record<string, string> = {
 
 const CSV_HEADER = "time,level,message,provider,model,key,ttft,tok_s,status"
 const FORMULA_LEAD = /^[=+@\t\r-]/
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
 
 function csvQuote(v: unknown): string {
   const raw = String(v ?? "")
@@ -64,7 +68,7 @@ function FilterDropdown({ options, selected, open, onToggle, onPick }: FilterDro
     <div className={`dd ${open ? "open" : ""}`}>
       <button type="button" className="dd-btn" onClick={onToggle}>
         <span className="dd-label">{selected}</span>
-        <i data-lucide="chevron-down"></i>
+        <ChevronDownIcon />
       </button>
       <div className="dd-menu">
         {options.map((option) => (
@@ -146,7 +150,7 @@ function RequestTrace({ event }: { event: LogEvent }) {
       {event.err ? (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3.5 text-xs">
           <p className="mb-1 flex items-center gap-2 font-semibold text-destructive">
-            <i data-lucide="alert-triangle" className="size-3.5"></i>What happened
+            <AlertTriangleIcon className="size-3.5" />What happened
           </p>
           <p className="leading-relaxed text-foreground">{event.err}</p>
         </div>
@@ -200,10 +204,6 @@ export default function RequestLogs(): JSX.Element {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [selected, setSelected] = useState<LogEvent | null>(null)
   const [exporting, setExporting] = useState(false)
-
-  useEffect(() => {
-    refreshIcons()
-  })
 
   useEffect(() => {
     const onDocClick = (event: MouseEvent) => {
@@ -339,14 +339,14 @@ export default function RequestLogs(): JSX.Element {
             onClick={() => void exportCsv()}
             className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent disabled:opacity-50"
           >
-            <i data-lucide="download" className="size-3.5"></i>Export CSV
+            <DownloadIcon className="size-3.5" />Export CSV
           </button>
         </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-sm">
         <div className="relative min-w-[220px] flex-1">
-          <i data-lucide="search" className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+          <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             id="log-search"
             name="search"
@@ -398,7 +398,7 @@ export default function RequestLogs(): JSX.Element {
           onClick={() => void adminStore.setLogFilter({ paused: !paused })}
           className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent"
         >
-          <i data-lucide={paused ? "play" : "pause"} className="size-3.5"></i>{paused ? "Resume" : "Pause"}
+          {paused ? <PlayIcon className="size-3.5" /> : <PauseIcon className="size-3.5" />}{paused ? "Resume" : "Pause"}
         </button>
       </div>
 
@@ -446,7 +446,7 @@ export default function RequestLogs(): JSX.Element {
                         <span className={`badge font-mono ${row.status === 200 ? "tone-ok" : "tone-error"}`}>{row.status}</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-right"><i data-lucide="chevron-right" className="ml-auto size-4 text-muted-foreground"></i></td>
+                    <td className="px-3 py-2.5 text-right"><ChevronRightIcon className="ml-auto size-4 text-muted-foreground" /></td>
                   </tr>
                 ))
               )}

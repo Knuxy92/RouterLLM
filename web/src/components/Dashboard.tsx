@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type MouseEvent } from "react"
+import { useMemo, useRef, useState, useSyncExternalStore, type JSX, type MouseEvent } from "react"
 import { adaptLogs, adaptModels, adaptTraffic, fmtDur, fmtInt, type AdaptedLog, type TrafficPoint } from "../lib/data"
 import { adminStore } from "../lib/store"
 import type { LogEvent, MetricsSummary } from "../lib/types"
+import {
+  ChevronRightIcon,
+  ClockIcon,
+  GaugeIcon,
+  RefreshCwIcon,
+  ShieldAlertIcon,
+  TrendingUpIcon,
+  ZapIcon,
+} from "./icons"
 
 type Range = "24h" | "7d"
 
 const BASE = import.meta.env.BASE_URL || "/admin/"
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
 
 function openTrace(entry: LogEvent) {
   window.dispatchEvent(new CustomEvent("routerllm:open-trace", { detail: entry }))
@@ -134,7 +138,7 @@ function FailureRow({ row }: { row: AdaptedLog }): JSX.Element {
       <span className={`badge ${row.level === "error" ? "tone-error" : "tone-warn"}`}>{row.level}</span>
       <span className="min-w-0 flex-1 truncate">{row.msg}</span>
       <span className="hidden font-mono text-xs text-muted-foreground sm:inline">{row.status ?? "—"}</span>
-      <i data-lucide="chevron-right" className="size-4 text-muted-foreground"></i>
+      <ChevronRightIcon className="size-4 text-muted-foreground" />
     </li>
   )
 }
@@ -145,10 +149,6 @@ export default function Dashboard(): JSX.Element {
   const [range, setRange] = useState<Range>("24h")
   const [reloading, setReloading] = useState(false)
   const weekly = range === "7d"
-
-  useEffect(() => {
-    refreshIcons()
-  })
 
   const current: MetricsSummary | undefined = weekly ? metrics?.global_weekly : metrics?.global
   const previous: MetricsSummary | undefined = weekly ? metrics?.global_weekly_prev : metrics?.global_prev
@@ -196,7 +196,7 @@ export default function Dashboard(): JSX.Element {
             onClick={handleReload}
             className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent disabled:opacity-50"
           >
-            <i data-lucide="refresh-cw" className="size-3.5"></i>Reload config
+            <RefreshCwIcon className="size-3.5" />Reload config
           </button>
         </div>
       </div>
@@ -205,7 +205,7 @@ export default function Dashboard(): JSX.Element {
         <div className="rounded-lg border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">Requests {weekly ? "7d" : "24h"}</p>
-            <i data-lucide="zap" className="size-3.5 text-muted-foreground"></i>
+            <ZapIcon className="size-3.5 text-muted-foreground" />
           </div>
           <p className="mt-1.5 font-mono text-xl font-semibold">
             {fmtInt(current?.req ?? 0)}
@@ -219,7 +219,7 @@ export default function Dashboard(): JSX.Element {
             <p className="text-xs text-muted-foreground">
               <span className="has-tip" data-tip="Share of requests that succeeded (non-error responses)">Success rate</span>
             </p>
-            <i data-lucide="gauge" className="size-3.5 text-muted-foreground"></i>
+            <GaugeIcon className="size-3.5 text-muted-foreground" />
           </div>
           <p className="mt-1.5 font-mono text-xl font-semibold">
             {current && current.req > 0 ? (
@@ -239,7 +239,7 @@ export default function Dashboard(): JSX.Element {
             <p className="text-xs text-muted-foreground">
               <span className="has-tip" data-tip="Median time to first token · half of requests were faster">Median TTFT</span>
             </p>
-            <i data-lucide="clock" className="size-3.5 text-muted-foreground"></i>
+            <ClockIcon className="size-3.5 text-muted-foreground" />
           </div>
           <p className="mt-1.5 font-mono text-xl font-semibold">
             {current?.ttft_p50_ms ? (
@@ -257,7 +257,7 @@ export default function Dashboard(): JSX.Element {
             <p className="text-xs text-muted-foreground">
               <span className="has-tip" data-tip="Output tokens streamed per second across all models">Throughput</span>
             </p>
-            <i data-lucide="trending-up" className="size-3.5 text-muted-foreground"></i>
+            <TrendingUpIcon className="size-3.5 text-muted-foreground" />
           </div>
           <p className="mt-1.5 font-mono text-xl font-semibold">
             {current?.tok_per_sec ? (
@@ -273,7 +273,7 @@ export default function Dashboard(): JSX.Element {
         <div className="col-span-2 rounded-lg border bg-card p-4 shadow-sm lg:col-span-1">
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">Errors {weekly ? "7d" : "24h"}</p>
-            <i data-lucide="shield-alert" className="size-3.5 text-muted-foreground"></i>
+            <ShieldAlertIcon className="size-3.5 text-muted-foreground" />
           </div>
           <p className="mt-1.5 font-mono text-xl font-semibold">
             {fmtInt(current?.err ?? 0)}

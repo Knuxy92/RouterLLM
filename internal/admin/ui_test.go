@@ -55,12 +55,13 @@ func firstHashedAsset(t *testing.T) string {
 		if err != nil {
 			continue
 		}
-		for _, entry := range entries {
-			if strings.Contains(entry.Name(), "-") {
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.Contains(entry.Name(), ".") {
+					continue
+				}
 				prefix := strings.TrimPrefix(dir, "dist/")
 				return prefix + "/" + entry.Name()
 			}
-		}
 	}
 
 	t.Fatal("no hashed embedded asset found")

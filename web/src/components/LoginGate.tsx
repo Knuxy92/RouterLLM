@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react"
 import { api } from "../lib/api"
 import { adminStore } from "../lib/store"
+import { KeyRoundIcon, WaypointsIcon } from "./icons"
 
 const AUTHED_EVENT = "routerllm:authed"
 const UNAUTHORIZED_EVENT = "routerllm:unauthorized"
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
 
 function showShell() {
   document.querySelector("#page-login")?.classList.add("hidden")
@@ -30,10 +26,6 @@ export default function LoginGate() {
   const [error, setError] = useState("")
   const [visible, setVisible] = useState(true)
   const secretRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    refreshIcons()
-  })
 
   useEffect(() => {
     let active = true
@@ -114,7 +106,7 @@ export default function LoginGate() {
           <div className="w-full max-w-sm">
             <div className="mb-6 flex flex-col items-center gap-2">
               <div className="flex size-11 items-center justify-center rounded-lg border bg-background shadow-sm">
-                <i data-lucide="waypoints" className="size-5"></i>
+                <WaypointsIcon className="size-5" />
               </div>
               <h1 className="text-lg font-semibold tracking-tight">RouterLLM</h1>
               <p className="text-sm text-muted-foreground">
@@ -127,10 +119,7 @@ export default function LoginGate() {
                 <div className="flex flex-col gap-2">
                   <label htmlFor="token" className="text-sm font-medium">Admin secret</label>
                   <div className="relative">
-                    <i
-                      data-lucide="key-round"
-                      className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                    ></i>
+                    <KeyRoundIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       id="token"
                       name="token"

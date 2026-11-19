@@ -1,9 +1,5 @@
 import { useEffect, type ReactNode } from "react"
-
-function refreshIcons() {
-  const lucide = (window as unknown as { lucide?: { createIcons(): void } }).lucide
-  lucide?.createIcons()
-}
+import { XIcon } from "../icons"
 
 interface DrawerProps {
   open: boolean
@@ -13,10 +9,6 @@ interface DrawerProps {
 }
 
 export default function Drawer({ open, onClose, title, children }: DrawerProps) {
-  useEffect(() => {
-    refreshIcons()
-  })
-
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -46,7 +38,7 @@ export default function Drawer({ open, onClose, title, children }: DrawerProps) 
             className="rounded-md border p-1.5 hover:bg-accent"
             onClick={onClose}
           >
-            <i data-lucide="x" className="size-4"></i>
+            <XIcon className="size-4" />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
