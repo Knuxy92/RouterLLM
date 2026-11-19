@@ -77,6 +77,9 @@ system_prompt_file: system_prompt.txt  # prepend this file's content as a system
 #     max_sessions: 100
 #     max_challenges: 1000
 #     json_body_bytes: 1048576
+#     models:
+#       timeout_seconds: 10          # per-provider model catalog fetch timeout
+#       body_bytes: 4194304          # 4 MiB cap on catalog response body
 #     test:                          # provider-test panel, also served to the console
 #       prompt_bytes: 4000
 #       max_tokens: 8192

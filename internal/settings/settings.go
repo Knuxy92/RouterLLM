@@ -82,8 +82,14 @@ type Admin struct {
 	MaxSessions      int           `yaml:"max_sessions"`
 	MaxChallenges    int           `yaml:"max_challenges"`
 	JSONBodyBytes    int           `yaml:"json_body_bytes"`
+	Models           Models        `yaml:"models"`
 	Test             AdminTest     `yaml:"test"`
 	UI               AdminUI       `yaml:"ui"`
+}
+
+type Models struct {
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	BodyBytes      int `yaml:"body_bytes"`
 }
 
 // AdminTest bounds one provider-test run.
@@ -177,6 +183,10 @@ func Default() Settings {
 			MaxSessions:   100,
 			MaxChallenges: 1000,
 			JSONBodyBytes: 1 << 20,
+			Models: Models{
+				TimeoutSeconds: 10,
+				BodyBytes:      4 << 20,
+			},
 			Test: AdminTest{
 				PromptBytes:           4000,
 				MaxTokens:             8192,
@@ -254,6 +264,8 @@ func (s Settings) Validate() error {
 		{"admin.max_sessions", s.Admin.MaxSessions},
 		{"admin.max_challenges", s.Admin.MaxChallenges},
 		{"admin.json_body_bytes", s.Admin.JSONBodyBytes},
+		{"admin.models.timeout_seconds", s.Admin.Models.TimeoutSeconds},
+		{"admin.models.body_bytes", s.Admin.Models.BodyBytes},
 		{"admin.test.prompt_bytes", s.Admin.Test.PromptBytes},
 		{"admin.test.max_tokens", s.Admin.Test.MaxTokens},
 		{"admin.test.default_tokens", s.Admin.Test.DefaultTokens},
