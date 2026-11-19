@@ -94,23 +94,38 @@ export function buildOpenCodeIndex(models: OpenCodeModel[]): Map<string, OpenCod
   return index
 }
 
-function withoutVariant(value: string): string {
+function stripQualitySuffix(value: string): string {
   const colon = value.lastIndexOf(":")
   return colon > 0 ? value.slice(0, colon) : value
+}
+
+function suffixVariants(value: string): string[] {
+  const out = [value]
+  const base = stripQualitySuffix(value)
+  if (base !== value) out.push(base)
+  for (let current = base; ;) {
+    const stripped = current.replace(/-(free|max|thinking|flash)$/i, "")
+    if (stripped === current) break
+    current = stripped
+    if (!out.includes(current)) out.push(current)
+  }
+  return out
 }
 
 export function resolveMetadata(nativeId: string, index: Map<string, OpenCodeModel>): OpenCodeModel | null {
   if (!nativeId) return null
 
-  const base = normalize(nativeId)
-  const exact = index.get(base) ?? index.get(normalize(withoutVariant(nativeId)))
-  if (exact) return exact
+  const variants = suffixVariants(nativeId)
+  for (const variant of variants) {
+    const hit = index.get(normalize(variant))
+    if (hit) return hit
+  }
 
-  const wantedTails = new Set([tail(nativeId), tail(withoutVariant(nativeId))])
+  const wantedTails = new Set(variants.flatMap((variant) => [tail(variant), normalize(variant)]))
   const candidates = new Map<string, OpenCodeModel>()
   for (const model of index.values()) {
-    const modelTail = tail(model.id)
-    if (wantedTails.has(modelTail) || wantedTails.has(tail(withoutVariant(modelTail)))) {
+    const modelTail = tail(stripQualitySuffix(model.id))
+    if (wantedTails.has(modelTail) || [...wantedTails].some((want) => want.length >= 6 && modelTail.endsWith(want))) {
       candidates.set(model.id, model)
     }
   }
@@ -119,10 +134,14 @@ export function resolveMetadata(nativeId: string, index: Map<string, OpenCodeMod
   const rank = (model: OpenCodeModel): number => {
     let score = 0
     if (!model.id.includes(":")) score += 8
-    if (wantedTails.has(normalize(model.id))) score += 4
+    for (const variant of variants) {
+      if (normalize(variant) === normalize(model.id)) score += 6
+      if (tail(variant) === tail(model.id)) score += 4
+    }
     if (model.canonical_model_id && normalize(model.canonical_model_id) === normalize(model.id)) score += 2
     if (model.reasoning_options?.length) score += 1
     if (model.limit?.context) score += 1
+    score -= Math.min(model.id.length, 60) / 1000
     return score
   }
 
