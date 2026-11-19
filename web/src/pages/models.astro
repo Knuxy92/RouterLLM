@@ -1,22 +1,8 @@
 ---
+import ModelsDetail from "../components/ModelsDetail"
 import AppLayout from "../layouts/AppLayout.astro"
 ---
 
 <AppLayout title="Models detail">
-  <section>
-    <h1 class="text-2xl font-semibold tracking-tight">Models detail</h1>
-    <p class="mt-1 text-sm text-muted-foreground">
-      Per-provider model catalogs and fallback chains.
-    </p>
-
-    <div class="mt-5 rounded-lg border bg-card p-10 text-center shadow-sm">
-      <div class="mx-auto mb-3 flex size-10 items-center justify-center rounded-lg border bg-muted/40">
-        <i data-lucide="box" class="size-5 text-muted-foreground"></i>
-      </div>
-      <p class="text-sm font-medium">Models detail — coming in Phase 2</p>
-      <p class="mt-1 text-xs text-muted-foreground">
-        This page is a placeholder. Model management lives under Providers &amp; Models for now.
-      </p>
-    </div>
-  </section>
+  <ModelsDetail client:load />
 </AppLayout>
