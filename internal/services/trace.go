@@ -56,7 +56,6 @@ func (t *RequestTrace) setLastBody(body string) {
 	t.lastBody = body
 }
 
-// LastBody returns the most recent captured upstream error body, if any.
 func (t *RequestTrace) LastBody() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

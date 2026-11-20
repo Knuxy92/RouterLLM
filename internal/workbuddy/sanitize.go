@@ -313,7 +313,6 @@ func SanitizeToolCalls(toolCalls any) any {
 
 func sanitizeToolFunction(fn map[string]any) map[string]any {
 	copied := cloneMap(fn)
-	// A missing arguments key counts as nil, same as the reference.
 	switch v := copied["arguments"].(type) {
 	case string:
 		copied["arguments"] = SanitizeText(v, false)

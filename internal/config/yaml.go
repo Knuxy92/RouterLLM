@@ -11,6 +11,7 @@ import (
 	"routerllm/internal/alysis"
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
+	"routerllm/internal/kilo"
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
 	"routerllm/internal/settings"
@@ -343,11 +344,11 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 	}
 
 	switch yp.Style {
-	case "openai", "anthropic", "cline", "google", "alysis", "codex", "opencode", "workbuddy":
+	case "openai", "anthropic", "cline", "google", "alysis", "codex", "opencode", "workbuddy", "kilo":
 	case "":
-		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, codex, opencode, or workbuddy)", yp.Name)
+		return fmt.Errorf("provider %q: style is required (openai, anthropic, cline, google, alysis, codex, opencode, workbuddy, or kilo)", yp.Name)
 	default:
-		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, codex, opencode, or workbuddy)", yp.Name, yp.Style)
+		return fmt.Errorf("provider %q: unsupported style %q (must be openai, anthropic, cline, google, alysis, codex, opencode, workbuddy, or kilo)", yp.Name, yp.Style)
 	}
 
 	switch yp.AuthMode {
@@ -384,7 +385,7 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 // isAccountStyle reports styles whose credentials come from a login-managed
 // account store instead of api_key.
 func isAccountStyle(style string) bool {
-	return style == "cline" || style == "alysis" || style == "codex" || style == "opencode" || style == "workbuddy"
+	return style == "cline" || style == "alysis" || style == "codex" || style == "opencode" || style == "workbuddy" || style == "kilo"
 }
 
 // accountStyleKeys loads the credentials of an account-backed style's store,
@@ -416,6 +417,12 @@ func accountStyleKeys(style string) (keys []string, path string, ok bool, err er
 			return nil, "", true, err
 		}
 		return store.RefreshTokens(), store.Path(), true, nil
+	case "kilo":
+		store, err := kilo.LoadAccountStore(kilo.DefaultAccountsPath())
+		if err != nil {
+			return nil, "", true, err
+		}
+		return store.GatewayKeys(), store.Path(), true, nil
 	case "workbuddy":
 		store, err := workbuddy.LoadAccountStore(workbuddy.DefaultAccountsPath())
 		if err != nil {

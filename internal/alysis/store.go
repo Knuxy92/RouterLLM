@@ -19,10 +19,6 @@ type Account struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-type accountsFile struct {
-	Accounts []Account `json:"accounts"`
-}
-
 type AccountStore struct {
 	path     string
 	mu       sync.Mutex
@@ -58,8 +54,4 @@ func (s *AccountStore) Add(account Account) error {
 	defer s.mu.Unlock()
 
 	return accounts.Add(accountLabel, s.path, &s.accounts, account, func(a Account) string { return a.GatewayKey })
-}
-
-func (s *AccountStore) persist() error {
-	return accounts.Persist(accountLabel, s.path, s.accounts)
 }

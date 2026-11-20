@@ -30,6 +30,10 @@ services:
       # `routerllm --codex-login` on the host (the file must exist first —
       # a missing host path is auto-created as a directory by Docker).
       # - ./codex-accounts.json:/app/codex-accounts.json:ro
+      # Kilo providers only: mount kilo-accounts.json AFTER running
+      # `routerllm --kilo-login` on the host (the file must exist first —
+      # a missing host path is auto-created as a directory by Docker).
+      # - ./kilo-accounts.json:/app/kilo-accounts.json:ro
       # OpenCode providers only: mount opencode-accounts.json AFTER running
       # `routerllm --opencode-login` on the host (the file must exist first —
       # a missing host path is auto-created as a directory by Docker).

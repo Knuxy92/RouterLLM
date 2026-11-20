@@ -49,7 +49,7 @@ func TestTranslateResponsesRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranslateResponsesRequest: %v", err)
 	}
-	if path != "/responses" {
+	if path != "/v1/responses" {
 		t.Fatalf("path = %q, want /responses", path)
 	}
 

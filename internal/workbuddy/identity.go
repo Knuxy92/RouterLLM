@@ -21,25 +21,6 @@ const (
 	stainlessRuntimeVersion = "v22.21.1"
 )
 
-// MachineID derives the stable per-account X-Machine-ID: the first 32 hex
-// chars of sha256("machine|<uid>|<salt>"). The salt is fixed so the same
-// account always presents the same machine identity.
-func MachineID(uid, salt string) string {
-	return hashedID("machine", uid, salt)
-}
-
-// SessionID derives the stable per-account X-Session-ID, same recipe as
-// MachineID with the "session" prefix.
-func SessionID(uid, salt string) string {
-	return hashedID("session", uid, salt)
-}
-
-func hashedID(kind, uid, salt string) string {
-	sum := sha256.Sum256([]byte(kind + "|" + uid + "|" + salt))
-
-	return hex.EncodeToString(sum[:])[:32]
-}
-
 // UUID7Hex returns a 32-char lowercase hex RFC 9562 UUIDv7: 48-bit unix
 // millisecond timestamp, version 7, 12-bit rand_a, variant 10, 62-bit rand_b.
 // The upstream conversation/request/message ids are this shape without dashes.
@@ -59,9 +40,9 @@ func UUID7Hex() string {
 
 // ConversationID returns a dashed UUID for the X-Conversation-ID family.
 // With a seed it is derived deterministically (sha256 of
-// "conversation|<seed>" with v4 version/variant bits set), so one account's
-// one session always presents the same conversation id instead of a fresh
-// throwaway per request; without a seed it is a fresh UUIDv4.
+// "conversation|<seed>" with v4 version/variant bits set), so the same seed
+// always yields the same conversation id instead of a fresh throwaway per
+// request; without a seed it is a fresh UUIDv4.
 func ConversationID(seed string) string {
 	if seed == "" {
 		return newUUID4()
@@ -124,9 +105,8 @@ type Identity struct {
 	AccessToken string
 	Realm       string
 	Product     string
-	MachineSalt string
-	// SessionKey stabilises the CLI identity's conversation id per
-	// (uid, session); the desktop identity generates a fresh one per request.
+	// SessionKey, when set, folds into the CLI identity's conversation id so
+	// one session keeps a stable id; empty derives it from the uid alone.
 	SessionKey string
 	// TurnID is the per-turn request id every attempt of one user send
 	// reuses; empty means a fresh id is minted here.

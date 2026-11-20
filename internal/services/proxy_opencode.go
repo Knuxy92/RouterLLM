@@ -225,7 +225,6 @@ func clampOpenCodeMaxTokens(body map[string]any, keys ...string) {
 	}
 }
 
-// mergeToolNameRestore folds a second reverse map into the accumulated one.
 func mergeToolNameRestore(dst, src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return dst

@@ -579,6 +579,16 @@
           },
           {
             "properties": {
+              "style": {
+                "const": "kilo"
+              }
+            },
+            "required": [
+              "style"
+            ]
+          },
+          {
+            "properties": {
               "disabled": {
                 "const": true
               }
@@ -614,14 +624,15 @@
             "alysis",
             "codex",
             "opencode",
-            "workbuddy"
+            "workbuddy",
+            "kilo"
           ],
-          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth), opencode (OpenCode Zen account auth via `routerllm --opencode-login`: Console device flow, per-request access tokens, auto x-org-id, required-tool injection, rotating session/request headers), workbuddy (WorkBuddy account auth via `routerllm --workbuddy-login`: browser OAuth, refresh-token pool with singleflight refresh, desktop identity headers, fingerprint sanitize; base_url is the realm host — intl https://www.workbuddy.ai or CN https://copilot.tencent.com — and /v2/chat/completions is appended by the style)."
+          "description": "Provider API style: openai (passthrough), anthropic (translated to /v1/messages), cline (Cline account auth), google (translated to Gemini generateContent), alysis (Alysis gateway account auth), codex (Codex/ChatGPT account auth), opencode (OpenCode Zen account auth via `routerllm --opencode-login`: Console device flow, per-request access tokens, auto x-org-id, required-tool injection, rotating session/request headers), workbuddy (WorkBuddy account auth via `routerllm --workbuddy-login`: browser OAuth, refresh-token pool with singleflight refresh, desktop identity headers, fingerprint sanitize; base_url is the realm host — intl https://www.workbuddy.ai or CN https://copilot.tencent.com — and /v2/chat/completions is appended by the style), kilo (Kilo Code account auth via `routerllm --kilo-login`: OAuth device flow, long-lived token with no refresh, plain OpenAI passthrough to the Kilo gateway, per-account X-KILOCODE-ORGANIZATIONID; base_url https://ai-gateway.kilo.ai/api/v1)."
         },
         "base_url": {
           "type": "string",
           "format": "uri",
-          "description": "Provider base URL. Used verbatim as the upstream prefix (only a trailing / is trimmed): include /v1 yourself for standard OpenAI APIs, or a custom sub-path like https://api.kilo.ai/api/gateway for gateways."
+          "description": "Provider base URL: the upstream origin plus any gateway prefix. A trailing version segment (/v1, /v2, /v1beta) is optional and stripped, because each style appends its own versioned path; e.g. https://api.openai.com and https://api.openai.com/v1 are equivalent, and https://api.kilo.ai/api/gateway works as-is."
         },
         "headers": {
           "$ref": "#/$defs/headers"

@@ -99,7 +99,7 @@ export default function ModelsDetail(): JSX.Element {
       setCatalogModels([])
     }
 
-    const catalogStyles = new Set(["codex", "cline", "workbuddy", "opencode", "alysis"])
+    const catalogStyles = new Set(["codex", "cline", "workbuddy", "opencode", "alysis", "kilo"])
     const providers = (adminStore.getStatus()?.providers ?? []).filter(
       (provider: ProviderStatus) =>
         !provider.disabled && provider.keys_alive > 0 && catalogStyles.has(provider.style),

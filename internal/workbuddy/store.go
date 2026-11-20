@@ -97,7 +97,6 @@ func (s *AccountStore) UID(refreshToken string) string {
 	return jwtUID(account.AccessToken)
 }
 
-// lookup returns the account whose refresh token matches, if any.
 func (s *AccountStore) lookup(refreshToken string) (Account, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

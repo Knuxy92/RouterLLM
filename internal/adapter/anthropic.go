@@ -136,7 +136,7 @@ func TranslateRequestWithResolver(body map[string]any, modelName string, resolve
 	req["stream"] = true
 
 	data, err := json.Marshal(req)
-	return data, "/messages", err
+	return data, "/v1/messages", err
 }
 
 // maxTokenKeys lists the OpenAI token-cap fields accepted on inbound bodies;
@@ -366,8 +366,8 @@ func (b *anthropicToolBlock) arguments() string {
 	return args
 }
 
-// anthropicSink receives the OpenAI-shaped output of the shared Anthropic
-// event core.
+// anthropicSink receives the shared Anthropic event core's semantic events and
+// renders them as OpenAI output.
 type anthropicSink interface {
 	messageMeta(id, model string)
 	messageStart()

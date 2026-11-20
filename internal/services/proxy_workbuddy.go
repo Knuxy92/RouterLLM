@@ -134,7 +134,6 @@ func (p *Proxy) translateWorkbuddyRoute(route provider.Route, routeBody map[stri
 	return json.Marshal(routeBody)
 }
 
-// messagesOf reads the messages array a chat body carries.
 func messagesOf(body map[string]any) []any {
 	msgs, _ := body["messages"].([]any)
 
@@ -157,7 +156,7 @@ func firstRole(msgs []any) string {
 
 // workbuddyThinkingEnabled resolves whether the outbound body turns DeepSeek
 // reasoning on: an explicit thinking.type=enabled, or any effort other than
-// none on a DeepSeek model — the same resolution build_upstream_body applies.
+// none on a DeepSeek model.
 func workbuddyThinkingEnabled(body map[string]any, model string) bool {
 	if len(model) < 8 || model[:8] != "deepseek" {
 		return false

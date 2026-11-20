@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -91,6 +92,38 @@ func NewRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 	return newRegistry(configs, rules, cooldown, nil)
 }
 
+// normalizeBaseURL drops a trailing API version segment (e.g. /v1, /v2,
+// /v1beta) so each style can append its own versioned path without doubling.
+// base_url stays the origin plus any gateway prefix the caller configured.
+func normalizeBaseURL(raw string) string {
+	base := strings.TrimRight(raw, "/")
+	idx := strings.LastIndex(base, "/")
+	if idx >= 0 && isVersionSegment(base[idx+1:]) {
+		return base[:idx]
+	}
+
+	return base
+}
+
+func isVersionSegment(seg string) bool {
+	if len(seg) < 2 || seg[0] != 'v' {
+		return false
+	}
+	i := 1
+	for i < len(seg) && seg[i] >= '0' && seg[i] <= '9' {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
+	switch seg[i:] {
+	case "", "beta", "alpha":
+		return true
+	}
+
+	return false
+}
+
 func Rebuild(configs []config.ProviderConfig, rules []model.Rule, cooldown time.Duration, previous *Registry) *Registry {
 	return newRegistry(configs, rules, cooldown, previous)
 }
@@ -120,7 +153,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 
 		providers[pc.Name] = &Provider{
 			Name:           pc.Name,
-			BaseURL:        pc.BaseURL,
+			BaseURL:        normalizeBaseURL(pc.BaseURL),
 			Style:          pc.Style,
 			Keys:           km,
 			Headers:        pc.Headers,

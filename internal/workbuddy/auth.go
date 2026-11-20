@@ -248,7 +248,6 @@ func (c *Client) callAuth(ctx context.Context, method, endpoint, realm, body str
 	return c.doAuth(req)
 }
 
-// doAuth sends one auth request and returns the raw body and HTTP status.
 func (c *Client) doAuth(req *http.Request) ([]byte, int, error) {
 	resp, err := c.httpClient().Do(req)
 	if err != nil {

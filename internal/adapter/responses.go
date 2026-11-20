@@ -109,7 +109,7 @@ func TranslateResponsesRequest(body map[string]any, modelName string) ([]byte, s
 	req["stream"] = true
 
 	data, err := json.Marshal(req)
-	return data, "/responses", err
+	return data, "/v1/responses", err
 }
 
 // responsesContentItem converts one chat message content into a single
@@ -366,8 +366,8 @@ func responsesFinishReason(ev *responsesEvent) string {
 	return "stop"
 }
 
-// responsesSink receives the OpenAI-shaped output of the shared Responses
-// event core.
+// responsesSink receives the shared Responses event core's semantic events and
+// renders them as OpenAI output.
 type responsesSink interface {
 	created(id string, ts int64)
 	content(delta string)

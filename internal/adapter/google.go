@@ -489,8 +489,8 @@ func mapGoogleFinishReason(reason string) string {
 	}
 }
 
-// googleSink receives the OpenAI-shaped output of the shared Gemini event
-// core.
+// googleSink receives the shared Gemini event core's semantic events and
+// renders them as OpenAI output.
 type googleSink interface {
 	// upstreamError handles an error object embedded in a Gemini chunk. It
 	// reports whether the rest of the chunk is dropped and whether iteration

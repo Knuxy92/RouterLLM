@@ -26,7 +26,6 @@ func newMediaBudget() *mediaBudget {
 	return &mediaBudget{limit: settings.Current().Limits.Media}
 }
 
-// reserveRef claims one reference slot.
 func (b *mediaBudget) reserveRef() error {
 	if b.refs >= b.limit.RefsPerRequest {
 		return fmt.Errorf("media budget exceeded: more than %d references per request", b.limit.RefsPerRequest)
@@ -49,17 +48,6 @@ func (b *mediaBudget) fetchLimit() int {
 
 func (b *mediaBudget) consume(n int) {
 	b.bytes += n
-}
-
-// wireFilesPath returns the files-collection prefix for provider-relative
-// media fetches. Providers with an opaque base_url (openai/anthropic) address
-// it without the /v1 prefix; every other style keeps the legacy path.
-func wireFilesPath(pv *provider.Provider) string {
-	if pv.Style == "openai" || pv.Style == "anthropic" {
-		return "/files"
-	}
-
-	return "/v1/files"
 }
 
 // mediaResolver resolves a client media reference for an anthropic-style
@@ -86,7 +74,7 @@ func (p *Proxy) mediaResolver(pv *provider.Provider) adapter.MediaResolver {
 			return nil, "", err
 		}
 
-		return p.fetchMedia(pv, pv.BaseURL+wireFilesPath(pv)+"/"+url.PathEscape(reference)+"/content", budget)
+		return p.fetchMedia(pv, pv.BaseURL+"/v1/files/"+url.PathEscape(reference)+"/content", budget)
 	}
 }
 

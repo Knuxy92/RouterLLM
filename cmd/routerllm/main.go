@@ -63,6 +63,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "--kilo-login" {
+		if err := runKiloLogin(); err != nil {
+			log.Fatalf("kilo login failed: %v", err)
+		}
+		return
+	}
+
 	var operationalOut io.Writer = os.Stdout
 	var logFile *os.File
 	if lf := os.Getenv("ROUTERLLM_LOG_FILE"); lf != "" {
