@@ -113,7 +113,7 @@ func TestForwardOpenCodeUsesAccountTokenNotPoolKey(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/device/token", opencodeTokenHandler(t, &refreshes))
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		orgID = r.Header.Get("X-Org-Id")
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -150,7 +150,7 @@ func TestForwardOpenCodeOmitsOrgHeaderWithoutOrg(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/device/token", opencodeTokenHandler(t, &refreshes))
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		_, orgSeen = r.Header["X-Org-Id"]
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, opencodeChatSSE)
@@ -180,7 +180,7 @@ func TestForwardRawRefreshesOpencodeTokenOnUnauthorized(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/device/token", opencodeSequencedTokenHandler(t, &refreshes))
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
 		if attempts == 1 {

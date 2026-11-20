@@ -201,14 +201,9 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	return nil, nil, nil, lastErr
 }
 
-// wirePath maps the inbound /v1-prefixed path to the outbound wire path for
-// providers whose base_url is an opaque prefix (style openai/anthropic).
-// All other styles keep the inbound path verbatim.
-func wirePath(pv *provider.Provider, path string) string {
-	if pv.Style != "openai" && pv.Style != "anthropic" {
-		return path
-	}
-
+// wirePath strips the inbound /v1 prefix so the outbound path is relative to
+// the provider's base_url, which carries the version prefix.
+func wirePath(path string) string {
 	return strings.TrimPrefix(path, "/v1")
 }
 
@@ -277,10 +272,10 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 				}
 				applyReasoningDialect(routeBody, pv.ReasoningStyle)
 			}
-			p.injectStreamUsage(routeBody, path)
-			reqBody, err = json.Marshal(routeBody)
-			reqPath = "/v1/chat/completions"
-		case "messages":
+		p.injectStreamUsage(routeBody, path)
+		reqBody, err = json.Marshal(routeBody)
+		reqPath = "/chat/completions"
+	case "messages":
 			canonicalizeReasoning(routeBody, route.Defaults)
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
@@ -336,7 +331,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		sessionID = cline.PrepareBody(routeBody)
 		p.injectStreamUsage(routeBody, path)
 		reqBody, err = json.Marshal(routeBody)
-		reqPath = path
+		reqPath = wirePath(path)
 	case "workbuddy":
 		reqBody, err = p.translateWorkbuddyRoute(route, routeBody)
 		reqPath = workbuddy.ChatPath
@@ -363,7 +358,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 			routeBody["model"] = route.ModelName
 			applyLegacyDefaults(routeBody, route.Defaults)
 			reqBody, err = json.Marshal(routeBody)
-			reqPath = wirePath(pv, path)
+			reqPath = wirePath(path)
 		} else {
 			canonicalizeReasoning(routeBody, route.Defaults)
 			reqBody, reqPath, err = adapter.TranslateResponsesRequest(routeBody, route.ModelName)
@@ -380,7 +375,7 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 		p.injectStreamUsage(routeBody, path)
 		reqBody, err = json.Marshal(routeBody)
-		reqPath = wirePath(pv, path)
+		reqPath = wirePath(path)
 	}
 
 	return reqBody, reqPath, sessionID, toolNameRestore, err

@@ -93,7 +93,7 @@ func (p *Proxy) clineModels(ctx context.Context, pv *provider.Provider, key stri
 		return "", nil, err
 	}
 
-	req, err := newCatalogRequest(ctx, pv, pv.BaseURL+"/v1/ai/cline/recommended-models")
+	req, err := newCatalogRequest(ctx, pv, pv.BaseURL+"/ai/cline/recommended-models")
 	if err != nil {
 		return "", nil, err
 	}
@@ -158,7 +158,7 @@ func (p *Proxy) workbuddyModels(ctx context.Context, pv *provider.Provider, key 
 }
 
 func (p *Proxy) fallbackModels(ctx context.Context, pv *provider.Provider, key string) (string, []string, error) {
-	req, err := newCatalogRequest(ctx, pv, pv.BaseURL+"/v1/models")
+	req, err := newCatalogRequest(ctx, pv, pv.BaseURL+"/models")
 	if err != nil {
 		return "", nil, err
 	}
