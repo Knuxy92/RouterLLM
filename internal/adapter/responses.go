@@ -109,7 +109,7 @@ func TranslateResponsesRequest(body map[string]any, modelName string) ([]byte, s
 	req["stream"] = true
 
 	data, err := json.Marshal(req)
-	return data, "/responses", err
+	return data, "/v1/responses", err
 }
 
 // responsesContentItem converts one chat message content into a single

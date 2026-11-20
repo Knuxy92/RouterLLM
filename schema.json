@@ -632,7 +632,7 @@
         "base_url": {
           "type": "string",
           "format": "uri",
-          "description": "Provider base URL. Used verbatim as the upstream prefix (only a trailing / is trimmed): include /v1 yourself for standard OpenAI APIs, or a custom sub-path like https://api.kilo.ai/api/gateway for gateways."
+          "description": "Provider base URL: the upstream origin plus any gateway prefix. A trailing version segment (/v1, /v2, /v1beta) is optional and stripped, because each style appends its own versioned path; e.g. https://api.openai.com and https://api.openai.com/v1 are equivalent, and https://api.kilo.ai/api/gateway works as-is."
         },
         "headers": {
           "$ref": "#/$defs/headers"

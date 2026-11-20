@@ -217,7 +217,7 @@ long-lived token in `kilo-accounts.json` next to the executable (`0600`). Overri
 with `KILO_ACCOUNTS_FILE`. Tokens do not expire within a year and need no refresh. When the
 account belongs to an organization, RouterLLM sends `X-KILOCODE-ORGANIZATIONID` automatically.
 The API base is `KILO_API_URL` (default `https://api.kilo.ai`) and the gateway is
-`KILO_AI_GATEWAY_URL` (default `https://ai-gateway.kilo.ai/api/v1`). Run the command again to add
+`KILO_AI_GATEWAY_URL` (default `https://ai-gateway.kilo.ai/api`). Run the command again to add
 more accounts — they rotate through the normal key manager.
 
 The example config ships the kilo provider **commented out**: uncomment the provider and its

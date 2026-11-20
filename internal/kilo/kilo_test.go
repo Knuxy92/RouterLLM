@@ -201,7 +201,7 @@ func TestFetchProfileAndGatewayModelsURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &Client{HTTPClient: server.Client(), APIBase: server.URL, GatewayBase: "https://gateway.example/api/v1"}
+	client := &Client{HTTPClient: server.Client(), APIBase: server.URL, GatewayBase: "https://gateway.example/api"}
 	profile, err := client.FetchProfile(context.Background(), "tok_live")
 	if err != nil {
 		t.Fatal(err)

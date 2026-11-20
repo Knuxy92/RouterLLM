@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultAPIBase     = "https://api.kilo.ai"
-	defaultGatewayBase = "https://ai-gateway.kilo.ai/api/v1"
+	defaultGatewayBase = "https://ai-gateway.kilo.ai/api"
 	devicePollInterval = 3 * time.Second
 	defaultExpiresIn   = 600
 )
@@ -70,7 +70,7 @@ func (c *Client) gatewayBase() string {
 		return strings.TrimRight(fromEnv, "/")
 	}
 	if apiURL := os.Getenv("KILO_API_URL"); apiURL != "" {
-		return strings.TrimRight(apiURL, "/") + "/api/gateway/v1"
+		return strings.TrimRight(apiURL, "/") + "/api/gateway"
 	}
 
 	return defaultGatewayBase
@@ -206,10 +206,10 @@ func (c *Client) FetchProfile(ctx context.Context, token string) (Profile, error
 func (c *Client) GatewayModelsURL(orgID string) string {
 	base := c.gatewayBase()
 	if orgID != "" {
-		return base + "/organizations/" + url.PathEscape(orgID) + "/models"
+		return base + "/v1/organizations/" + url.PathEscape(orgID) + "/models"
 	}
 
-	return base + "/models"
+	return base + "/v1/models"
 }
 
 func (c *Client) postJSON(ctx context.Context, endpoint string, body []byte) (*http.Response, error) {
