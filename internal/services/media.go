@@ -26,7 +26,6 @@ func newMediaBudget() *mediaBudget {
 	return &mediaBudget{limit: settings.Current().Limits.Media}
 }
 
-// reserveRef claims one reference slot.
 func (b *mediaBudget) reserveRef() error {
 	if b.refs >= b.limit.RefsPerRequest {
 		return fmt.Errorf("media budget exceeded: more than %d references per request", b.limit.RefsPerRequest)

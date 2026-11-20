@@ -415,7 +415,8 @@ func (e *codexEvent) responseError() *codexError {
 	return e.Response.Error
 }
 
-// codexSink receives the OpenAI-shaped output of the shared Codex event core.
+// codexSink receives the shared Codex event core's semantic events and renders
+// them as OpenAI output.
 type codexSink interface {
 	delta(model.Delta)
 	finish(finishReason string, usage json.RawMessage)

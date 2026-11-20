@@ -134,7 +134,6 @@ func (p *Proxy) translateWorkbuddyRoute(route provider.Route, routeBody map[stri
 	return json.Marshal(routeBody)
 }
 
-// messagesOf reads the messages array a chat body carries.
 func messagesOf(body map[string]any) []any {
 	msgs, _ := body["messages"].([]any)
 

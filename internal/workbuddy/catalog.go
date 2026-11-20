@@ -137,7 +137,6 @@ func parseAgentModels(raw json.RawMessage) []string {
 	return ids
 }
 
-// parseModelIDs reads the rich data.models array of objects and returns their ids.
 func parseModelIDs(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
@@ -160,7 +159,7 @@ func parseModelIDs(raw json.RawMessage) []string {
 	return ids
 }
 
-// CatalogClient is a convenience constructor for one-shot catalog pulls.
+// CatalogClient returns a Client with the given request timeout.
 func CatalogClient(timeout time.Duration) *Client {
 	return &Client{HTTPClient: &http.Client{Timeout: timeout}}
 }

@@ -26,7 +26,6 @@ import (
 )
 
 const (
-	// googleAPIKeyHeader carries Google-style credentials.
 	googleAPIKeyHeader = "x-goog-api-key"
 )
 

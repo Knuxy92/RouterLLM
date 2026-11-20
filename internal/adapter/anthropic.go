@@ -366,8 +366,8 @@ func (b *anthropicToolBlock) arguments() string {
 	return args
 }
 
-// anthropicSink receives the OpenAI-shaped output of the shared Anthropic
-// event core.
+// anthropicSink receives the shared Anthropic event core's semantic events and
+// renders them as OpenAI output.
 type anthropicSink interface {
 	messageMeta(id, model string)
 	messageStart()
