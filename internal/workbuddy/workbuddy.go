@@ -32,10 +32,6 @@ const (
 	// AuthStatePath and AuthTokenPath back the browser OAuth login.
 	AuthStatePath = "/v2/plugin/auth/state"
 	AuthTokenPath = "/v2/plugin/auth/token"
-
-	// DefaultMachineSalt seeds the per-account machine/session ids; the salt
-	// is fixed so the same account always presents the same identity.
-	DefaultMachineSalt = "workbuddy-routerllm"
 )
 
 // RealmHosts returns the chat base URL, origin and domain for a realm.

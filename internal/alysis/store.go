@@ -19,10 +19,6 @@ type Account struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-type accountsFile struct {
-	Accounts []Account `json:"accounts"`
-}
-
 type AccountStore struct {
 	path     string
 	mu       sync.Mutex

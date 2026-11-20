@@ -30,7 +30,6 @@ const OrgHeaderLower = "x-kilocode-organizationid"
 type DeviceAuth struct {
 	Code            string `json:"code"`
 	UserCode        string `json:"user_code"`
-	DeviceCode      string `json:"device_code"`
 	VerificationURL string `json:"verificationUrl"`
 	ExpiresIn       int    `json:"expiresIn"`
 }
@@ -40,9 +39,7 @@ type Profile struct {
 		Email string `json:"email"`
 		Name  string `json:"name"`
 	} `json:"user"`
-	Organizations          []json.RawMessage `json:"organizations"`
-	SelectedOrganizationID string            `json:"selectedOrganizationId"`
-	HasPersonalAccount     bool              `json:"hasPersonalAccount"`
+	SelectedOrganizationID string `json:"selectedOrganizationId"`
 }
 
 type Client struct {
@@ -88,7 +85,7 @@ func (c *Client) httpClient() *http.Client {
 }
 
 // RequestDeviceAuth starts the RFC 8628 flow. The returned Code is the short
-// code used for polling; DeviceCode is only an identifier for the browser step.
+// code used for polling.
 func (c *Client) RequestDeviceAuth(ctx context.Context) (DeviceAuth, error) {
 	endpoint := c.apiBase() + "/api/device-auth/codes"
 	resp, err := c.postJSON(ctx, endpoint, []byte("{}"))
