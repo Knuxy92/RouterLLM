@@ -70,13 +70,13 @@ func TestListProviderModelsCline(t *testing.T) {
 	var gotPath, gotClientType string
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 			"accessToken": "access-1",
 			"expiresAt":   time.Now().Add(time.Hour).UnixMilli(),
 		}})
 	})
-	mux.HandleFunc("/ai/cline/recommended-models", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/ai/cline/recommended-models", func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotClientType = r.Header.Get("X-CLIENT-TYPE")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -95,7 +95,7 @@ func TestListProviderModelsCline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if gotPath != "/ai/cline/recommended-models" {
+	if gotPath != "/v1/ai/cline/recommended-models" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if gotClientType != "cline-sdk" {
@@ -174,8 +174,8 @@ func TestListProviderModelsFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if gotPath != "/models" {
-		t.Errorf("path = %q, want /models", gotPath)
+	if gotPath != "/v1/models" {
+		t.Errorf("path = %q, want /v1/models", gotPath)
 	}
 	if gotAuth != "Bearer k1" {
 		t.Errorf("authorization = %q, want Bearer k1", gotAuth)

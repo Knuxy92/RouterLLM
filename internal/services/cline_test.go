@@ -36,13 +36,13 @@ func TestForwardRawSendsClineHeadersAndSession(t *testing.T) {
 	var gotBody map[string]any
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 			"accessToken": "access-1",
 			"expiresAt":   time.Now().Add(time.Hour).UnixMilli(),
 		}})
 	})
-	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Clone()
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 
@@ -98,14 +98,14 @@ func TestForwardRawRefreshesClineTokenOnUnauthorized(t *testing.T) {
 	attempts := 0
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
 		refreshes++
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 			"accessToken": "access-" + string(rune('0'+refreshes)),
 			"expiresAt":   time.Now().Add(time.Hour).UnixMilli(),
 		}})
 	})
-	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		if attempts == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -145,7 +145,7 @@ func TestForwardRawRotatesClineAccountsAfterUnauthorized(t *testing.T) {
 	seen := map[string]int{}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
@@ -153,7 +153,7 @@ func TestForwardRawRotatesClineAccountsAfterUnauthorized(t *testing.T) {
 			"expiresAt":   time.Now().Add(time.Hour).UnixMilli(),
 		}})
 	})
-	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer workos:access-for-")
 		seen[token]++
 		if token == "refresh-1" {

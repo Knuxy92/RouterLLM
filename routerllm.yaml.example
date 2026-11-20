@@ -123,11 +123,11 @@ providers:
   # These are common API gateways. You must still specify style + base_url
   # (shown as comments for reference).
   #
-  # base_url is the full upstream prefix, so include the version segment:
+  # Gateways on a custom sub-path need no /v1:
   # - name: kilo
   #   api_key: ${KILO_API_KEY}
   #   style: openai
-  #   base_url: https://api.kilo.ai/api/gateway/v1
+  #   base_url: https://api.kilo.ai/api/gateway
 
   - name: agentrouter
     api_key: ${AGENT_ROUTER_API_KEY}
@@ -158,7 +158,7 @@ providers:
 
   - name: opencode
     style: opencode
-    base_url: https://opencode.ai/inference/openai/v1
+    base_url: https://opencode.ai/inference/openai
     headers:
       Content-Type: application/json
 
@@ -239,7 +239,7 @@ providers:
   #
   # - name: cline
   #   style: cline
-  #   base_url: https://api.cline.bot/api/v1
+  #   base_url: https://api.cline.bot/api
 
   # --- Alysis free models ---
   # Commented out on purpose: an ENABLED alysis provider refuses to start until

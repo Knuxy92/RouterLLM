@@ -18,7 +18,7 @@ func (p *Proxy) clineAccessToken(ctx context.Context, baseURL, refreshToken stri
 		}
 		manager = cline.NewManager(&cline.Client{
 			HTTPClient: p.client,
-			Endpoints:  cline.Endpoints{Refresh: baseURL + "/auth/refresh"},
+			Endpoints:  cline.Endpoints{Refresh: baseURL + "/v1/auth/refresh"},
 		}, store)
 		p.clineManagers[baseURL] = manager
 	}

@@ -119,7 +119,7 @@ directory, which then breaks both the login and the account loader.
 providers:
   - name: cline
     style: cline
-    base_url: https://api.cline.bot/api/v1
+    base_url: https://api.cline.bot/api
 
 routes:
   - model_id: cline-free/glm-5.2

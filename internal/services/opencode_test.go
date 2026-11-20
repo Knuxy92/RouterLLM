@@ -326,8 +326,8 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
 			return
 		}
-		if r.URL.Path != "/chat/completions" {
-			t.Errorf("path = %q, want /chat/completions", r.URL.Path)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %q, want /v1/chat/completions", r.URL.Path)
 		}
 		assertOpenCodeHeaders(t, r)
 
@@ -560,8 +560,8 @@ func TestForwardOpenCodeDefaultsToChat(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
 			return
 		}
-		if r.URL.Path != "/chat/completions" {
-			t.Errorf("path = %q, want /chat/completions (default dialect)", r.URL.Path)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %q, want /v1/chat/completions (default dialect)", r.URL.Path)
 		}
 		assertOpenCodeHeaders(t, r)
 
