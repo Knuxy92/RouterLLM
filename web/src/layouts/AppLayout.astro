@@ -32,6 +32,9 @@ const activeSlug = Astro.url.pathname.replace(/\/$/, "").split("/").pop() || "da
         if (localStorage.getItem("routerllm.admin.theme") === "dark") {
           document.documentElement.classList.add("dark")
         }
+        if (localStorage.getItem("routerllm.admin.session")) {
+          document.documentElement.classList.add("authed")
+        }
       } catch (_) {}
     </script>
     <script is:inline src={base + "vendor/lucide.min.js"}></script>

@@ -98,6 +98,12 @@
   }
 }
 
+/* Pre-hydration auth paint: a valid session shows the shell immediately and
+   keeps the login form hidden, so navigating between pages never flashes it.
+   The class is set by an inline script in <head> before first paint. */
+html.authed #page-login { display: none; }
+html.authed #app { display: block; }
+
 /* --- component classes (verbatim from the wireframe) ---------------------- */
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }

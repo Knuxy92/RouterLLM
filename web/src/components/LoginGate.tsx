@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react"
-import { api } from "../lib/api"
+import { api, getToken } from "../lib/api"
 import { adminStore } from "../lib/store"
 import { KeyRoundIcon, WaypointsIcon } from "./icons"
 
 const AUTHED_EVENT = "routerllm:authed"
 const UNAUTHORIZED_EVENT = "routerllm:unauthorized"
 
+type Gate = "login" | "app"
+
 function showShell() {
+  document.documentElement.classList.add("authed")
   document.querySelector("#page-login")?.classList.add("hidden")
   document.querySelector("#app")?.classList.remove("hidden")
 }
 
 function showLogin(message = "") {
+  document.documentElement.classList.remove("authed")
   document.querySelector("#app")?.classList.add("hidden")
   document.querySelector("#page-login")?.classList.remove("hidden")
   const error = document.querySelector<HTMLElement>("#login-error")
@@ -24,7 +28,7 @@ function showLogin(message = "") {
 export default function LoginGate() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const [visible, setVisible] = useState(true)
+  const [gate, setGate] = useState<Gate>("login")
   const secretRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -32,7 +36,7 @@ export default function LoginGate() {
 
     const reveal = () => {
       if (!active) return
-      setVisible(false)
+      setGate("app")
       showShell()
       void adminStore.init().then(() => adminStore.startPolling())
       window.dispatchEvent(new Event(AUTHED_EVENT))
@@ -43,7 +47,7 @@ export default function LoginGate() {
         event instanceof CustomEvent && typeof event.detail === "string"
           ? event.detail
           : "Session expired — sign in again"
-      setVisible(true)
+      setGate("login")
       setError(message)
       showLogin(message)
     }
@@ -60,12 +64,14 @@ export default function LoginGate() {
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     document.querySelector("#signout-btn")?.addEventListener("click", onSignOut)
 
-    api.status().then(reveal).catch(() => {
-      if (active) {
-        setVisible(true)
-        showLogin()
-      }
-    })
+    if (getToken()) {
+      api.status().then(reveal).catch(() => {
+        if (active) {
+          setGate("login")
+          showLogin()
+        }
+      })
+    }
 
     return () => {
       active = false
@@ -84,7 +90,7 @@ export default function LoginGate() {
     try {
       await api.login(secret)
       if (secretRef.current) secretRef.current.value = ""
-      setVisible(false)
+      setGate("app")
       showShell()
       void adminStore.init().then(() => adminStore.startPolling())
       window.dispatchEvent(new Event(AUTHED_EVENT))
@@ -98,7 +104,7 @@ export default function LoginGate() {
 
   return (
     <>
-      {visible && (
+      {gate === "login" && (
         <div
           id="page-login"
           className="flex min-h-dvh items-center justify-center bg-muted/40 px-4"
