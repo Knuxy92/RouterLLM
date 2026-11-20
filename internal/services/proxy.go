@@ -11,6 +11,7 @@ import (
 
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
+	"routerllm/internal/kilo"
 	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
 	"routerllm/internal/quota"
@@ -42,8 +43,9 @@ var clientCredentialHeaders = map[string]bool{
 	googleAPIKeyHeader:    true,
 	"cookie":              true,
 	"cookie2":             true,
-	"proxy-authorization": true,
-	"accept-encoding":     true,
+	"proxy-authorization":       true,
+	"accept-encoding":           true,
+	kilo.OrgHeaderLower:         true,
 }
 
 type Proxy struct {
@@ -100,7 +102,6 @@ func (p *Proxy) SetTelemetry(s *telemetry.Store) {
 	p.telemetry.Store(s)
 }
 
-// recordTelemetry fills the common fields and hands the event to the store.
 func (p *Proxy) recordTelemetry(e telemetry.Event) {
 	p.telemetry.Load().Record(e)
 }

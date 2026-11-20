@@ -15,6 +15,7 @@ import (
 	"routerllm/internal/audit"
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
+	"routerllm/internal/kilo"
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
 	"routerllm/internal/provider"
@@ -201,13 +202,6 @@ func (p *Proxy) ForwardRaw(path string, r *http.Request, body map[string]any) (*
 	return nil, nil, nil, lastErr
 }
 
-// translateRoute builds the outbound body and request path for one route leg:
-// it folds the route defaults and the provider's reasoning dialect into
-// routeBody (mutated in place) and translates it into the leg's wire dialect
-// (the explicit stylecall when set, otherwise the provider style's native
-// dialect). Shared by ForwardRaw and the admin test runner. The returned
-// reverse map restores sanitized tool names on the way back; it is nil when the
-// leg leaves tool names untouched.
 // wirePath maps the inbound /v1-prefixed path to the outbound wire path for
 // providers whose base_url is an opaque prefix (style openai/anthropic).
 // All other styles keep the inbound path verbatim.
@@ -219,6 +213,13 @@ func wirePath(pv *provider.Provider, path string) string {
 	return strings.TrimPrefix(path, "/v1")
 }
 
+// translateRoute builds the outbound body and request path for one route leg:
+// it folds the route defaults and the provider's reasoning dialect into
+// routeBody (mutated in place) and translates it into the leg's wire dialect
+// (the explicit stylecall when set, otherwise the provider style's native
+// dialect). Shared by ForwardRaw and the admin test runner. The returned
+// reverse map restores sanitized tool names on the way back; it is nil when the
+// leg leaves tool names untouched.
 func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path string, routeBody map[string]any) (reqBody []byte, reqPath string, sessionID string, toolNameRestore map[string]string, err error) {
 	if dedupe := route.DedupeTools || p.dedupeTools.Load(); dedupe || route.SanitizeToolNames {
 		restore, dropped := processToolNames(routeBody, dedupe, route.SanitizeToolNames)
@@ -727,6 +728,11 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				}
 				opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID(), orgID)
 				req.Header.Set("Authorization", "Bearer "+token)
+			} else if pv.Style == "kilo" {
+				applyAuthHeaders(req.Header, key, pv.AuthMode)
+				if orgID := p.kiloOrg(key); orgID != "" {
+					req.Header.Set(kilo.OrgHeader, orgID)
+				}
 			} else {
 				applyAuthHeaders(req.Header, key, pv.AuthMode)
 			}

@@ -256,6 +256,54 @@ routes:
 	}
 }
 
+func TestLoadYAMLKiloProviderReadsAccountsFile(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "kilo-accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"accounts":[{"accountId":"acc_1","token":"tok_test1234","organizationId":"org-1","createdAt":"2026-01-01T00:00:00Z"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KILO_ACCOUNTS_FILE", accounts)
+
+	path := writeTempYAML(t, `
+providers:
+  - name: kilo
+    style: kilo
+    base_url: https://ai-gateway.kilo.ai/api/v1
+routes:
+  - model_id: kilo-model
+    routes:
+      - provider: kilo
+        model: kilo-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || len(cfg.Providers[0].Keys) != 1 || cfg.Providers[0].Keys[0] != "tok_test1234" {
+		t.Fatalf("providers = %#v", cfg.Providers)
+	}
+}
+
+func TestLoadYAMLKiloProviderWithoutAccountsFails(t *testing.T) {
+	t.Setenv("KILO_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: kilo
+    style: kilo
+    base_url: https://ai-gateway.kilo.ai/api/v1
+routes:
+  - model_id: kilo-model
+    routes:
+      - provider: kilo
+        model: kilo-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "no kilo accounts found") {
+		t.Fatalf("error = %v, want 'no kilo accounts found'", err)
+	}
+}
+
 func TestLoadYAMAlysisProviderAPIKeyWins(t *testing.T) {
 	t.Setenv("ALYSIS_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
 

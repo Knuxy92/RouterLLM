@@ -200,8 +200,6 @@ func (p *Proxy) finishTestFailure(start time.Time, ctx context.Context, pv *prov
 	p.finishTestEvent(start, pv, result, "", "")
 }
 
-// bufferedTestContent drains the upstream SSE stream into the assistant text of
-// the assembled chat.completion response, per wire dialect.
 // bufferToOpenAI drains one SSE dialect into the assembled OpenAI document.
 var bufferToOpenAI = map[string]func(io.Reader, string) ([]byte, error){
 	"messages":  adapter.BufferAnthropicToOpenAI,
@@ -210,6 +208,8 @@ var bufferToOpenAI = map[string]func(io.Reader, string) ([]byte, error){
 	"codex":     adapter.BufferCodexToOpenAI,
 }
 
+// bufferedTestContent drains the upstream SSE stream into the assistant text of
+// the assembled chat.completion response, per wire dialect.
 func bufferedTestContent(body io.Reader, dialect, modelName string) (string, error) {
 	if bufferFn, ok := bufferToOpenAI[dialect]; ok {
 		data, err := bufferFn(body, modelName)

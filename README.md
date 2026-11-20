@@ -37,8 +37,8 @@ FREEMODEL_API_KEY=key1,key2
 ```
 
 OpenCode needs no API key: run `routerllm --opencode-login` (same for
-`--cline-login`, `--codex-login`, `--alysis-login`) to create the account file
-before starting.
+`--cline-login`, `--codex-login`, `--alysis-login`, `--workbuddy-login`, and
+`--kilo-login`) to create the account file before starting.
 
 `.env` is loaded automatically at startup. Real environment variables take precedence over `.env`.
 
@@ -201,6 +201,40 @@ routes:
     routes:
       - provider: codex
         model: gpt-5.6-codex
+```
+
+### Kilo Code accounts
+
+`style: kilo` authenticates with a Kilo Code account via the OAuth device flow and proxies the
+Kilo gateway as plain OpenAI-compatible chat. Log in first:
+
+```bash
+routerllm --kilo-login
+```
+
+The command prints a verification URL and user code, polls for approval, then stores the
+long-lived token in `kilo-accounts.json` next to the executable (`0600`). Override the location
+with `KILO_ACCOUNTS_FILE`. Tokens do not expire within a year and need no refresh. When the
+account belongs to an organization, RouterLLM sends `X-KILOCODE-ORGANIZATIONID` automatically.
+The API base is `KILO_API_URL` (default `https://api.kilo.ai`) and the gateway is
+`KILO_AI_GATEWAY_URL` (default `https://ai-gateway.kilo.ai/api/v1`). Run the command again to add
+more accounts — they rotate through the normal key manager.
+
+The example config ships the kilo provider **commented out**: uncomment the provider and its
+route only after `--kilo-login` has created the accounts file. In Docker, uncomment the
+`kilo-accounts.json` mount too, and only after the host file exists.
+
+```yaml
+providers:
+  - name: kilo
+    style: kilo
+    base_url: https://ai-gateway.kilo.ai/api/v1
+
+routes:
+  - model_id: kilo/auto
+    routes:
+      - provider: kilo
+        model: openrouter/auto
 ```
 
 ### Google Gemini

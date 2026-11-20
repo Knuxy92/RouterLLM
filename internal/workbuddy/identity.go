@@ -21,25 +21,6 @@ const (
 	stainlessRuntimeVersion = "v22.21.1"
 )
 
-// MachineID derives the stable per-account X-Machine-ID: the first 32 hex
-// chars of sha256("machine|<uid>|<salt>"). The salt is fixed so the same
-// account always presents the same machine identity.
-func MachineID(uid, salt string) string {
-	return hashedID("machine", uid, salt)
-}
-
-// SessionID derives the stable per-account X-Session-ID, same recipe as
-// MachineID with the "session" prefix.
-func SessionID(uid, salt string) string {
-	return hashedID("session", uid, salt)
-}
-
-func hashedID(kind, uid, salt string) string {
-	sum := sha256.Sum256([]byte(kind + "|" + uid + "|" + salt))
-
-	return hex.EncodeToString(sum[:])[:32]
-}
-
 // UUID7Hex returns a 32-char lowercase hex RFC 9562 UUIDv7: 48-bit unix
 // millisecond timestamp, version 7, 12-bit rand_a, variant 10, 62-bit rand_b.
 // The upstream conversation/request/message ids are this shape without dashes.

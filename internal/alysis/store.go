@@ -59,7 +59,3 @@ func (s *AccountStore) Add(account Account) error {
 
 	return accounts.Add(accountLabel, s.path, &s.accounts, account, func(a Account) string { return a.GatewayKey })
 }
-
-func (s *AccountStore) persist() error {
-	return accounts.Persist(accountLabel, s.path, s.accounts)
-}

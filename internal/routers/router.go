@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -203,19 +202,6 @@ func captureRequestBody(r *http.Request) (capturedBody, error) {
 	}
 
 	return capturedBody{body: string(raw)}, err
-}
-
-func formatHeaders(headers http.Header) string {
-	clean := headers.Clone()
-	for name := range clean {
-		lowerName := strings.ToLower(name)
-		if lowerName == "authorization" || lowerName == "x-api-key" || strings.Contains(lowerName, "token") {
-			clean.Set(name, "[REDACTED]")
-		}
-	}
-
-	encoded, _ := json.Marshal(clean)
-	return string(encoded)
 }
 
 func requestID(next http.Handler) http.Handler {

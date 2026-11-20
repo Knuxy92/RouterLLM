@@ -263,6 +263,19 @@ providers:
   #   style: codex
   #   base_url: https://chatgpt.com/backend-api
 
+  # --- Kilo Code accounts ---
+  # Commented out on purpose: an ENABLED kilo provider refuses to start until
+  # `routerllm --kilo-login` has created kilo-accounts.json next to the
+  # executable (override with KILO_ACCOUNTS_FILE). Uncomment BOTH this block
+  # and the kilo route below after logging in. No api_key is needed — keys
+  # come from the accounts file — and the gateway is plain OpenAI passthrough.
+  # The account's selected organization is sent as X-KILOCODE-ORGANIZATIONID;
+  # endpoint overrides: KILO_API_URL, KILO_AI_GATEWAY_URL.
+  #
+  # - name: kilo
+  #   style: kilo
+  #   base_url: https://ai-gateway.kilo.ai/api/v1
+
   # --- OpenCode Console accounts ---
   # The opencode provider above is ENABLED and needs opencode-accounts.json
   # next to the executable (override with OPENCODE_ACCOUNTS_FILE). Create it
@@ -411,8 +424,15 @@ routes:
   #     - provider: codex
   #       model: gpt-5.6-codex
 
-  # WorkBuddy account model — uncomment together with the workbuddy provider
-  # above (requires `routerllm --workbuddy-login` first). Model names come from
+  # Kilo account model — uncomment together with the kilo provider above
+  # (requires `routerllm --kilo-login` first). Model names come from the Kilo
+  # catalog; pick any id from `https://ai-gateway.kilo.ai/api/v1/models`.
+  # - model_id: kilo/auto
+  #   routes:
+  #     - provider: kilo
+  #       model: openrouter/auto
+
+  # WorkBuddy account model — uncomment together with the workbuddy provider  # above (requires `routerllm --workbuddy-login` first). Model names come from
   # the upstream catalog (deepseek-v4.1-flash is the cheapest any-realm model).
   # - model_id: wb/deepseek-v4.1-flash
   #   routes:
@@ -433,7 +453,7 @@ routes:
   # Per-leg call style — commented out example. `stylecall` overrides the
   # upstream dialect for a single leg (chat|responses|messages), so one
   # openai-style provider can also serve Responses-only models. Empty/absent
-  # keeps the provider style; only openai/anthropic/alysis providers accept it.
+  # keeps the provider style; openai/anthropic/alysis/opencode/kilo accept it.
   # - model_id: gpt-5.6-responses
   #   routes:
   #     - provider: forge

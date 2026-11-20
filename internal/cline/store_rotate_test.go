@@ -65,11 +65,8 @@ func TestManagerServesTokenWhenRotationCannotPersist(t *testing.T) {
 	server := refreshServer(t, "access-1", "refresh-2", &calls)
 
 	dir := t.TempDir()
-	store := &AccountStore{
-		path:     filepath.Join(dir, "cline-accounts.json"),
-		accounts: []Account{{AccountID: "acc_1", Email: "one@example.test", RefreshToken: "refresh-1"}},
-	}
-	if err := store.persist(); err != nil {
+	store := &AccountStore{path: filepath.Join(dir, "cline-accounts.json")}
+	if err := store.Add(Account{AccountID: "acc_1", Email: "one@example.test", RefreshToken: "refresh-1"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(dir, 0o500); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"routerllm/internal/cline"
 	"routerllm/internal/codex"
+	"routerllm/internal/kilo"
 	"routerllm/internal/provider"
 	"routerllm/internal/settings"
 	"routerllm/internal/workbuddy"
@@ -49,6 +50,8 @@ func (p *Proxy) ListProviderModels(ctx context.Context, name string) (ModelCatal
 		source, models, err = p.workbuddyModels(ctx, pv, key, timeout)
 	case "cline":
 		source, models, err = p.clineModels(ctx, pv, key)
+	case "kilo":
+		source, models, err = p.kiloModels(ctx, pv, key)
 	default:
 		source, models, err = p.fallbackModels(ctx, pv, key)
 	}
@@ -103,6 +106,35 @@ func (p *Proxy) clineModels(ctx context.Context, pv *provider.Provider, key stri
 	}
 
 	models, err := cline.ParseModels(body)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return "catalog", models, nil
+}
+
+func (p *Proxy) kiloModels(ctx context.Context, pv *provider.Provider, key string) (string, []string, error) {
+	client := &kilo.Client{GatewayBase: pv.BaseURL}
+	orgID := p.kiloOrg(key)
+	url := client.GatewayModelsURL(orgID)
+
+	req, err := newCatalogRequest(ctx, pv, url)
+	if err != nil {
+		return "", nil, err
+	}
+	if pv.AuthMode != "none" {
+		applyAuthHeaders(req.Header, key, pv.AuthMode)
+	}
+	if orgID != "" {
+		req.Header.Set(kilo.OrgHeader, orgID)
+	}
+
+	body, err := p.doCatalogRequest(req, pv.Name)
+	if err != nil {
+		return "", nil, err
+	}
+
+	models, err := kilo.ParseModels(body)
 	if err != nil {
 		return "", nil, err
 	}

@@ -93,7 +93,3 @@ func (s *AccountStore) noteWrite(err error) error {
 func refreshToken(a Account) string { return a.RefreshToken }
 
 func setRefreshToken(a *Account, token string) { a.RefreshToken = token }
-
-func (s *AccountStore) persist() error {
-	return accounts.Persist(accountLabel, s.path, s.accounts)
-}
