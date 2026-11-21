@@ -361,6 +361,8 @@ Route defaults stay canonical (`reasoning_effort`, `enable_thinking`, `thinking_
 | `AUTHTOKEN`              | —                | Bearer token(s) for `/v1` write endpoints (comma-separated); unset = open |
 | `ROUTERLLM_ADMIN_TLS_PORT` | —              | Serve the admin console over HTTPS on this port; main port drops `/admin` |
 | `ROUTERLLM_ADMIN_TLS_CERT` / `_KEY` | auto  | TLS cert/key paths; self-signed pair generated beside the config when missing |
+| `OPENCODE_TLS_RELAY`     | off              | `1` routes style:opencode providers through a Bun TLS-relay child (transport-level client gate); see `internal/relay/README.md` |
+| `OPENCODE_REP_TOOLS`     | off              | `1` collapses a large native tool surface into a catalog + one `execute` tool (structural tool gate); see `internal/services/rep_tools_README.md` |
 | Provider API keys        | —                | `*_API_KEY` vars per your config      |
 
 `.env` files are loaded automatically (real env vars take precedence).

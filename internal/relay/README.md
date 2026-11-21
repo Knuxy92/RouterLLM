@@ -53,6 +53,13 @@ exhaustion with `…Connect a provider or subscribe to OpenCode Go… switch
 models`. Same 429 status, different body: the body style tells you whether
 the request was flagged (transport/shape) or the account's free quota is gone.
 
+The relay only clears the transport-level gate. The request-level structural gate —
+a tools[] array that does not look like the real CLI's — is handled by the
+representative-tool mode (`OPENCODE_REP_TOOLS=1`, see
+`../services/rep_tools_README.md`). From datacenter IPs a passing request usually
+needs both flags on.
+
+
 ## Known limits
 
 - Bun version updates can change the TLS fingerprint the gateway expects.
