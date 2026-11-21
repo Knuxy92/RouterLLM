@@ -1,5 +1,5 @@
 <env>
-  Working directory: /home/user/project
-  Workspace root folder: /home/user/project
+  Working directory: ?
+  Workspace root folder: ?
   Is directory a git repo: no
 </env>
