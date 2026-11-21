@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -321,7 +322,17 @@ func (m *Manager) startProc(p *proc) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.WaitDelay = 3 * time.Second
-	if err := cmd.Start(); err != nil {
+
+	// Pdeathsig (Linux) must be installed while pinned to one OS thread, or
+	// the Go runtime can migrate the goroutine and kill the child early.
+	startErr := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		configureSysProcAttr(cmd)
+		startErr <- cmd.Start()
+	}()
+	if err := <-startErr; err != nil {
 		logFile.Close()
 		supCancel()
 		return fmt.Errorf("spawn %s: %w", relayBin(), err)
