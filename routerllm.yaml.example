@@ -396,10 +396,13 @@ routes:
       # thinking_budget: 8192              # → thinkingConfig.thinkingBudget
 
   # Free model, single provider
-  - model_id: deepseek-v4-flash-free
+  - model_id: deepseek-v4.1-flash-free
     routes:
       - provider: opencode
-        model: deepseek-v4-flash-free
+        # The gateway resolves body model ids verbatim; use the catalog id
+        # exactly (no provider prefix, right version) or it answers
+        # 400 "Model is unavailable".
+        model: deepseek-v4.1-flash-free
         defaults:
           thinking_budget: 8192
 
