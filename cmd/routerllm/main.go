@@ -18,6 +18,7 @@ import (
 	"routerllm/internal/config"
 	"routerllm/internal/handlers"
 	"routerllm/internal/provider"
+	"routerllm/internal/relay"
 	"routerllm/internal/routers"
 	"routerllm/internal/services"
 	"routerllm/internal/settings"
@@ -27,6 +28,10 @@ import (
 
 func main() {
 	_ = util.LoadDotenv(".env")
+	// opencode tls relay children (when OPENCODE_TLS_RELAY=1) must not
+	// outlive the proxy. NOTE: log.Fatalf skips defers — a relay child can
+	// survive a fatal startup error; the next Ensure spawns a fresh child.
+	defer relay.Default().Stop()
 
 	if len(os.Args) > 1 && os.Args[1] == "--cline-login" {
 		if err := runClineLogin(); err != nil {
