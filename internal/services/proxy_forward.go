@@ -243,6 +243,11 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		// happily lets through.
 		clampOpenCodeMaxTokens(routeBody, openCodeTokenKeys...)
 
+		// The gateway also checks the system prompt: only requests carrying
+		// its harness prompt (an <env> block holding "Working directory:")
+		// pass, so the captured harness prompt leads when configured.
+		p.injectOpenCodeSystemPrompt(routeBody)
+
 		// The gateway accepts only "auto"; "none" is honoured further down, once
 		// the required tool set has been injected.
 		forbidToolUse := clientForbidsToolUse(routeBody)
@@ -1045,5 +1050,34 @@ func (p *Proxy) injectIntoInstructions(body map[string]any, prompt string) {
 
 	if p.advancedDebug {
 		p.log.Printf("injected system prompt into instructions: len=%d chars", len(prompt))
+	}
+}
+
+// injectOpenCodeSystemPrompt puts the opencode harness prompt in front of the
+// conversation on style: opencode legs. The gateway checks each request for
+// its harness prompt — an <env> block carrying "Working directory:" — and
+// answers everything else with a soft 429 FreeUsageLimitError, so the captured
+// harness prompt leads while the operator prompt (already prepended by
+// injectSystemPrompt) and the client's own system message stay below it.
+func (p *Proxy) injectOpenCodeSystemPrompt(body map[string]any) {
+	stored := p.opencodeSystemPrompt.Load()
+	if stored == nil || *stored == "" {
+		return
+	}
+	prompt := *stored
+
+	if _, isResponses := body["input"]; isResponses {
+		p.injectIntoInstructions(body, prompt)
+		return
+	}
+
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		return
+	}
+
+	body["messages"] = append([]any{map[string]any{"role": "system", "content": prompt}}, msgs...)
+	if p.advancedDebug {
+		p.log.Printf("injected opencode system prompt: len=%d chars, messages=%d", len(prompt), len(body["messages"].([]any)))
 	}
 }

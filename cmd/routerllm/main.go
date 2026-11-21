@@ -102,6 +102,7 @@ func main() {
 	advancedDebug := os.Getenv("ROUTERLLM_DEBUG_ADVANCED") == "true"
 	registry := provider.NewRegistry(cfg.Providers, cfg.Routes, cfg.Cooldown)
 	proxy := services.NewProxy(registry, cfg.Client, logger, debug, advancedDebug, cfg.ForceStream, cfg.ForwardClientHeaders, cfg.AllowClientHeaders, cfg.SystemPrompt)
+	proxy.SetOpencodeSystemPrompt(cfg.OpencodeSystemPrompt)
 	proxy.SetDedupeTools(cfg.DedupeTools)
 	proxy.SetClampToolSchemas(cfg.ClampToolSchemas, cfg.ToolSchemaMaxDepth)
 	logRegistry(logger, registry)
@@ -129,6 +130,7 @@ func main() {
 	applyConfig := func(next *config.Config) {
 		reloaded := provider.Rebuild(next.Providers, next.Routes, next.Cooldown, proxy.Registry())
 		proxy.Apply(reloaded, next.SystemPrompt)
+		proxy.SetOpencodeSystemPrompt(next.OpencodeSystemPrompt)
 		proxy.ApplySettings(next.ForceStream, next.ForwardClientHeaders, next.AllowClientHeaders)
 		proxy.SetDedupeTools(next.DedupeTools)
 		proxy.SetClampToolSchemas(next.ClampToolSchemas, next.ToolSchemaMaxDepth)

@@ -43,9 +43,9 @@ var clientCredentialHeaders = map[string]bool{
 	googleAPIKeyHeader:    true,
 	"cookie":              true,
 	"cookie2":             true,
-	"proxy-authorization":       true,
-	"accept-encoding":           true,
-	kilo.OrgHeaderLower:         true,
+	"proxy-authorization": true,
+	"accept-encoding":     true,
+	kilo.OrgHeaderLower:   true,
 }
 
 type Proxy struct {
@@ -62,6 +62,7 @@ type Proxy struct {
 	forwardClientHeaders atomic.Bool
 	allowClientHeaders   atomic.Pointer[[]string]
 	systemPrompt         atomic.Pointer[string]
+	opencodeSystemPrompt atomic.Pointer[string]
 	clineMu              sync.Mutex
 	clineManagers        map[string]*cline.Manager
 	codexMu              sync.Mutex
@@ -100,6 +101,12 @@ func (p *Proxy) SetTelemetry(s *telemetry.Store) {
 		s = telemetry.NewMemStore()
 	}
 	p.telemetry.Store(s)
+}
+
+// SetOpencodeSystemPrompt configures the harness prompt prepended on
+// style: opencode legs. An empty string disables it.
+func (p *Proxy) SetOpencodeSystemPrompt(prompt string) {
+	p.opencodeSystemPrompt.Store(&prompt)
 }
 
 func (p *Proxy) recordTelemetry(e telemetry.Event) {

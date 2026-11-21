@@ -588,3 +588,85 @@ func TestForwardOpenCodeDefaultsToChat(t *testing.T) {
 		t.Fatalf("content missing:\n%s", w.Body.String())
 	}
 }
+
+func TestForwardOpenCodeInjectsOpencodeSystemPrompt(t *testing.T) {
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistry(upstream))
+	proxy.SetOpencodeSystemPrompt("OPENCODE-HARNESS-PROMPT")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"system","content":"CLIENT-SYSTEM"},{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	messages, _ := upstreamBody["messages"].([]any)
+	if len(messages) < 3 {
+		t.Fatalf("messages = %d, want the harness prompt, the client's system message and the user turn: %v", len(messages), upstreamBody["messages"])
+	}
+	first, _ := messages[0].(map[string]any)
+	if first["role"] != "system" || first["content"] != "OPENCODE-HARNESS-PROMPT" {
+		t.Errorf("first message = %v, want the opencode harness prompt leading", first)
+	}
+	// The global system prompt is unset in this fixture, so the client's own
+	// system message is the next one and must survive untouched.
+	second, _ := messages[1].(map[string]any)
+	if second["role"] != "system" || second["content"] != "CLIENT-SYSTEM" {
+		t.Errorf("second message = %v, want the client's own system message preserved", second)
+	}
+}
+
+func TestForwardOpenCodeResponsesInjectsOpencodeSystemPrompt(t *testing.T) {
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Errorf("body decode: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistryWithStyleCall(upstream, "responses"))
+	proxy.SetOpencodeSystemPrompt("OPENCODE-HARNESS-PROMPT")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"test-model","input":"hi"}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/responses", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	instructions, _ := upstreamBody["instructions"].(string)
+	if !strings.Contains(instructions, "OPENCODE-HARNESS-PROMPT") {
+		t.Errorf("instructions = %q, want the opencode harness prompt leading", instructions)
+	}
+}
