@@ -52,6 +52,8 @@ function NumberCell({ value }: { value: number | null }): JSX.Element {
 // backed by the whole models.opencode.ai catalog. Every other tab holds the
 // few models of one configured provider, so it renders single-column.
 const CATALOG_TAB = "opencode"
+// Opening the catalog tab lands on the opencode provider itself, not "all".
+const CATALOG_PROVIDER = "opencode"
 
 export default function ModelsDetail(): JSX.Element {
   const subscribe = useCallback((listener: () => void) => adminStore.subscribe(listener), [])
@@ -66,7 +68,7 @@ export default function ModelsDetail(): JSX.Element {
   const [query, setQuery] = useState("")
   const [reasoningFilter, setReasoningFilter] = useState("all")
   const [freeOnly, setFreeOnly] = useState(false)
-  const [providerFilter, setProviderFilter] = useState("all")
+  const [providerFilter, setProviderFilter] = useState(CATALOG_PROVIDER)
   const [railQuery, setRailQuery] = useState("")
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -92,7 +94,7 @@ export default function ModelsDetail(): JSX.Element {
 
   function selectTab(key: string) {
     setActiveTab(key)
-    setProviderFilter("all")
+    setProviderFilter(key === CATALOG_TAB ? CATALOG_PROVIDER : "all")
     resetPage()
   }
 
@@ -384,7 +386,7 @@ export default function ModelsDetail(): JSX.Element {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-xs">
+            <table className="w-full min-w-[1000px] text-left text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                   <th className="px-3 py-2.5 font-medium">Model Id</th>
@@ -401,18 +403,13 @@ export default function ModelsDetail(): JSX.Element {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-medium">{row.id}</span>
-                        {row.free && <span className="badge tone-ok">FREE</span>}
+                        {isCatalog && row.free && <span className="badge tone-ok">FREE</span>}
                       </div>
-                      {row.description && (
-                        <div className="max-w-[320px] truncate text-[11px] text-muted-foreground" title={row.description}>
-                          {row.description}
-                        </div>
-                      )}
                     </td>
                     <td className="px-3 py-2.5"><ReasoningCell row={row} /></td>
                     <td className="px-3 py-2.5 text-right"><NumberCell value={row.context} /></td>
                     <td className="px-3 py-2.5 text-right"><NumberCell value={row.maxOutput} /></td>
-                    <td className="px-3 py-2.5">
+                    <td className="min-w-[170px] px-3 py-2.5">
                       {row.modalities.length > 0 ? (
                         <span className="flex flex-wrap gap-1">
                           {row.modalities.map((modality) => (
