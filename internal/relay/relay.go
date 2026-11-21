@@ -91,8 +91,7 @@ func UpstreamFor(baseURL string) string {
 // Manager supervises one bun child per upstream origin.
 type Manager struct {
 	log *log.Logger
-	out io.Writer // child stdio sink; the logger for prod, discard for tests
-	bin string
+	out io.Writer
 
 	mu    sync.Mutex
 	procs map[string]*proc // upstream origin -> supervised child
@@ -133,7 +132,6 @@ func New(log *log.Logger, out io.Writer) *Manager {
 	return &Manager{
 		log:   log,
 		out:   out,
-		bin:   relayBin(),
 		procs: map[string]*proc{},
 		ports: map[string]int{},
 	}
@@ -267,14 +265,14 @@ func (m *Manager) startProc(p *proc) error {
 	p.logFile = logFile
 	p.mu.Unlock()
 
-	cmd := exec.CommandContext(p.supCtx, m.bin, script, "--port", strconv.Itoa(p.port), "--upstream", p.upstream)
+	cmd := exec.CommandContext(p.supCtx, relayBin(), script, "--port", strconv.Itoa(p.port), "--upstream", p.upstream)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.WaitDelay = 3 * time.Second
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		supCancel()
-		return fmt.Errorf("spawn %s: %w", m.bin, err)
+		return fmt.Errorf("spawn %s: %w", relayBin(), err)
 	}
 
 	if err := m.waitHealth(p, p.supCtx); err != nil {
