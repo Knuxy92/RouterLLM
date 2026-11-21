@@ -118,3 +118,40 @@ func writeSSEFrames(w http.ResponseWriter, frames []string) {
 	}
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
 }
+
+// The gateway folds the last call fragment and finish_reason into one frame;
+// that frame must reach the client with its finish_reason intact even though
+// every tool_call part in it was buffered.
+func TestForwardOpenCodeRepToolsKeepsFinishReasonFoldedWithLastFragment(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
+		frames := []string{
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"execute","arguments":"{\"tool\":\"srv_alpha__list\",\"arg"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"uments\":{\"path\":\".\"}}"}}]},"finish_reason":"tool_calls"}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}`,
+		}
+		writeSSEFrames(w, frames)
+	}))
+	defer upstream.Close()
+
+	t.Setenv("OPENCODE_REP_TOOLS", "1")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistry(upstream))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"go"}],"tools":[{"type":"function","function":{"name":"srv_alpha__list","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	calls := repClientCalls(t, body) // also asserts finish_reason == tool_calls
+	if len(calls) != 1 || calls[0]["name"] != "srv_alpha__list" {
+		t.Errorf("native call wrong: %v\n%s", calls, body)
+	}
+}

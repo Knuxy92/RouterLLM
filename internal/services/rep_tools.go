@@ -426,9 +426,12 @@ func repStreamSSE(src io.Reader, w http.ResponseWriter, reverse map[string]strin
 			emitPending()
 		}
 
-		if buffered && live {
-			// The frame mixes live content (or foreign calls) with buffered
-			// fragments: re-emit only the parts that pass through now.
+		if buffered && (live || finish) {
+			// The frame mixes passthrough-worthy content (or the finish_reason
+			// itself) with buffered fragments: re-emit only the parts that
+			// reach the client now. The gateway folds the last call fragment
+			// and finish_reason into one frame, so this path is the rule, not
+			// the exception.
 			var doc map[string]any
 			if err := json.Unmarshal([]byte(payload), &doc); err == nil {
 				if choices, ok := doc["choices"].([]any); ok {
