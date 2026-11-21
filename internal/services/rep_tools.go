@@ -3,8 +3,14 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"sort"
 	"strings"
+
+	"routerllm/internal/model"
+	"routerllm/internal/util"
 )
 
 // Representative-tool mode: the gateway's structural gate flags free-tier
@@ -249,4 +255,213 @@ func repDescription(desc any) string {
 	}
 
 	return text
+}
+
+// repUnwrapArguments reverses the representative wrapper: {"tool": "<native>",
+// "arguments": {...}} becomes the native tool name and its re-marshaled
+// argument object. Arguments that do not parse as the wrapper shape — the
+// CLI's own execute tool carries {"code": ...} — return ok=false and pass
+// through untouched, which keeps Code Mode clients safe while the mode is on.
+func repUnwrapArguments(raw string) (native string, inner string, ok bool) {
+	var wrapper struct {
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapper); err != nil || wrapper.Tool == "" {
+		return "", "", false
+	}
+	if len(wrapper.Arguments) == 0 || string(wrapper.Arguments) == "null" {
+		wrapper.Arguments = json.RawMessage("{}")
+	}
+
+	return wrapper.Tool, string(wrapper.Arguments), true
+}
+
+// repRestoreBuffered unwraps representative execute calls in an already
+// assembled response (bufferStream output) so a native client sees its own
+// tool names.
+func repRestoreBuffered(result *model.ChatCompletionResponse) *model.ChatCompletionResponse {
+	for ci := range result.Choices {
+		for ti := range result.Choices[ci].Message.ToolCalls {
+			tc := &result.Choices[ci].Message.ToolCalls[ti]
+			if tc.Function.Name != repToolName {
+				continue
+			}
+			native, inner, ok := repUnwrapArguments(tc.Function.Arguments)
+			if !ok {
+				continue
+			}
+			tc.Function.Name = native
+			tc.Function.Arguments = inner
+		}
+	}
+
+	return result
+}
+
+// repPendingCall accumulates one representative tool call the upstream streams
+// as fragments: the native name lives inside the arguments JSON, so the call
+// can only be rewritten once its arguments are complete.
+type repPendingCall struct {
+	id   string
+	args strings.Builder
+}
+
+// repStreamSSE forwards an openai-dialect stream under representative-tool
+// mode. Content and reasoning deltas reach the client live; execute tool_call
+// fragments are held per index until the finish frame, then re-emitted as
+// complete native tool calls. Foreign tool_call names and arguments that do
+// not parse as the wrapper pass through untouched. reverse (the sanitize
+// rename map) is applied to every frame on the way out.
+func repStreamSSE(src io.Reader, w http.ResponseWriter, reverse map[string]string) error {
+	flusher, _ := w.(http.Flusher)
+	write := func(frame string) {
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	pending := map[int]*repPendingCall{}
+	restore := func(frame string) string {
+		if len(reverse) == 0 {
+			return frame
+		}
+		return restorePayloadNames(frame, reverse)
+	}
+
+	emitPending := func() {
+		if len(pending) == 0 {
+			return
+		}
+		indexes := make([]int, 0, len(pending))
+		for idx := range pending {
+			indexes = append(indexes, idx)
+		}
+		sort.Ints(indexes)
+		for _, idx := range indexes {
+			call := pending[idx]
+			name, inner := repToolName, call.args.String()
+			if native, unwrapped, ok := repUnwrapArguments(call.args.String()); ok {
+				name, inner = native, unwrapped
+			}
+			synthetic, err := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{
+					"index": 0,
+					"delta": map[string]any{
+						"tool_calls": []any{map[string]any{
+							"index":    idx,
+							"id":       call.id,
+							"type":     "function",
+							"function": map[string]any{"name": name, "arguments": inner},
+						}},
+					},
+				}},
+			})
+			if err != nil {
+				continue
+			}
+			write(restore(string(synthetic)))
+		}
+		pending = map[int]*repPendingCall{}
+	}
+
+	_, err := util.IterDataLines(src, func(payload string) bool {
+		if _, isError := util.ParseErrorFrame(payload); isError {
+			write(util.SanitizedErrorFrame)
+			return true
+		}
+
+		var frame struct {
+			Choices []struct {
+				Delta struct {
+					Content          string           `json:"content"`
+					ReasoningContent string           `json:"reasoning_content"`
+					ToolCalls        []model.ToolCall `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+			write(restore(payload))
+			return true
+		}
+
+		buffered := false
+		kept := map[[2]int]bool{} // [choiceIdx, callIdx] -> passthrough as-is
+		live := false             // the frame carries content/reasoning to emit now
+		for ci := range frame.Choices {
+			if frame.Choices[ci].Delta.Content != "" || frame.Choices[ci].Delta.ReasoningContent != "" {
+				live = true
+			}
+			for ki, call := range frame.Choices[ci].Delta.ToolCalls {
+				_, alreadyPending := pending[call.Index]
+				if call.Function.Name == repToolName || alreadyPending {
+					buffered = true
+					pc, ok := pending[call.Index]
+					if !ok {
+						pc = &repPendingCall{}
+						pending[call.Index] = pc
+					}
+					if call.ID != "" {
+						pc.id = call.ID
+					}
+					pc.args.WriteString(call.Function.Arguments)
+				} else {
+					kept[[2]int{ci, ki}] = true
+					live = true
+				}
+			}
+		}
+		finish := false
+		for _, choice := range frame.Choices {
+			if choice.FinishReason != nil {
+				finish = true
+				break
+			}
+		}
+		// The calls must reach the client before the frame that ends them,
+		// even when the finish frame carries nothing else.
+		if finish {
+			emitPending()
+		}
+
+		if buffered && live {
+			// The frame mixes live content (or foreign calls) with buffered
+			// fragments: re-emit only the parts that pass through now.
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(payload), &doc); err == nil {
+				if choices, ok := doc["choices"].([]any); ok {
+					for ci, raw := range choices {
+						choice, _ := raw.(map[string]any)
+						delta, _ := choice["delta"].(map[string]any)
+						calls, _ := delta["tool_calls"].([]any)
+						filtered := make([]any, 0, len(calls))
+						for ki, c := range calls {
+							if kept[[2]int{ci, ki}] {
+								filtered = append(filtered, c)
+							}
+						}
+						if len(filtered) == 0 {
+							delete(delta, "tool_calls")
+						} else {
+							delta["tool_calls"] = filtered
+						}
+					}
+				}
+				if out, err := json.Marshal(doc); err == nil {
+					write(restore(string(out)))
+				}
+			}
+		} else if !buffered {
+			write(restore(payload))
+		}
+
+		return true
+	})
+	if err == nil {
+		write("[DONE]")
+	}
+
+	return err
 }

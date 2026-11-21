@@ -272,3 +272,177 @@ func TestForwardOpenCodeRepToolsOffKeepsNativeDeclarations(t *testing.T) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// repFragmentStream is an upstream that streams two parallel execute calls as
+// fragments — the native name only exists inside the completed arguments JSON.
+func repFragmentStream(w http.ResponseWriter) {
+	frames := []string{
+		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"execute","arguments":""}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"tool\":\"srv_alpha__list\",\"arg"}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"uments\":{\"path\":\".\"}}"}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"c2","type":"function","function":{"name":"execute","arguments":"{\"tool\":\"srv_beta__read\",\"arguments\":{\"path\":\"a.txt\"}}"}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, f := range frames {
+		io.WriteString(w, "data: "+f+"\n\n")
+	}
+	io.WriteString(w, "data: [DONE]\n\n")
+}
+
+// repClientCalls folds the client-side SSE stream back into assembled calls.
+func repClientCalls(t *testing.T, body string) []map[string]any {
+	t.Helper()
+
+	acc := map[int]map[string]any{}
+	finish := ""
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		var evt struct {
+			Choices []struct {
+				Delta struct {
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+			t.Fatalf("client frame not JSON: %v (%q)", err, payload)
+		}
+		for _, ch := range evt.Choices {
+			if ch.FinishReason != nil {
+				finish = *ch.FinishReason
+			}
+			for _, part := range ch.Delta.ToolCalls {
+				m, ok := acc[part.Index]
+				if !ok {
+					m = map[string]any{"id": "", "name": "", "arguments": ""}
+					acc[part.Index] = m
+				}
+				if part.ID != "" {
+					m["id"] = part.ID
+				}
+				if part.Function.Name != "" {
+					m["name"] = part.Function.Name
+				}
+				m["arguments"] = m["arguments"].(string) + part.Function.Arguments
+			}
+		}
+	}
+	if finish != "tool_calls" {
+		t.Errorf("client finish_reason = %q, want tool_calls", finish)
+	}
+
+	calls := make([]map[string]any, 0, len(acc))
+	for i := 0; i < len(acc); i++ {
+		calls = append(calls, acc[i])
+	}
+
+	return calls
+}
+
+func TestForwardOpenCodeRepToolsRestoresStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
+		repFragmentStream(w)
+	}))
+	defer upstream.Close()
+
+	t.Setenv("OPENCODE_REP_TOOLS", "1")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistry(upstream))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"go"}],"tools":[{"type":"function","function":{"name":"srv_alpha__list","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if strings.Contains(body, `"execute"`) {
+		t.Errorf("client must not see the representative name:\n%s", body)
+	}
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Error("client stream lost its DONE marker")
+	}
+
+	calls := repClientCalls(t, body)
+	if len(calls) != 2 {
+		t.Fatalf("client saw %d calls, want 2 parallel native calls:\n%s", len(calls), body)
+	}
+	if calls[0]["name"] != "srv_alpha__list" || calls[1]["name"] != "srv_beta__read" {
+		t.Errorf("native names wrong: %v / %v", calls[0]["name"], calls[1]["name"])
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(calls[0]["arguments"].(string)), &args); err != nil || args["path"] != "." {
+		t.Errorf("call 0 arguments = %q (%v)", calls[0]["arguments"], err)
+	}
+	if calls[0]["id"] != "c1" || calls[1]["id"] != "c2" {
+		t.Errorf("call ids lost: %v / %v", calls[0]["id"], calls[1]["id"])
+	}
+}
+
+func TestForwardOpenCodeRepToolsRestoresBuffered(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opencodeTokenExchange(w, r)
+		if strings.HasPrefix(r.URL.Path, "/auth/device/token") {
+			return
+		}
+		repFragmentStream(w)
+	}))
+	defer upstream.Close()
+
+	t.Setenv("OPENCODE_REP_TOOLS", "1")
+	proxy := newOpencodeTestProxy(t, upstream, opencodeTestRegistry(upstream))
+
+	// stream:false — parseAndForceStream still streams upstream, but the client
+	// receives the buffered JSON body.
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
+		`{"model":"test-model","messages":[{"role":"user","content":"go"}],"tools":[{"type":"function","function":{"name":"srv_alpha__list","parameters":{"type":"object"}}}]}`))
+	w := httptest.NewRecorder()
+
+	proxy.Forward("/v1/chat/completions", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("client body not JSON: %v\n%s", err, w.Body.String())
+	}
+	calls := result.Choices[0].Message.ToolCalls
+	if len(calls) != 2 || calls[0].Function.Name != "srv_alpha__list" || calls[1].Function.Name != "srv_beta__read" {
+		t.Errorf("buffered native calls wrong: %+v", calls)
+	}
+}

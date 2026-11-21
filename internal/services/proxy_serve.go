@@ -24,6 +24,14 @@ func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, w http.Respo
 	if clientStream {
 		writeStreamHeaders(w)
 		w.WriteHeader(http.StatusOK)
+		// Representative-tool mode holds execute fragments until they complete
+		// and hands the client native tool names; foreign frames pass through.
+		if repToolsEnabled() {
+			if err := repStreamSSE(resp.Body, w, toolNameRestore); err != nil {
+				log.Printf("stream error: %v", err)
+			}
+			return ""
+		}
 		if err := util.StreamSSETransform(resp.Body, w, true, streamRestoreTransform(toolNameRestore)); err != nil {
 			log.Printf("stream error: %v", err)
 		}
@@ -38,7 +46,7 @@ func (p *Proxy) serveOpenAI(resp *http.Response, clientStream bool, w http.Respo
 		return upstreamErr
 	}
 
-	util.WriteJSON(w, http.StatusOK, restoreBufferedToolNames(result, toolNameRestore))
+	util.WriteJSON(w, http.StatusOK, restoreBufferedToolNames(repRestoreBuffered(result), toolNameRestore))
 
 	return ""
 }
