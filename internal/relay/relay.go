@@ -144,26 +144,15 @@ func relayBin() string {
 	return "bun"
 }
 
-// Ensure returns a local base URL that forwards baseURL's traffic through
-// Bun's TLS stack, spawning the child when needed. It is safe to call on
-// every config load: a base_url that already points at a supervised relay is
-// returned unchanged, so repeated rewrites never double-wrap.
-func (m *Manager) Ensure(ctx context.Context, baseURL string) (string, error) {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
-		return "", errors.New("relay: empty base_url")
+// Ensure returns a local relay origin ("http://127.0.0.1:<port>") that
+// forwards to the given upstream origin, spawning the child when needed. It
+// is safe to call on every config load: an already-supervised child for the
+// same upstream is reused.
+func (m *Manager) Ensure(ctx context.Context, upstream string) (string, error) {
+	upstream = strings.TrimRight(strings.TrimSpace(upstream), "/")
+	if upstream == "" {
+		return "", errors.New("relay: empty upstream")
 	}
-
-	m.mu.Lock()
-	for _, p := range m.procs {
-		if p.ctx.Err() == nil && p.baseURL() == baseURL {
-			m.mu.Unlock()
-			return baseURL, nil
-		}
-	}
-	m.mu.Unlock()
-
-	upstream := UpstreamFor(baseURL)
 
 	m.mu.Lock()
 	if p, ok := m.procs[upstream]; ok && p.ctx.Err() == nil {
@@ -199,6 +188,69 @@ func (m *Manager) Ensure(ctx context.Context, baseURL string) (string, error) {
 	m.mu.Unlock()
 
 	return p.baseURL(), nil
+}
+
+// Resolve maps a provider base_url onto the relay: the origin is rewritten to
+// a supervised relay child and any gateway prefix path (e.g.
+// "/inference/openai") is preserved. Idempotent — a base_url already pointing
+// at a supervised relay comes back unchanged.
+func (m *Manager) Resolve(ctx context.Context, baseURL string) (string, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "", errors.New("relay: empty base_url")
+	}
+
+	m.mu.Lock()
+	for _, p := range m.procs {
+		if p.ctx.Err() != nil {
+			continue
+		}
+		if sameOrigin(baseURL, p.baseURL()) {
+			m.mu.Unlock()
+			return p.Wrap(baseURL), nil
+		}
+	}
+	m.mu.Unlock()
+
+	upstream := UpstreamFor(baseURL)
+
+	m.mu.Lock()
+	// A base_url whose origin IS one of our relays (rewritten by an older
+	// generation) must forward to that relay's true upstream, not loop.
+	if p, ok := m.procs[upstream]; ok && p.ctx.Err() == nil {
+		upstream = p.upstream
+	}
+	m.mu.Unlock()
+
+	relayOrigin, err := m.Ensure(ctx, upstream)
+	if err != nil {
+		return "", err
+	}
+
+	return wrapOrigin(relayOrigin, baseURL), nil
+}
+
+// Wrap rewrites a provider base_url to point at this relay, preserving any
+// gateway prefix path.
+func (p *proc) Wrap(baseURL string) string {
+	return wrapOrigin(p.baseURL(), baseURL)
+}
+
+func wrapOrigin(relayOrigin, baseURL string) string {
+	prefix := ""
+	if u, err := url.Parse(baseURL); err == nil {
+		prefix = strings.TrimRight(u.Path, "/")
+	}
+	return strings.TrimRight(relayOrigin, "/") + prefix
+}
+
+func sameOrigin(a, b string) bool {
+	pa, erra := url.Parse(a)
+	pb, errb := url.Parse(b)
+	if erra != nil || errb != nil {
+		return a == b
+	}
+	return strings.TrimRight(pa.Scheme+"://"+pa.Host, "/") == strings.TrimRight(pb.Scheme+"://"+pb.Host, "/")
 }
 
 // Stop kills every supervised child. Routing falls back to direct afterwards.

@@ -82,7 +82,7 @@ func applyOpencodeRelay(cfg *Config) {
 		if pc.Style != "opencode" || pc.Disabled {
 			continue
 		}
-		base, err := relay.Default().Ensure(context.Background(), pc.BaseURL)
+		base, err := relay.Default().Resolve(context.Background(), pc.BaseURL)
 		if err != nil {
 			log.Printf("opencode tls relay unavailable (provider %q): %v — falling back to direct", pc.Name, err)
 			continue
