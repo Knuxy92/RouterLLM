@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"routerllm/internal/model"
+	"routerllm/internal/relay"
 	"routerllm/internal/settings"
 )
 
@@ -57,9 +59,37 @@ func Load() *Config {
 		cfg.Port = port
 	}
 
+	applyOpencodeRelay(cfg)
+
 	settings.Set(cfg.Settings)
 
 	return cfg
+}
+
+// applyOpencodeRelay routes opencode providers through a local Bun TLS relay
+// when OPENCODE_TLS_RELAY is enabled. The gateway scores clients at the
+// transport level — from datacenter IPs only Bun-family clients pass its
+// structural gate — so the provider base_url is rewritten to the relay while
+// the original origin becomes the relay's upstream. Any relay failure falls
+// back to the untouched base_url (direct connection); request handling never
+// blocks on the relay.
+func applyOpencodeRelay(cfg *Config) {
+	if !relay.Enabled() {
+		return
+	}
+	for i := range cfg.Providers {
+		pc := &cfg.Providers[i]
+		if pc.Style != "opencode" || pc.Disabled {
+			continue
+		}
+		base, err := relay.Default().Ensure(context.Background(), pc.BaseURL)
+		if err != nil {
+			log.Printf("opencode tls relay unavailable (provider %q): %v — falling back to direct", pc.Name, err)
+			continue
+		}
+		log.Printf("opencode provider %q routed through tls relay %s", pc.Name, base)
+		pc.BaseURL = base
+	}
 }
 
 // validatePort accepts an empty string (caller applies the default) and any

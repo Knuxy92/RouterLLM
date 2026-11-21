@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -90,6 +91,7 @@ func UpstreamFor(baseURL string) string {
 // Manager supervises one bun child per upstream origin.
 type Manager struct {
 	log *log.Logger
+	out io.Writer // child stdio sink; the logger for prod, discard for tests
 	bin string
 
 	mu    sync.Mutex
@@ -108,6 +110,7 @@ type proc struct {
 
 	mu        sync.Mutex
 	cmd       *exec.Cmd       // current child, replaced on respawn
+	logFile   *os.File        // child stdio sink; file handles don't stall test exit
 	supCtx    context.Context // per-spawn lifetime; cancels the current child
 	supCancel context.CancelFunc
 }
@@ -120,13 +123,16 @@ var (
 // Default returns the process-wide manager used by config loading, so
 // hot-reload Ensure calls are idempotent against the same children.
 func Default() *Manager {
-	defaultOnce.Do(func() { defaultM = New(log.New(os.Stderr, "relay: ", log.LstdFlags)) })
+	defaultOnce.Do(func() {
+		defaultM = New(log.New(os.Stderr, "relay: ", log.LstdFlags), os.Stderr)
+	})
 	return defaultM
 }
 
-func New(log *log.Logger) *Manager {
+func New(log *log.Logger, out io.Writer) *Manager {
 	return &Manager{
 		log:   log,
+		out:   out,
 		bin:   relayBin(),
 		procs: map[string]*proc{},
 		ports: map[string]int{},
@@ -140,14 +146,26 @@ func relayBin() string {
 	return "bun"
 }
 
-// Ensure returns a local base URL that forwards to upstream through Bun's TLS
-// stack, spawning the child when needed. It is safe to call on every config
-// load: an already-supervised child for the same upstream is reused.
-func (m *Manager) Ensure(ctx context.Context, upstream string) (string, error) {
-	upstream = strings.TrimRight(strings.TrimSpace(upstream), "/")
-	if upstream == "" {
-		return "", errors.New("relay: empty upstream")
+// Ensure returns a local base URL that forwards baseURL's traffic through
+// Bun's TLS stack, spawning the child when needed. It is safe to call on
+// every config load: a base_url that already points at a supervised relay is
+// returned unchanged, so repeated rewrites never double-wrap.
+func (m *Manager) Ensure(ctx context.Context, baseURL string) (string, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "", errors.New("relay: empty base_url")
 	}
+
+	m.mu.Lock()
+	for _, p := range m.procs {
+		if p.ctx.Err() == nil && p.baseURL() == baseURL {
+			m.mu.Unlock()
+			return baseURL, nil
+		}
+	}
+	m.mu.Unlock()
+
+	upstream := UpstreamFor(baseURL)
 
 	m.mu.Lock()
 	if p, ok := m.procs[upstream]; ok && p.ctx.Err() == nil {
@@ -235,10 +253,26 @@ func (m *Manager) startProc(p *proc) error {
 	p.mu.Lock()
 	p.supCtx, p.supCancel = supCtx, supCancel
 	p.mu.Unlock()
+
+	// Child stdio goes to a file, never to pipes: bun re-execs on Windows and
+	// an orphaned grandchild holding an inherited pipe stalls `go test` exit
+	// ("Test I/O incomplete") even after the direct child is killed. File
+	// handles don't block the test binary's exit.
+	logFile, err := os.OpenFile(filepath.Join(filepath.Dir(script), "relay.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		supCancel()
+		return fmt.Errorf("open relay log: %w", err)
+	}
+	p.mu.Lock()
+	p.logFile = logFile
+	p.mu.Unlock()
+
 	cmd := exec.CommandContext(p.supCtx, m.bin, script, "--port", strconv.Itoa(p.port), "--upstream", p.upstream)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.WaitDelay = 3 * time.Second
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		supCancel()
 		return fmt.Errorf("spawn %s: %w", m.bin, err)
 	}
@@ -257,11 +291,13 @@ func (m *Manager) supervise(p *proc) {
 	for {
 		p.mu.Lock()
 		cmd := p.cmd
+		logFile := p.logFile
 		p.mu.Unlock()
 		if cmd == nil {
 			return
 		}
 		err := cmd.Wait()
+		logFile.Close()
 		if p.ctx.Err() != nil {
 			return
 		}

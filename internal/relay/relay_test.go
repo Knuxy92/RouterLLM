@@ -47,7 +47,7 @@ func TestUpstreamForUsesProviderOrigin(t *testing.T) {
 
 func TestEnsureFallbackWhenBinMissing(t *testing.T) {
 	t.Setenv(envBin, "/nonexistent/bun")
-	m := New(log.New(io.Discard, "", 0))
+	m := New(log.New(io.Discard, "", 0), io.Discard)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func TestEnsureIdempotentPerUpstream(t *testing.T) {
 		return
 	}
 	t.Setenv(envPort, "0") // never collide with a standalone relay on 9999
-	m := New(log.New(io.Discard, "", 0))
+	m := New(log.New(io.Discard, "", 0), io.Discard)
 	t.Cleanup(m.Stop)
 
 	ctx := context.Background()
@@ -95,7 +95,7 @@ func TestEnsureRecoversAfterChildKill(t *testing.T) {
 		return
 	}
 	t.Setenv(envPort, "0")
-	m := New(log.New(io.Discard, "", 0))
+	m := New(log.New(io.Discard, "", 0), io.Discard)
 	t.Cleanup(m.Stop)
 
 	base, err := m.Ensure(context.Background(), "https://opencode.ai")
@@ -126,7 +126,7 @@ func TestStopKillsChildren(t *testing.T) {
 		return
 	}
 	t.Setenv(envPort, "0")
-	m := New(log.New(io.Discard, "", 0))
+	m := New(log.New(io.Discard, "", 0), io.Discard)
 	if _, err := m.Ensure(context.Background(), "https://opencode.ai"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
