@@ -32,18 +32,19 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type yamlConfig struct {
-	Port                 string         `yaml:"port,omitempty"`
-	Cooldown             string         `yaml:"cooldown,omitempty"`
-	ForceStream          bool           `yaml:"force_stream,omitempty"`
-	DedupeTools          bool           `yaml:"dedupe_tools,omitempty"`
-	ClampToolSchemas     bool           `yaml:"clamp_tool_schemas,omitempty"`
-	ToolSchemaMaxDepth   int            `yaml:"tool_schema_max_depth,omitempty"`
-	ForwardClientHeaders *bool          `yaml:"forward_client_headers,omitempty"`
-	AllowClientHeaders   []string       `yaml:"allow_client_headers,omitempty"`
-	SystemPromptFile     string         `yaml:"system_prompt_file,omitempty"`
-	Settings             yamlSettings   `yaml:"settings,omitempty"`
-	Providers            []yamlProvider `yaml:"providers"`
-	Routes               []model.Rule   `yaml:"routes,omitempty"`
+	Port                     string         `yaml:"port,omitempty"`
+	Cooldown                 string         `yaml:"cooldown,omitempty"`
+	ForceStream              bool           `yaml:"force_stream,omitempty"`
+	DedupeTools              bool           `yaml:"dedupe_tools,omitempty"`
+	ClampToolSchemas         bool           `yaml:"clamp_tool_schemas,omitempty"`
+	ToolSchemaMaxDepth       int            `yaml:"tool_schema_max_depth,omitempty"`
+	ForwardClientHeaders     *bool          `yaml:"forward_client_headers,omitempty"`
+	AllowClientHeaders       []string       `yaml:"allow_client_headers,omitempty"`
+	SystemPromptFile         string         `yaml:"system_prompt_file,omitempty"`
+	OpencodeSystemPromptFile string         `yaml:"system_prompt_file_opencode,omitempty"`
+	Settings                 yamlSettings   `yaml:"settings,omitempty"`
+	Providers                []yamlProvider `yaml:"providers"`
+	Routes                   []model.Rule   `yaml:"routes,omitempty"`
 }
 
 // yamlSettings starts from settings.Default so an absent key keeps its built-in
@@ -163,7 +164,12 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		cooldown = d
 	}
 
-	systemPrompt, err := loadSystemPrompt(yc.SystemPromptFile, configPath)
+	systemPrompt, err := loadSystemPrompt(yc.SystemPromptFile, configPath, "system_prompt_file")
+	if err != nil {
+		return nil, err
+	}
+
+	opencodeSystemPrompt, err := loadSystemPrompt(yc.OpencodeSystemPromptFile, configPath, "system_prompt_file_opencode")
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +237,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		ForwardClientHeaders: forwardClientHeaders,
 		AllowClientHeaders:   yc.AllowClientHeaders,
 		SystemPrompt:         systemPrompt,
+		OpencodeSystemPrompt: opencodeSystemPrompt,
 		Settings:             yc.Settings.resolved(),
 		Providers:            providers,
 		Client:               client,
@@ -246,7 +253,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 	return cfg, nil
 }
 
-func loadSystemPrompt(path, configPath string) (string, error) {
+func loadSystemPrompt(path, configPath, key string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
@@ -258,7 +265,7 @@ func loadSystemPrompt(path, configPath string) (string, error) {
 
 	data, err := os.ReadFile(resolved)
 	if err != nil {
-		return "", fmt.Errorf("failed to read system_prompt_file %q: %w", path, err)
+		return "", fmt.Errorf("failed to read %s %q: %w", key, path, err)
 	}
 
 	return strings.TrimSpace(string(data)), nil

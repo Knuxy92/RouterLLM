@@ -36,6 +36,7 @@ type Config struct {
 	ForwardClientHeaders bool
 	AllowClientHeaders   []string
 	SystemPrompt         string
+	OpencodeSystemPrompt string
 	Settings             settings.Settings
 	Providers            []ProviderConfig
 	Client               *http.Client

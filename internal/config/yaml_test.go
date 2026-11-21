@@ -787,6 +787,61 @@ routes:
 	}
 }
 
+func TestLoadYAMLOpencodeSystemPromptFileRelativeToConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "system_prompt_opencode.txt"), []byte("  opencode harness  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "routerllm.yaml")
+	if err := os.WriteFile(path, []byte(`
+system_prompt_file_opencode: system_prompt_opencode.txt
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(t.TempDir())
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.OpencodeSystemPrompt != "opencode harness" {
+		t.Fatalf("opencode system prompt = %q, want %q", cfg.OpencodeSystemPrompt, "opencode harness")
+	}
+}
+
+func TestValidateBytesRejectsUnreadableOpencodeSystemPromptFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-opencode-prompt.txt")
+	data := []byte(fmt.Sprintf(`
+system_prompt_file_opencode: %s
+providers:
+  - name: test
+    style: openai
+    base_url: https://example.com
+    api_key: sk-test
+routes:
+  - model_id: m
+    routes:
+      - provider: test
+        model: m
+`, missing))
+
+	if err := ValidateBytes(data); err == nil || !strings.Contains(err.Error(), "system_prompt_file_opencode") {
+		t.Fatalf("ValidateBytes() error = %v, want unreadable system_prompt_file_opencode", err)
+	}
+}
+
 func TestLoadYAMLInvalidPortRejected(t *testing.T) {
 	for _, port := range []string{"not-a-port", "0", "-1", "65536"} {
 		path := writeTempYAML(t, fmt.Sprintf(`
