@@ -67,6 +67,7 @@ export interface ModelRow {
   maxOutput: number | null
   modalities: string[]
   source: string
+  free: boolean
 }
 
 const EMPTY = "—"
@@ -168,6 +169,9 @@ export function toModelRow(nativeId: string, source: string, model: OpenCodeMode
         (value, index, all) => value && all.indexOf(value) === index,
       )
     : []
+  // The catalog prices per token; a model is free when neither side charges.
+  const cost = model?.cost
+  const free = Boolean(cost && cost.input === 0 && cost.output === 0)
 
   return {
     id: nativeId,
@@ -179,6 +183,7 @@ export function toModelRow(nativeId: string, source: string, model: OpenCodeMode
     maxOutput: model?.limit?.output ?? null,
     modalities,
     source,
+    free,
   }
 }
 
@@ -214,4 +219,35 @@ export function enrichOpenCodeCatalog(models: OpenCodeModel[]): ModelRow[] {
   return models
     .filter((model) => Boolean(model.id))
     .map((model) => toModelRow(model.id, "opencode", model))
+}
+
+export interface OpenCodeCatalogEntry {
+  provider: string
+  model: OpenCodeModel
+}
+
+// parseOpenCodeCatalogEntries keeps provider provenance: one entry per
+// (provider, model) pair, with none of parseOpenCodeCatalog's cross-provider
+// dedupe. This is what feeds the per-provider sidebar on the models page.
+export function parseOpenCodeCatalogEntries(payload: OpenCodeCatalog | null | undefined): OpenCodeCatalogEntry[] {
+  if (!payload) return []
+
+  const entries: OpenCodeCatalogEntry[] = []
+  for (const [provider, value] of Object.entries(payload)) {
+    if (isProvider(value)) {
+      for (const model of Object.values(value.models ?? {})) {
+        if (model.id) entries.push({ provider, model })
+      }
+      continue
+    }
+    if (value.id) entries.push({ provider, model: value })
+  }
+
+  return entries
+}
+
+export function enrichOpenCodeCatalogByProvider(entries: OpenCodeCatalogEntry[]): ModelRow[] {
+  return entries
+    .filter((entry) => Boolean(entry.model.id))
+    .map((entry) => toModelRow(entry.model.id, entry.provider, entry.model))
 }
