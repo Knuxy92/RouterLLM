@@ -118,7 +118,9 @@ func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeB
 		reverse := renameReservedResponsesNames(routeBody, openCodeReservedTools)
 		injectMissingResponsesTools(routeBody, openCodeResponsesTools())
 		if forbidToolUse {
-			dropToolUse(routeBody)
+			// Keep the tools key — deleting it draws the gateway's soft 429
+			// FreeUsageLimitError — and pass the "none" choice through instead.
+			routeBody["tool_choice"] = "none"
 		}
 		routeBody["model"] = route.ModelName
 
@@ -131,7 +133,8 @@ func (p *Proxy) translateOpenCodeRoute(route provider.Route, path string, routeB
 	reverse := renameReservedToolNames(routeBody, openCodeReservedTools)
 	injectMissingTools(routeBody, opencode.RequiredTools())
 	if forbidToolUse {
-		dropToolUse(routeBody)
+		// Same rule: the tools stay, the "none" choice passes through.
+		routeBody["tool_choice"] = "none"
 	}
 	routeBody["model"] = route.ModelName
 
@@ -148,9 +151,9 @@ func clientForbidsToolUse(routeBody map[string]any) bool {
 }
 
 // forceAutoToolChoice rewrites the tool_choice values the OpenCode gateway
-// rejects — everything except "auto", and "none" which is honoured by removing
-// the tools instead. It returns a description of what it replaced for the log
-// line, or an empty string when nothing needed rewriting.
+// rejects — everything except "auto" and "none", both of which pass through.
+// It returns a description of what it replaced for the log line, or an empty
+// string when nothing needed rewriting.
 func forceAutoToolChoice(routeBody map[string]any) string {
 	choice, ok := routeBody["tool_choice"]
 	if !ok {
@@ -163,13 +166,6 @@ func forceAutoToolChoice(routeBody map[string]any) string {
 	routeBody["tool_choice"] = "auto"
 
 	return fmt.Sprintf("%v", choice)
-}
-
-// dropToolUse removes the tool surface entirely — the only way to honour
-// tool_choice "none" on a gateway that accepts nothing but "auto".
-func dropToolUse(body map[string]any) {
-	delete(body, "tools")
-	delete(body, "tool_choice")
 }
 
 // openCodeReservedTools holds the tool names the OpenCode gateway injects

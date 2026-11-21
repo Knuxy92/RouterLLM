@@ -1,10 +1,12 @@
 package opencode
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 )
 
-const UserAgent = "opencode/latest/2.0.23/cli"
+const UserAgent = "opencode/latest/2.3.2/cli"
 
 // ToolDef describes one tool the gateway requires on every dialect. Desc is
 // the description the client would send for its own tool of that name, so the
@@ -101,6 +103,26 @@ func NewRequestID() string {
 	return newIdentifier("msg_")
 }
 
+// newTraceIDs returns a fresh (traceID, spanID, parentID) triple as 32- and
+// 16-hex W3C trace identifiers — one trace per upstream attempt, as the CLI
+// emits on the wire.
+func newTraceIDs() (string, string, string) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	span := make([]byte, 8)
+	if _, err := rand.Read(span); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	parent := make([]byte, 8)
+	if _, err := rand.Read(parent); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+
+	return hex.EncodeToString(buf), hex.EncodeToString(span), hex.EncodeToString(parent)
+}
+
 func SetHeaders(header http.Header, sessionID, requestID, orgID string) {
 	header.Set("User-Agent", UserAgent)
 	header.Set("x-opencode-session", sessionID)
@@ -108,12 +130,18 @@ func SetHeaders(header http.Header, sessionID, requestID, orgID string) {
 	// gateway keys off whichever it knows and ignores the rest.
 	header.Set("x-session-id", sessionID)
 	header.Set("x-opencode-session-id", sessionID)
+	header.Set("x-session-affinity", sessionID)
 	header.Set("x-opencode-request", requestID)
 	header.Set("x-opencode-project", "global")
 	header.Set("x-opencode-client", "cli")
+	// The CLI rides a fresh W3C trace per request: a four-segment b3 with a
+	// parent span and a root traceparent (mirrors the captured wire format).
+	traceID, spanID, parentID := newTraceIDs()
+	header.Set("b3", traceID+"-"+spanID+"-1-"+parentID)
+	header.Set("traceparent", "00-"+traceID+"-"+spanID+"-01")
 	// The Console client attaches the serving account's org only when the
 	// account belongs to one; the gateway behaves the same without it.
 	if orgID != "" {
-		header.Set("x-org-id", orgID)
+		header.Set("x-opencode-org-id", orgID)
 	}
 }

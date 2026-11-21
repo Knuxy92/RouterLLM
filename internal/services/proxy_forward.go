@@ -254,9 +254,9 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
 			injectMissingTools(routeBody, opencode.RequiredTools())
-			if forbidToolUse {
-				dropToolUse(routeBody)
-			}
+			// tool_choice "none" passes through as the client sent it. Never
+			// delete the tools key: a request without `tools` draws the
+			// gateway's soft 429 FreeUsageLimitError instead of an answer.
 			routeBody["model"] = route.ModelName
 			if pv.ReasoningStyle == "raw" {
 				applyLegacyDefaults(routeBody, route.Defaults)
@@ -296,8 +296,10 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 				}
 			}
 			injectMissingAnthropicTools(doc, openCodeAnthropicTools())
+			// Same rule as the chat branch: the tools stay, the choice goes
+			// none — deleting the tool surface trips the gateway's soft 429.
 			if forbidToolUse {
-				delete(doc, "tools")
+				doc["tool_choice"] = map[string]any{"type": "none"}
 			}
 			reqBody, err = json.Marshal(doc)
 		default: // responses
@@ -635,6 +637,10 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 	var lastStatus int
 	var lastErrBody []byte
 
+	// One user send keeps one OpenCode session across every key attempt and
+	// retry — the native CLI never rotates the session mid-conversation.
+	opencodeSessionID := opencode.NewSessionID()
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		key, ok := pv.Keys.Next()
 		if !ok {
@@ -704,7 +710,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			} else if pv.Style == "opencode" {
 				// The key pool carries account refresh tokens, never the api_key
 				// from YAML. Exchange for a short-lived Console access token here;
-				// the serving account's org id rides on x-org-id automatically.
+				// the serving account's org id rides on x-opencode-org-id automatically.
 				server, orgID := p.opencodeServerOrg(key)
 				token, err := p.opencodeAccessToken(r.Context(), server, key, forceRefresh)
 				if err != nil {
@@ -714,7 +720,7 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					pv.Keys.MarkDead(key)
 					break
 				}
-				opencode.SetHeaders(req.Header, opencode.NewSessionID(), opencode.NewRequestID(), orgID)
+				opencode.SetHeaders(req.Header, opencodeSessionID, opencode.NewRequestID(), orgID)
 				req.Header.Set("Authorization", "Bearer "+token)
 			} else if pv.Style == "kilo" {
 				applyAuthHeaders(req.Header, key, pv.AuthMode)
@@ -805,6 +811,20 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("key %s rate-limited via %s, cooling down", maskKey(key), pv.Name), r2, eb)
+				lastStatus = r2.StatusCode
+				lastErrBody = eb
+				pv.Keys.MarkDead(key)
+				break
+			}
+
+			// The OpenCode gateway answers both real free-tier exhaustion and
+			// its soft shape rejection with the same 429 FreeUsageLimitError.
+			// Retrying the same account never helps either way, so it sits out
+			// the key manager's cooldown window and the pool moves on.
+			if pv.Style == "opencode" && r2.StatusCode == http.StatusTooManyRequests {
+				eb := ReadErrorBody(r2.Body)
+				r2.Body.Close()
+				p.logResp(fmt.Sprintf("key %s usage-limited via %s, cooling down", maskKey(key), pv.Name), r2, eb)
 				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				pv.Keys.MarkDead(key)

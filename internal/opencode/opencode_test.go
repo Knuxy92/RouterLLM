@@ -105,23 +105,36 @@ func TestSetHeaders(t *testing.T) {
 		"X-Opencode-Session":    "ses_abc",
 		"X-Session-Id":          "ses_abc",
 		"X-Opencode-Session-Id": "ses_abc",
+		"X-Session-Affinity":    "ses_abc",
 		"X-Opencode-Request":    "msg_def",
 		"X-Opencode-Project":    "global",
 		"X-Opencode-Client":     "cli",
 	}
-	if len(h) != len(want) {
-		t.Fatalf("headers = %v, want exactly %d entries", h, len(want))
+	if len(h) != len(want)+2 { // the b3/traceparent pair rides alongside
+		t.Fatalf("headers = %v, want exactly %d entries", h, len(want)+2)
 	}
 	for name, value := range want {
 		if got := h.Get(name); got != value {
 			t.Fatalf("%s = %q, want %q", name, got, value)
 		}
 	}
+	// The trace pair: four-segment b3 and a root traceparent on the same
+	// trace, matching the captured CLI wire format.
+	b3 := h.Get("B3")
+	if len(b3) != 68 || b3[32] != '-' || b3[49] != '-' || b3[51] != '-' {
+		t.Fatalf("b3 = %q, want 32hex-16hex-1-16hex", b3)
+	}
+	if tp := h.Get("Traceparent"); tp != "00-"+b3[:32]+"-"+b3[33:49]+"-01" {
+		t.Fatalf("traceparent = %q, want a root span of the same trace", tp)
+	}
 	if _, ok := h["Authorization"]; ok {
 		t.Fatalf("Authorization header set, want none")
 	}
 	if _, ok := h["X-Org-Id"]; ok {
-		t.Fatalf("X-Org-Id header set, want none")
+		t.Fatalf("X-Org-Id header set, want the x-opencode-org-id spelling")
+	}
+	if _, ok := h["X-Opencode-Org-Id"]; ok {
+		t.Fatalf("X-Opencode-Org-Id header set without an org, want none")
 	}
 }
 
@@ -130,8 +143,11 @@ func TestSetHeadersWithOrg(t *testing.T) {
 
 	SetHeaders(h, "ses_abc", "msg_def", "org-1")
 
-	if got := h.Get("X-Org-Id"); got != "org-1" {
-		t.Fatalf("X-Org-Id = %q, want org-1", got)
+	if got := h.Get("X-Opencode-Org-Id"); got != "org-1" {
+		t.Fatalf("X-Opencode-Org-Id = %q, want org-1", got)
+	}
+	if _, ok := h["X-Org-Id"]; ok {
+		t.Fatalf("X-Org-Id header set, want the x-opencode-org-id spelling")
 	}
 }
 

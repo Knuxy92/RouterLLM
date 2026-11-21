@@ -377,7 +377,7 @@ func TestForwardOpenCodeStyleCallChat(t *testing.T) {
 	}
 }
 
-func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
+func TestForwardOpenCodeKeepsToolsForToolChoiceNone(t *testing.T) {
 	var upstreamBody map[string]any
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -408,11 +408,13 @@ func TestForwardOpenCodeDropsToolsForToolChoiceNone(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
-	if _, ok := upstreamBody["tools"]; ok {
-		t.Errorf("upstream tools = %v, want none when the client asked for no tool use", upstreamBody["tools"])
+	// Deleting the tool surface draws the gateway's soft 429
+	// FreeUsageLimitError, so the tools must survive the translation.
+	if _, ok := upstreamBody["tools"]; !ok {
+		t.Errorf("upstream tools missing — the tools key must survive tool_choice none")
 	}
-	if _, ok := upstreamBody["tool_choice"]; ok {
-		t.Errorf("upstream tool_choice = %v, want the field removed", upstreamBody["tool_choice"])
+	if got := upstreamBody["tool_choice"]; got != "none" {
+		t.Errorf("upstream tool_choice = %v, want none passed through", got)
 	}
 }
 

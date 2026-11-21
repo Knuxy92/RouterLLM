@@ -115,7 +115,7 @@ func TestForwardOpenCodeUsesAccountTokenNotPoolKey(t *testing.T) {
 	mux.HandleFunc("/auth/device/token", opencodeTokenHandler(t, &refreshes))
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
-		orgID = r.Header.Get("X-Org-Id")
+		orgID = r.Header.Get("X-Opencode-Org-Id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, opencodeChatSSE)
 	})
@@ -136,7 +136,7 @@ func TestForwardOpenCodeUsesAccountTokenNotPoolKey(t *testing.T) {
 		t.Fatalf("Authorization = %q, want the minted access token, never the pool key", auth)
 	}
 	if orgID != "org-1" {
-		t.Fatalf("X-Org-Id = %q, want org-1 from the serving account", orgID)
+		t.Fatalf("X-Opencode-Org-Id = %q, want org-1 from the serving account", orgID)
 	}
 	if refreshes < 1 {
 		t.Fatalf("refreshes = %d, want at least one exchange", refreshes)
@@ -151,7 +151,7 @@ func TestForwardOpenCodeOmitsOrgHeaderWithoutOrg(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/device/token", opencodeTokenHandler(t, &refreshes))
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		_, orgSeen = r.Header["X-Org-Id"]
+		_, orgSeen = r.Header["X-Opencode-Org-Id"]
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, opencodeChatSSE)
 	})
@@ -169,7 +169,7 @@ func TestForwardOpenCodeOmitsOrgHeaderWithoutOrg(t *testing.T) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	if orgSeen {
-		t.Fatalf("X-Org-Id sent without an org: %q", orgID)
+		t.Fatalf("X-Opencode-Org-Id sent without an org: %q", orgID)
 	}
 }
 
