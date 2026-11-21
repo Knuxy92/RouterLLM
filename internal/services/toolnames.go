@@ -111,9 +111,16 @@ func sanitizeToolName(name string) string {
 	return name[:56] + "-" + hex.EncodeToString(sum[:])[:7]
 }
 
+// nameTaken reports whether a candidate tool name collides with an already
+// used name, case-insensitively — the gateway's reserved-name gate treats
+// "Edit" and "edit" as the same tool.
+func nameTaken(candidate string, used map[string]bool) bool {
+	return used[candidate] || used[strings.ToLower(candidate)]
+}
+
 func uniqueSanitizedToolName(name string, used map[string]bool) string {
 	candidate := sanitizeToolName(name)
-	if !used[candidate] {
+	if !nameTaken(candidate, used) {
 		return candidate
 	}
 
@@ -126,7 +133,7 @@ func uniqueSanitizedToolName(name string, used map[string]bool) string {
 		sum := sha256.Sum256([]byte(name + ":" + strconv.Itoa(i)))
 
 		candidate = prefix + "-" + hex.EncodeToString(sum[:])[:23]
-		if !used[candidate] {
+		if !nameTaken(candidate, used) {
 			return candidate
 		}
 	}

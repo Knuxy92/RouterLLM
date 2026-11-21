@@ -1,15 +1,20 @@
 package services
 
+import "strings"
+
 // renameReservedToolNames renames client tools whose names collide with the
 // reserved set (chat shape: declarations, history tool_calls, tool_choice) and
-// returns the sanitized->original map for response restore.
+// returns the sanitized->original map for response restore. Collisions are
+// case-insensitive: the gateway's reserved-name gate treats "Edit" and "edit"
+// as the same tool, so a client "Edit" must be renamed away too.
 func renameReservedToolNames(body map[string]any, reserved map[string]bool) map[string]string {
+	reservedLower := lowerReservedSet(reserved)
 	forward, reverse, used := newReservedRename(reserved)
 
 	tools, _ := body["tools"].([]any)
 	for _, entry := range tools {
 		name, ok := toolComparableName(entry)
-		if !ok || !reserved[name] {
+		if !ok || !reservedLower[strings.ToLower(name)] {
 			continue
 		}
 		assignSanitizedToolName(name, forward, reverse, used)
@@ -29,9 +34,10 @@ func renameReservedToolNames(body map[string]any, reserved map[string]bool) map[
 // whole document and renames function_call items, flat function declarations
 // and chat-shaped tool_choice entries whose names collide with the reserved set.
 func renameReservedResponsesNames(doc map[string]any, reserved map[string]bool) map[string]string {
+	reservedLower := lowerReservedSet(reserved)
 	forward, reverse, used := newReservedRename(reserved)
 
-	walkReserved(doc, reserved, forward, reverse, used)
+	walkReserved(doc, reservedLower, forward, reverse, used)
 	if len(forward) == 0 {
 		return nil
 	}
@@ -39,12 +45,22 @@ func renameReservedResponsesNames(doc map[string]any, reserved map[string]bool) 
 	return reverse
 }
 
+func lowerReservedSet(reserved map[string]bool) map[string]bool {
+	lower := make(map[string]bool, len(reserved))
+	for name := range reserved {
+		lower[strings.ToLower(name)] = true
+	}
+
+	return lower
+}
+
 func newReservedRename(reserved map[string]bool) (map[string]string, map[string]string, map[string]bool) {
 	forward := make(map[string]string)
 	reverse := make(map[string]string)
-	used := make(map[string]bool, len(reserved))
+	used := make(map[string]bool, len(reserved)*2)
 	for name := range reserved {
 		used[name] = true
+		used[strings.ToLower(name)] = true
 	}
 
 	return forward, reverse, used
@@ -52,23 +68,23 @@ func newReservedRename(reserved map[string]bool) (map[string]string, map[string]
 
 // walkReserved visits every object/array and renames names on function_call
 // items, flat function declarations and chat-shaped tool_choice.
-func walkReserved(v any, reserved map[string]bool, forward, reverse map[string]string, used map[string]bool) {
+func walkReserved(v any, reservedLower map[string]bool, forward, reverse map[string]string, used map[string]bool) {
 	switch t := v.(type) {
 	case map[string]any:
 		typeName, _ := t["type"].(string)
 		name, _ := t["name"].(string)
-		if (typeName == "function_call" || typeName == "function") && name != "" && reserved[name] {
+		if (typeName == "function_call" || typeName == "function") && name != "" && reservedLower[strings.ToLower(name)] {
 			t["name"] = assignSanitizedToolName(name, forward, reverse, used)
 		}
 		if fn, ok := t["function"].(map[string]any); ok {
-			walkReserved(fn, reserved, forward, reverse, used)
+			walkReserved(fn, reservedLower, forward, reverse, used)
 		}
 		for _, child := range t {
-			walkReserved(child, reserved, forward, reverse, used)
+			walkReserved(child, reservedLower, forward, reverse, used)
 		}
 	case []any:
 		for _, child := range t {
-			walkReserved(child, reserved, forward, reverse, used)
+			walkReserved(child, reservedLower, forward, reverse, used)
 		}
 	}
 }
