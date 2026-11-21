@@ -64,6 +64,10 @@
       "type": "string",
       "description": "Path to a file whose contents are prepended as a system message."
     },
+    "system_prompt_file_opencode": {
+      "type": "string",
+      "description": "Path to a file whose contents are prepended as the leading system message on style: opencode legs only."
+    },
     "providers": {
       "type": "array",
       "description": "Upstream provider configurations.",

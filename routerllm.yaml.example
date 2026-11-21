@@ -32,6 +32,11 @@ forward_client_headers: true        # forward safe client headers upstream (defa
 #   - X-Request-ID                  # (case-insensitive; hop-by-hop headers always blocked)
 #   - User-Agent
 system_prompt_file: system_prompt.txt  # prepend this file's content as a system message (default: none)
+system_prompt_file_opencode: system_prompt_opencode.txt
+                                    # prepend this file's content as the LEADING system
+                                    # message on style: opencode legs only — the OpenCode
+                                    # gateway checks each request for its harness prompt
+                                    # (default: none)
                                     # when a key gets 401/402/403, it's
                                     # skipped for this duration
 

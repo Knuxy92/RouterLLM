@@ -10,6 +10,7 @@ services:
     volumes:
       - ./routerllm.yaml:/app/routerllm.yaml:rw
       - ./system_prompt.txt:/app/system_prompt.txt:ro
+      - ./system_prompt_opencode.txt:/app/system_prompt_opencode.txt:ro
       # Request-event telemetry survives container rebuilds only if the whole
       # /app/data directory is mounted (the store rotates by rename, so a
       # single-file bind mount would break rotation). A named volume is used
