@@ -256,6 +256,14 @@ func (p *Proxy) translateRoute(pv *provider.Provider, route provider.Route, path
 		}
 		switch route.Dialect() {
 		case "chat":
+			// Representative-tool mode collapses a large native tool surface
+			// into a catalog + one execute call; a CLI-like request (its own
+			// execute tool) passes through untouched.
+			if repToolsEnabled() {
+				if collapsed, ok := collapseRepTools(routeBody); ok {
+					p.log.Printf("route %s/%s: collapsed %d client tool(s) into the representative execute tool", route.ModelName, pv.Name, collapsed)
+				}
+			}
 			restore := renameReservedToolNames(routeBody, openCodeReservedTools)
 			toolNameRestore = mergeToolNameRestore(toolNameRestore, restore)
 			injectMissingTools(routeBody, opencode.RequiredTools())
