@@ -43,7 +43,7 @@ OpenCode needs no API key: run `routerllm --opencode-login` (same for
 OpenCode also runs with no login at all: set  on the
 provider (or  to try anonymous first and fall back to the login
 accounts). Anonymous traffic is only accepted over the Bun TLS relay, so
-`OPENCODE_TLS_RELAY=1` is required — the proxy refuses to start otherwise.
+`OPENCODE_TLS_RELAY=1` is required — the proxy refuses to start otherwise. Anonymous traffic only serves the `-free` model ids (a paid model id answers 401).
 
 `.env` is loaded automatically at startup. Real environment variables take precedence over `.env`.
 
