@@ -216,6 +216,7 @@ The command prints a verification URL and user code, polls for approval, then st
 long-lived token in `kilo-accounts.json` next to the executable (`0600`). Override the location
 with `KILO_ACCOUNTS_FILE`. Tokens do not expire within a year and need no refresh. When the
 account belongs to an organization, RouterLLM sends `X-KILOCODE-ORGANIZATIONID` automatically.
+Requests retry transient upstream failures (transport errors, 408/429/5xx) up to 10 times, spacing them the way the Kilo CLI does — a `Retry-After`/`Retry-After-MS` header wins when the gateway sends one, otherwise exponential 2s→4s→8s… with 25% jitter, capped at 30s. Auth failures (401/402/403) never retry: the key is dropped from the pool at once and the log tells you to re-run `--kilo-login`.
 The API base is `KILO_API_URL` (default `https://api.kilo.ai`) and the gateway is
 `KILO_AI_GATEWAY_URL` (default `https://ai-gateway.kilo.ai/api`). Run the command again to add
 more accounts — they rotate through the normal key manager.
