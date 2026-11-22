@@ -645,6 +645,12 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 	}
 
 	maxRetries := settings.Current().Retry.Attempts
+	if pv.Style == "kilo" {
+		// Kilo walks its own retry schedule — kiloRetryDelay mirrors the
+		// official CLI's exponential backoff — so it gets its own attempt
+		// count instead of the shared settings knob.
+		maxRetries = kiloRetryAttempts
+	}
 
 	pv.RecordRequest()
 	var lastStatus int
@@ -770,6 +776,14 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 					audit.FromContext(r.Context()).Emit(repE)
 				}
 				if retry < maxRetries-1 {
+					if pv.Style == "kilo" {
+						// Transport failure: no response headers to consult,
+						// so this is the plain exponential path.
+						if p.sleepFor(r.Context(), kiloRetryDelay(nil, retry+1)) {
+							return nil, lastStatus, lastErrBody, true
+						}
+						continue
+					}
 					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
 					}
@@ -851,6 +865,13 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				if retry < maxRetries-1 {
+					if pv.Style == "kilo" {
+						// Header stays readable after the body is closed.
+						if p.sleepFor(r.Context(), kiloRetryDelay(r2.Header, retry+1)) {
+							return nil, lastStatus, lastErrBody, true
+						}
+						continue
+					}
 					if p.backoff(r.Context(), retry) {
 						return nil, lastStatus, lastErrBody, true
 					}
@@ -1010,7 +1031,11 @@ func briefBody(body []byte) string {
 
 func (p *Proxy) backoff(ctx context.Context, retry int) bool {
 	base := settings.Current().Retry.BackoffBaseMS
-	d := time.Duration(base*(1<<retry)) * time.Millisecond
+	return p.sleepFor(ctx, time.Duration(base*(1<<retry))*time.Millisecond)
+}
+
+// sleepFor waits d or until the request context is done, reporting which.
+func (p *Proxy) sleepFor(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
