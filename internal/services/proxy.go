@@ -76,6 +76,8 @@ type Proxy struct {
 	quotaMu              sync.Mutex
 	quotas               map[string]map[string]quota.Snapshot
 	telemetry            atomic.Pointer[telemetry.Store]
+	// anonGates holds one bolt-mode gate per provider name (proxy_opencode_anon.go).
+	anonGates sync.Map
 }
 
 // debug controls the per-request routing trace (which model, which provider

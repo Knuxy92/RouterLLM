@@ -48,7 +48,9 @@ func openCodeSanitizedTool() string {
 	return uniqueSanitizedToolName(openCodeCollidingTool, used)
 }
 
-func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
+// assertOpenCodeIdentity checks the identity header set every opencode leg
+// sends regardless of auth mode (internal/opencode.SetHeaders owns values).
+func assertOpenCodeIdentity(t *testing.T, r *http.Request) {
 	t.Helper()
 
 	if got := r.Header.Get("User-Agent"); got != opencode.UserAgent {
@@ -73,11 +75,17 @@ func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
 	if got := r.Header.Get("x-opencode-client"); got != "cli" {
 		t.Errorf("x-opencode-client = %q, want cli", got)
 	}
-	if got := r.Header.Get("Authorization"); got != "Bearer oc_access_token" {
-		t.Errorf("Authorization = %q, want Bearer oc_access_token", got)
-	}
 	if got := r.Header.Get("x-api-key"); got != "" {
 		t.Errorf("x-api-key = %q, want empty (opencode auth is Bearer-only)", got)
+	}
+}
+
+func assertOpenCodeHeaders(t *testing.T, r *http.Request) {
+	t.Helper()
+
+	assertOpenCodeIdentity(t, r)
+	if got := r.Header.Get("Authorization"); got != "Bearer oc_access_token" {
+		t.Errorf("Authorization = %q, want Bearer oc_access_token", got)
 	}
 }
 

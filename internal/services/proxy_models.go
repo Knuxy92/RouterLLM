@@ -30,6 +30,11 @@ func (p *Proxy) ListProviderModels(ctx context.Context, name string) (ModelCatal
 	}
 
 	key := pv.Keys.LiveKey()
+	if pv.OpencodeAnon() {
+		// Anonymous opencode catalog: the placeholder credential the CLI
+		// sends signed out, fetched through the Bun relay like chat traffic.
+		key = opencodeAnonKey
+	}
 	if pv.AuthMode != "none" && key == "" {
 		return ModelCatalog{}, fmt.Errorf("provider %q has no available keys", name)
 	}

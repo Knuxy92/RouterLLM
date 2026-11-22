@@ -640,6 +640,12 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 	}
 
 	maxAttempts := pv.Keys.AliveCount()
+	// Anonymous modes run one attempt on the placeholder credential ahead of
+	// (or instead of) the pool; a tripped bolt gate goes straight to login.
+	anonAttempt := pv.OpencodeAnon() && p.anonGateFor(pv.Name).allowed(time.Now())
+	if anonAttempt {
+		maxAttempts++
+	}
 	if maxAttempts == 0 {
 		return nil, 0, nil, false
 	}
@@ -661,9 +667,15 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 	opencodeSessionID := opencode.NewSessionID()
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		key, ok := pv.Keys.Next()
-		if !ok {
-			break
+		var key string
+		if attempt == 0 && anonAttempt {
+			key = opencodeAnonKey
+		} else {
+			next, ok := pv.Keys.Next()
+			if !ok {
+				break
+			}
+			key = next
 		}
 		forceRefresh := false
 		refreshed := false
@@ -727,20 +739,27 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			} else if pv.Style == "google" {
 				req.Header.Set(googleAPIKeyHeader, key)
 			} else if pv.Style == "opencode" {
-				// The key pool carries account refresh tokens, never the api_key
-				// from YAML. Exchange for a short-lived Console access token here;
-				// the serving account's org id rides on x-opencode-org-id automatically.
-				server, orgID := p.opencodeServerOrg(key)
-				token, err := p.opencodeAccessToken(r.Context(), server, key, forceRefresh)
-				if err != nil {
-					p.log.Printf("opencode token refresh failed via %s: %v", pv.Name, err)
-					lastStatus = http.StatusUnauthorized
-					lastErrBody = []byte(err.Error())
-					pv.Keys.MarkDead(key)
-					break
+				if key == opencodeAnonKey {
+					// Anonymous attempt: the CLI's placeholder credential,
+					// identity headers only — no Console exchange happens.
+					opencode.SetHeaders(req.Header, opencodeSessionID, opencode.NewRequestID(), "")
+					req.Header.Set("Authorization", "Bearer "+opencodeAnonKey)
+				} else {
+					// The key pool carries account refresh tokens, never the api_key
+					// from YAML. Exchange for a short-lived Console access token here;
+					// the serving account's org id rides on x-opencode-org-id automatically.
+					server, orgID := p.opencodeServerOrg(key)
+					token, err := p.opencodeAccessToken(r.Context(), server, key, forceRefresh)
+					if err != nil {
+						p.log.Printf("opencode token refresh failed via %s: %v", pv.Name, err)
+						lastStatus = http.StatusUnauthorized
+						lastErrBody = []byte(err.Error())
+						pv.Keys.MarkDead(key)
+						break
+					}
+					opencode.SetHeaders(req.Header, opencodeSessionID, opencode.NewRequestID(), orgID)
+					req.Header.Set("Authorization", "Bearer "+token)
 				}
-				opencode.SetHeaders(req.Header, opencodeSessionID, opencode.NewRequestID(), orgID)
-				req.Header.Set("Authorization", "Bearer "+token)
 			} else if pv.Style == "kilo" {
 				applyAuthHeaders(req.Header, key, pv.AuthMode)
 				if orgID := p.kiloOrg(key); orgID != "" {
@@ -824,6 +843,12 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("key %s dead via %s", maskKey(key), pv.Name), r2, eb)
+				if key == opencodeAnonKey {
+					// The gateway refused the anonymous identity itself: bolt
+					// falls through to the login pool, anonymous-only ends here.
+					p.anonGateFor(pv.Name).trip(time.Now(), anonCooldown)
+					p.log.Printf("opencode anonymous rejected via %s (%d) — cooling down anonymous for %v", pv.Name, r2.StatusCode, anonCooldown)
+				}
 				if pv.Style == "kilo" {
 					// Kilo tokens never rotate, so a dead key means the
 					// stored credential itself went bad — say so plainly.
@@ -856,6 +881,15 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 			if pv.Style == "opencode" && r2.StatusCode == http.StatusTooManyRequests {
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
+				if key == opencodeAnonKey {
+					// Anonymous door shut: bolt falls through to the login
+					// pool, anonymous-only returns the exhaustion upstream.
+					p.anonGateFor(pv.Name).trip(time.Now(), anonCooldown)
+					p.logResp(fmt.Sprintf("opencode anonymous usage-limited via %s, cooling down anonymous for %v", pv.Name, anonCooldown), r2, eb)
+					lastStatus = r2.StatusCode
+					lastErrBody = eb
+					break
+				}
 				p.logResp(fmt.Sprintf("key %s usage-limited via %s, cooling down", maskKey(key), pv.Name), r2, eb)
 				lastStatus = r2.StatusCode
 				lastErrBody = eb
