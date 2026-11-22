@@ -155,6 +155,9 @@ providers:
   # x-org-id automatically when the serving login account belongs to an org).
   # Auth is login-based, not api_key: run `routerllm --opencode-login` (device
   # flow against https://opencode.ai/console, override with OPENCODE_CONSOLE_URL)
+  # Anonymous mode: set opencode_auth: anonymous (no login at all) or bolt
+  # (anonymous first, login fallback). Both require OPENCODE_TLS_RELAY=1 —
+  # the gateway only accepts anonymous traffic over the Bun TLS relay.
   # to create opencode-accounts.json next to the executable (override with
   # OPENCODE_ACCOUNTS_FILE). An ENABLED opencode provider refuses to start
   # until that file holds at least one account — same rule as cline/codex.

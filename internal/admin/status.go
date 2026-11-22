@@ -9,27 +9,28 @@ import (
 )
 
 type KeyState struct {
-	Masked       string                  `json:"masked"`
-	Alive        bool                    `json:"alive"`
-	CooldownLeft int                     `json:"cooldown_left_seconds"`
-	Disabled     bool                    `json:"disabled"`
+	Masked       string          `json:"masked"`
+	Alive        bool            `json:"alive"`
+	CooldownLeft int             `json:"cooldown_left_seconds"`
+	Disabled     bool            `json:"disabled"`
 	Quota        *quota.Snapshot `json:"quota,omitempty"`
 }
 
 type ProviderStatus struct {
-	Name       string     `json:"name"`
-	Style      string     `json:"style"`
-	BaseURL    string     `json:"base_url"`
-	AuthMode   string     `json:"auth_mode"`
-	Disabled   bool       `json:"disabled"`
-	KeysAlive  int        `json:"keys_alive"`
-	KeysTotal  int        `json:"keys_total"`
-	Keys       []KeyState `json:"keys"`
-	Requests   uint64     `json:"requests"`
-	Errors     uint64     `json:"errors"`
-	Shared     string     `json:"share,omitempty"`
-	Serving    bool       `json:"serving"`
-	ModelCount int        `json:"model_count"`
+	Name         string     `json:"name"`
+	Style        string     `json:"style"`
+	BaseURL      string     `json:"base_url"`
+	AuthMode     string     `json:"auth_mode"`
+	OpencodeAuth string     `json:"opencode_auth,omitempty"`
+	Disabled     bool       `json:"disabled"`
+	KeysAlive    int        `json:"keys_alive"`
+	KeysTotal    int        `json:"keys_total"`
+	Keys         []KeyState `json:"keys"`
+	Requests     uint64     `json:"requests"`
+	Errors       uint64     `json:"errors"`
+	Shared       string     `json:"share,omitempty"`
+	Serving      bool       `json:"serving"`
+	ModelCount   int        `json:"model_count"`
 }
 
 type RouteLeg struct {
@@ -96,13 +97,14 @@ func buildProviders(reg *provider.Registry, quotaFn func(provider, key string) (
 
 	for _, pc := range reg.ProviderConfigs() {
 		status := ProviderStatus{
-			Name:     pc.Name,
-			Style:    pc.Style,
-			BaseURL:  pc.BaseURL,
-			AuthMode: pc.AuthMode,
-			Disabled: pc.Disabled,
-			Shared:   pc.ShareKeys,
-			Keys:     []KeyState{},
+			Name:         pc.Name,
+			Style:        pc.Style,
+			BaseURL:      pc.BaseURL,
+			AuthMode:     pc.AuthMode,
+			OpencodeAuth: pc.OpencodeAuth,
+			Disabled:     pc.Disabled,
+			Shared:       pc.ShareKeys,
+			Keys:         []KeyState{},
 		}
 
 		if live, ok := reg.Provider(pc.Name); ok {

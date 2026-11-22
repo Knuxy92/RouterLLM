@@ -40,6 +40,11 @@ OpenCode needs no API key: run `routerllm --opencode-login` (same for
 `--cline-login`, `--codex-login`, `--alysis-login`, `--workbuddy-login`, and
 `--kilo-login`) to create the account file before starting.
 
+OpenCode also runs with no login at all: set  on the
+provider (or  to try anonymous first and fall back to the login
+accounts). Anonymous traffic is only accepted over the Bun TLS relay, so
+`OPENCODE_TLS_RELAY=1` is required — the proxy refuses to start otherwise.
+
 `.env` is loaded automatically at startup. Real environment variables take precedence over `.env`.
 
 ### 3. Run
@@ -81,6 +86,7 @@ providers:
     base_url: https://forge-gateway-api.fly.dev
     style: openai                 # openai | anthropic | cline | google | alysis | codex
     auth_mode: bearer             # bearer | x-api-key | both (ignored for google)
+    opencode_auth: login          # login | anonymous | bolt (opencode style only)
     headers:                      # optional extra headers
       Content-Type: application/json
     share: mygroup                # optional key-sharing group name
