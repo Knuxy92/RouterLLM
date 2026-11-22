@@ -252,3 +252,77 @@ func TestParseModels(t *testing.T) {
 		})
 	}
 }
+
+// A transient poll failure must not kill the login: 503 once, then approval.
+func TestPollForTokenToleratesTransient(t *testing.T) {
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls++
+		w.Header().Set("Content-Type", "application/json")
+		if polls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"overloaded"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"approved","token":"tok_live","userEmail":"user@example.test"}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTPClient: server.Client(), APIBase: server.URL, pollInterval: time.Millisecond}
+	token, err := client.PollForToken(context.Background(), DeviceAuth{Code: "SHORT", ExpiresIn: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "tok_live" || polls != 2 {
+		t.Fatalf("token = %q, polls = %d", token, polls)
+	}
+}
+
+// A dropped connection (transport error) keeps the window open too.
+func TestPollForTokenToleratesTransportBlip(t *testing.T) {
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls++
+		if polls == 1 {
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Errorf("server does not support hijacking")
+				return
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = conn.Close() // client sees EOF — a transport failure
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"approved","token":"tok_live","userEmail":"user@example.test"}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTPClient: server.Client(), APIBase: server.URL, pollInterval: time.Millisecond}
+	token, err := client.PollForToken(context.Background(), DeviceAuth{Code: "SHORT", ExpiresIn: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "tok_live" || polls != 2 {
+		t.Fatalf("token = %q, polls = %d", token, polls)
+	}
+}
+
+// A persistent outage gives up early with a self-describing error instead of
+// burning the whole ten-minute window silently.
+func TestPollForTokenTransientLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := &Client{HTTPClient: server.Client(), APIBase: server.URL, pollInterval: time.Millisecond}
+	_, err := client.PollForToken(context.Background(), DeviceAuth{Code: "SHORT", ExpiresIn: 60})
+	if err == nil || !strings.Contains(err.Error(), "consecutive") {
+		t.Fatalf("err = %v, want the consecutive-failures limit error", err)
+	}
+}

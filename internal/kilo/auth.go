@@ -18,6 +18,9 @@ const (
 	defaultGatewayBase = "https://ai-gateway.kilo.ai/api"
 	devicePollInterval = 3 * time.Second
 	defaultExpiresIn   = 600
+	// Consecutive transient poll failures (network blips, 429, 5xx) tolerated
+	// before the login gives up early instead of burning the whole window.
+	kiloPollTransientLimit = 10
 )
 
 // OrgHeader is the per-account organization header the gateway reads to bill
@@ -111,7 +114,10 @@ func (c *Client) RequestDeviceAuth(ctx context.Context) (DeviceAuth, error) {
 }
 
 // PollForToken polls with the short code (the device_code returns 410). Kilo
-// answers 202 while pending, 403 on denial, 410 on expiry and 200 once approved.
+// answers 202 while pending, 403 on denial, 410 on expiry and 200 once
+// approved. Transient poll failures — connection blips, 429, 5xx — keep the
+// window open (the official CLI does the same); a bounded streak of them
+// gives up early, and denial/expiry still fail immediately.
 func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, error) {
 	expiresIn := device.ExpiresIn
 	if expiresIn <= 0 {
@@ -124,6 +130,7 @@ func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, e
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
 	pollURL := c.apiBase() + "/api/device-auth/codes/" + url.PathEscape(device.Code)
 
+	transientFails := 0
 	for time.Now().Before(deadline) {
 		if err := util.SleepContext(ctx, interval); err != nil {
 			return "", err
@@ -137,13 +144,18 @@ func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, e
 
 		resp, err := c.httpClient().Do(req)
 		if err != nil {
-			return "", fmt.Errorf("poll kilo device auth: %w", err)
+			transientFails++
+			if transientFails >= kiloPollTransientLimit {
+				return "", fmt.Errorf("poll kilo device auth after %d consecutive failures: %w", transientFails, err)
+			}
+			continue
 		}
 		body := util.ReadLimited(resp.Body)
 		resp.Body.Close()
 
 		switch resp.StatusCode {
 		case http.StatusAccepted:
+			transientFails = 0
 			continue
 		case http.StatusForbidden:
 			return "", fmt.Errorf("kilo login was denied on the website")
@@ -161,7 +173,15 @@ func (c *Client) PollForToken(ctx context.Context, device DeviceAuth) (string, e
 			if payload.Status == "approved" && payload.Token != "" {
 				return payload.Token, nil
 			}
+			transientFails = 0
 		default:
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+				transientFails++
+				if transientFails >= kiloPollTransientLimit {
+					return "", fmt.Errorf("kilo device poll kept failing (%d consecutive): %s: %s", transientFails, resp.Status, body)
+				}
+				continue
+			}
 			return "", fmt.Errorf("kilo device poll returned %s: %s", resp.Status, body)
 		}
 	}
