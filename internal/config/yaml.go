@@ -364,6 +364,10 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 		return fmt.Errorf("provider %q: unsupported auth_mode %q (must be bearer, x-api-key, both, or none)", yp.Name, yp.AuthMode)
 	}
 
+	if yp.Style == "kilo" && yp.AuthMode == "none" {
+		return fmt.Errorf("provider %q: style kilo always authenticates (the Kilo gateway rejects keyless requests) — remove auth_mode: none", yp.Name)
+	}
+
 	switch yp.ReasoningStyle {
 	case "openai", "openrouter", "qwen", "raw", "":
 	default:

@@ -824,6 +824,11 @@ func (p *Proxy) tryKeys(pv *provider.Provider, call upstreamCall, r *http.Reques
 				eb := ReadErrorBody(r2.Body)
 				r2.Body.Close()
 				p.logResp(fmt.Sprintf("key %s dead via %s", maskKey(key), pv.Name), r2, eb)
+				if pv.Style == "kilo" {
+					// Kilo tokens never rotate, so a dead key means the
+					// stored credential itself went bad — say so plainly.
+					p.log.Printf("kilo key %s rejected upstream (%d) — token may be stale or revoked; re-run: routerllm --kilo-login", maskKey(key), r2.StatusCode)
+				}
 				lastStatus = r2.StatusCode
 				lastErrBody = eb
 				pv.Keys.MarkDead(key)

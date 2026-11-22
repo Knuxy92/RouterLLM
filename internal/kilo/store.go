@@ -50,17 +50,21 @@ func (s *AccountStore) GatewayKeys() []string {
 	return accounts.Keys(s.accounts, func(a Account) string { return a.Token })
 }
 
-func (s *AccountStore) OrganizationID(token string) string {
+// OrganizationID returns the account's organization id and whether the token
+// exists in the store. An account without an organization reports ("", true) —
+// omitting the header for it is correct; a token that is not in the store
+// reports ("", false).
+func (s *AccountStore) OrganizationID(token string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, account := range s.accounts {
 		if account.Token == token {
-			return account.OrganizationID
+			return account.OrganizationID, true
 		}
 	}
 
-	return ""
+	return "", false
 }
 
 func (s *AccountStore) Add(account Account) error {

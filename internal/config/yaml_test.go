@@ -1424,3 +1424,28 @@ routes:
 		}
 	}
 }
+
+func TestLoadYAMLKiloProviderRejectsAuthModeNone(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "kilo-accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"accounts":[{"accountId":"acc_1","token":"tok_test1234","organizationId":"org-1","createdAt":"2026-01-01T00:00:00Z"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KILO_ACCOUNTS_FILE", accounts)
+
+	path := writeTempYAML(t, `
+providers:
+  - name: kilo
+    style: kilo
+    base_url: https://ai-gateway.kilo.ai/api/v1
+    auth_mode: none
+routes:
+  - model_id: kilo-model
+    routes:
+      - provider: kilo
+        model: kilo-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "always authenticates") {
+		t.Fatalf("error = %v, want 'style kilo always authenticates'", err)
+	}
+}

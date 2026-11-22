@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"routerllm/internal/kilo"
@@ -63,9 +64,16 @@ func kiloExponentialDelay(attempt int) time.Duration {
 	return min(base+time.Duration(float64(base)*0.25*rand.Float64()), kiloRetryCap)
 }
 
+// kiloOrgMissOnce guards the store-miss warning so a mis-keyed provider (a
+// yaml api_key override the store never saw, say) logs once per key instead
+// of once per request.
+var kiloOrgMissOnce sync.Map
+
 // kiloOrg resolves the per-account organization id for a gateway key. Kilo
 // tokens are long-lived and never rotate, so a direct store lookup is stable
-// across requests; no sticky cache is needed.
+// across requests; no sticky cache is needed. An account without an
+// organization legitimately omits the header; a key the store has never seen
+// gets a one-time warning.
 func (p *Proxy) kiloOrg(token string) string {
 	store, err := kilo.LoadAccountStore(kilo.DefaultAccountsPath())
 	if err != nil {
@@ -73,5 +81,12 @@ func (p *Proxy) kiloOrg(token string) string {
 		return ""
 	}
 
-	return store.OrganizationID(token)
+	org, found := store.OrganizationID(token)
+	if !found {
+		if _, dup := kiloOrgMissOnce.LoadOrStore(token, true); !dup {
+			p.log.Printf("kilo key %s is not in the accounts store (yaml api_key override?) — %s omitted", maskKey(token), kilo.OrgHeader)
+		}
+	}
+
+	return org
 }

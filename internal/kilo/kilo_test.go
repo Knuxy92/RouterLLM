@@ -42,11 +42,16 @@ func TestAccountStoreRoundTrip(t *testing.T) {
 	if got := reloaded.GatewayKeys(); !reflect.DeepEqual(got, []string{"tok_one", "tok_two"}) {
 		t.Fatalf("gateway keys = %#v", got)
 	}
-	if got := reloaded.OrganizationID("tok_one"); got != "org-1" {
-		t.Fatalf("org for tok_one = %q, want org-1", got)
+	if got, found := reloaded.OrganizationID("tok_one"); !found || got != "org-1" {
+		t.Fatalf("org for tok_one = (%q, %v), want (org-1, true)", got, found)
 	}
-	if got := reloaded.OrganizationID("tok_two"); got != "" {
-		t.Fatalf("org for tok_two = %q, want empty", got)
+	// tok_two exists but has no organization: found, empty.
+	if got, found := reloaded.OrganizationID("tok_two"); !found || got != "" {
+		t.Fatalf("org for tok_two = (%q, %v), want (\"\", true)", got, found)
+	}
+	// An unknown token is not found at all.
+	if got, found := reloaded.OrganizationID("tok_unknown"); found || got != "" {
+		t.Fatalf("org for unknown token = (%q, %v), want (\"\", false)", got, found)
 	}
 }
 
