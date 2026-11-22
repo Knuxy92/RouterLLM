@@ -23,6 +23,7 @@ type ProviderConfig struct {
 	Headers        map[string]string
 	ShareKeys      string
 	AuthMode       string
+	OpencodeAuth   string
 	Query          string
 	ReasoningStyle string
 	Disabled       bool

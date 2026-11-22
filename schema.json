@@ -652,6 +652,16 @@
           "default": "bearer",
           "description": "Authentication mode. none sends no auth header and needs no api_key (keyless local upstreams)."
         },
+        "opencode_auth": {
+          "type": "string",
+          "enum": [
+            "login",
+            "anonymous",
+            "bolt"
+          ],
+          "default": "login",
+          "description": "OpenCode style only. login uses the account store and Console token exchange (default). anonymous sends the CLI's public placeholder credential with no account. bolt tries anonymous first, then falls back to login accounts for 60s after the gateway rejects anonymous. anonymous and bolt require OPENCODE_TLS_RELAY=1 (the Bun TLS relay) — the gateway only accepts anonymous traffic over that fingerprint."
+        },
         "reasoning_style": {
           "type": "string",
           "enum": [

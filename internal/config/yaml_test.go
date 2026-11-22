@@ -1449,3 +1449,142 @@ routes:
 		t.Fatalf("error = %v, want 'style kilo always authenticates'", err)
 	}
 }
+
+func TestLoadYAMLOpencodeAnonymousWithoutAccounts(t *testing.T) {
+	t.Setenv("OPENCODE_TLS_RELAY", "1")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: opencode
+    style: opencode
+    base_url: https://opencode.ai/inference/openai/v1
+    opencode_auth: anonymous
+routes:
+  - model_id: oc-model
+    routes:
+      - provider: opencode
+        model: oc-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("anonymous opencode without accounts failed: %v", err)
+	}
+	if got := cfg.Providers[0].OpencodeAuth; got != "anonymous" {
+		t.Fatalf("opencode_auth = %q, want anonymous", got)
+	}
+	if len(cfg.Providers[0].Keys) != 0 {
+		t.Fatalf("keys = %#v, want empty (anonymous needs no store)", cfg.Providers[0].Keys)
+	}
+}
+
+func TestLoadYAMLOpencodeAnonymousRequiresRelay(t *testing.T) {
+	t.Setenv("OPENCODE_TLS_RELAY", "")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: opencode
+    style: opencode
+    base_url: https://opencode.ai/inference/openai/v1
+    opencode_auth: anonymous
+routes:
+  - model_id: oc-model
+    routes:
+      - provider: opencode
+        model: oc-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "OPENCODE_TLS_RELAY") {
+		t.Fatalf("error = %v, want the relay requirement", err)
+	}
+}
+
+func TestLoadYAMLOpencodeBoltWithoutAccountsIsAnonymousOnly(t *testing.T) {
+	t.Setenv("OPENCODE_TLS_RELAY", "1")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: opencode
+    style: opencode
+    base_url: https://opencode.ai/inference/openai/v1
+    opencode_auth: bolt
+routes:
+  - model_id: oc-model
+    routes:
+      - provider: opencode
+        model: oc-model
+`)
+
+	cfg, err := loadYAML(path)
+	if err != nil {
+		t.Fatalf("bolt opencode without accounts failed: %v", err)
+	}
+	if got := cfg.Providers[0].OpencodeAuth; got != "bolt" {
+		t.Fatalf("opencode_auth = %q, want bolt", got)
+	}
+	if len(cfg.Providers[0].Keys) != 0 {
+		t.Fatalf("keys = %#v, want empty", cfg.Providers[0].Keys)
+	}
+}
+
+func TestLoadYAMLOpencodeLoginWithoutAccountsStillFails(t *testing.T) {
+	t.Setenv("OPENCODE_TLS_RELAY", "1")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	path := writeTempYAML(t, `
+providers:
+  - name: opencode
+    style: opencode
+    base_url: https://opencode.ai/inference/openai/v1
+routes:
+  - model_id: oc-model
+    routes:
+      - provider: opencode
+        model: oc-model
+`)
+
+	if _, err := loadYAML(path); err == nil || !strings.Contains(err.Error(), "no opencode accounts found") {
+		t.Fatalf("error = %v, want the accounts requirement (login regression)", err)
+	}
+}
+
+func TestLoadYAMLOpencodeAuthValidation(t *testing.T) {
+	t.Setenv("OPENCODE_TLS_RELAY", "1")
+	t.Setenv("OPENCODE_ACCOUNTS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+
+	bad := writeTempYAML(t, `
+providers:
+  - name: opencode
+    style: opencode
+    base_url: https://opencode.ai/inference/openai/v1
+    opencode_auth: banana
+routes:
+  - model_id: oc-model
+    routes:
+      - provider: opencode
+        model: oc-model
+`)
+	if _, err := loadYAML(bad); err == nil || !strings.Contains(err.Error(), "unsupported opencode_auth") {
+		t.Fatalf("error = %v, want unsupported opencode_auth", err)
+	}
+
+	wrongStyle := writeTempYAML(t, `
+providers:
+  - name: plain
+    style: openai
+    base_url: https://api.example.com
+    api_key: sk-1
+    opencode_auth: anonymous
+routes:
+  - model_id: m
+    routes:
+      - provider: plain
+        model: m
+`)
+	if _, err := loadYAML(wrongStyle); err == nil || !strings.Contains(err.Error(), "only applies to style opencode") {
+		t.Fatalf("error = %v, want the opencode-only rejection", err)
+	}
+}

@@ -19,9 +19,17 @@ type Provider struct {
 	Keys           *keys.Manager
 	Headers        map[string]string
 	AuthMode       string
+	OpencodeAuth   string
 	Query          string
 	ReasoningStyle string
 	stats          *Stats
+}
+
+// OpencodeAnon reports whether the opencode leg runs without a Console
+// account: anonymous sends the CLI's "public" placeholder credential and
+// bolt tries anonymous first. login (and every other style) reports false.
+func (p *Provider) OpencodeAnon() bool {
+	return p.Style == "opencode" && (p.OpencodeAuth == "anonymous" || p.OpencodeAuth == "bolt")
 }
 
 type Stats struct {
@@ -158,6 +166,7 @@ func newRegistry(configs []config.ProviderConfig, rules []model.Rule, cooldown t
 			Keys:           km,
 			Headers:        pc.Headers,
 			AuthMode:       pc.AuthMode,
+			OpencodeAuth:   pc.OpencodeAuth,
 			Query:          pc.Query,
 			ReasoningStyle: pc.ReasoningStyle,
 			stats:          previous.statsFor(pc.Name),

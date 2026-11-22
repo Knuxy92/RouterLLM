@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"routerllm/internal/kilo"
 	"routerllm/internal/model"
 	"routerllm/internal/opencode"
+	"routerllm/internal/relay"
 	"routerllm/internal/settings"
 	"routerllm/internal/workbuddy"
 
@@ -88,6 +90,7 @@ type yamlProvider struct {
 	APIKey         stringOrList      `yaml:"api_key,omitempty"`
 	Headers        map[string]string `yaml:"headers,omitempty"`
 	AuthMode       string            `yaml:"auth_mode,omitempty"`
+	OpencodeAuth   string            `yaml:"opencode_auth,omitempty"`
 	Share          string            `yaml:"share,omitempty"`
 	Query          string            `yaml:"query,omitempty"`
 	ReasoningStyle string            `yaml:"reasoning_style,omitempty"`
@@ -182,18 +185,28 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 		if yp.ReasoningStyle == "" {
 			yp.ReasoningStyle = "openai"
 		}
+		if yp.OpencodeAuth == "" {
+			yp.OpencodeAuth = "login"
+		}
 
 		keys := expandKeys(yp.APIKey)
-		if !yp.Disabled && len(keys) == 0 {
+		if !yp.Disabled && len(keys) == 0 && yp.OpencodeAuth != "anonymous" {
 			storeKeys, path, ok, err := accountStyleKeys(yp.Style)
 			if err != nil {
 				return nil, fmt.Errorf("provider %q: %w", yp.Name, err)
 			}
 			if ok {
 				if len(storeKeys) == 0 {
-					return nil, fmt.Errorf("provider %q: no %s accounts found in %s — run `routerllm --%s-login`", yp.Name, yp.Style, path, yp.Style)
+					if yp.Style == "opencode" && yp.OpencodeAuth == "bolt" {
+						// Bolt without accounts is anonymous-only until a login
+						// adds one; that is a warning, not a startup failure.
+						log.Printf("provider %q: opencode_auth bolt with no opencode accounts in %s — running anonymous-only until `routerllm --opencode-login` adds an account", yp.Name, path)
+					} else {
+						return nil, fmt.Errorf("provider %q: no %s accounts found in %s — run `routerllm --%s-login`", yp.Name, yp.Style, path, yp.Style)
+					}
+				} else {
+					keys = storeKeys
 				}
-				keys = storeKeys
 			}
 		}
 
@@ -202,6 +215,7 @@ func yamlToConfig(yc *yamlConfig, configPath string) (*Config, error) {
 			BaseURL:        strings.TrimRight(yp.BaseURL, "/"),
 			Style:          yp.Style,
 			AuthMode:       yp.AuthMode,
+			OpencodeAuth:   yp.OpencodeAuth,
 			ShareKeys:      yp.Share,
 			Query:          yp.Query,
 			ReasoningStyle: yp.ReasoningStyle,
@@ -366,6 +380,18 @@ func validateProvider(yp yamlProvider, index int, seen map[string]string) error 
 
 	if yp.Style == "kilo" && yp.AuthMode == "none" {
 		return fmt.Errorf("provider %q: style kilo always authenticates (the Kilo gateway rejects keyless requests) — remove auth_mode: none", yp.Name)
+	}
+
+	switch yp.OpencodeAuth {
+	case "", "login", "anonymous", "bolt":
+	default:
+		return fmt.Errorf("provider %q: unsupported opencode_auth %q (must be login, anonymous, or bolt)", yp.Name, yp.OpencodeAuth)
+	}
+	if yp.Style != "opencode" && yp.OpencodeAuth != "" && yp.OpencodeAuth != "login" {
+		return fmt.Errorf("provider %q: opencode_auth %q only applies to style opencode", yp.Name, yp.OpencodeAuth)
+	}
+	if yp.Style == "opencode" && (yp.OpencodeAuth == "anonymous" || yp.OpencodeAuth == "bolt") && !relay.Enabled() {
+		return fmt.Errorf("provider %q: opencode_auth %q requires OPENCODE_TLS_RELAY=1 (anonymous requests are only accepted over the Bun TLS relay)", yp.Name, yp.OpencodeAuth)
 	}
 
 	switch yp.ReasoningStyle {
